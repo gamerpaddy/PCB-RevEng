@@ -421,6 +421,19 @@ function render(){
     ctx.restore();
   }
 
+  // --- 2-line deskew: draw the line(s) the user is defining ---
+  if (Tools.deskewPts){
+    ctx.save();
+    ctx.lineWidth = 2/View.zoom;
+    const pts = Tools.deskewPts;
+    const seg = (a,b,col)=>{ ctx.strokeStyle=col; ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke(); };
+    const dot = (p,col)=>{ ctx.fillStyle=col; ctx.beginPath(); ctx.arc(p.x,p.y,4/View.zoom,0,Math.PI*2); ctx.fill(); };
+    if (pts[0] && pts[1]) seg(pts[0],pts[1],"#ffb648"); else if (pts[0] && Tools.cursor) seg(pts[0],Tools.cursor,"#ffb64880");
+    if (pts[2] && pts[3]) seg(pts[2],pts[3],"#4fd07f"); else if (pts[2] && Tools.cursor) seg(pts[2],Tools.cursor,"#4fd07f80");
+    pts.forEach((p,i)=> dot(p, i<2 ? "#ffb648" : "#4fd07f"));
+    ctx.restore();
+  }
+
   // --- alignment reference points (world-space crosshair at exact location) ---
   if (Tools.alignPts){
     ctx.save();

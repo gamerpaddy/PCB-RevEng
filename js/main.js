@@ -190,6 +190,7 @@ function wireToolbar(){
   $("#btn-open").addEventListener("click", ()=> $("#file-project").click());
   $("#btn-export").addEventListener("click", ()=> UI.openExport());
   $("#btn-add-layer").addEventListener("click", ()=> $("#file-images").click());
+  $("#draw-side").addEventListener("change", ()=> requestRender()); // visibility follows active side
   $("#btn-measure").addEventListener("click", ()=> setTool("measure"));
   $("#btn-calibrate").addEventListener("click", ()=> setTool("calibrate"));
   $("#btn-history").addEventListener("click", ()=> UI.openHistory());
@@ -429,6 +430,7 @@ function wireKeyboard(){
       case "Escape":
         if (Tools.addPinFor){ Tools.addPinFor=null; UI.setHint(TOOL_HINTS[Tools.name]||""); UI.refreshInspector(); }
         else if (Tools.tracePts) cancelTrace();
+        else if (Tools.deskewPts){ Tools.deskewPts=null; Tools.deskewLayer=null; UI.setHint(TOOL_HINTS.align); requestRender(); }
         else if (Tools.alignPts){ Tools.alignPts=null; Tools.alignLayer=null; UI.setHint(TOOL_HINTS.align); requestRender(); }
         else if (Tools.name==="component"){ setTool("select"); }
         else { UI.select(null); View.hoverNetId=null; requestRender(); }
@@ -456,6 +458,7 @@ function cycleDrawSide(){
   const order = availableSides();
   sel.value = order[(order.indexOf(sel.value)+1) % order.length];
   UI.toast("Drawing on " + SIDE_LABELS[sel.value]);
+  requestRender(); // trace/component visibility follows the active side
 }
 
 /* ---------------- dialogs ---------------- */

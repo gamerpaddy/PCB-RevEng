@@ -27,7 +27,10 @@ want to keep or move between machines.
    features **on that layer** (each click is numbered and shows a thumbnail of what
    you clicked), then click the four matching positions on the reference - a side
    strip shows the source thumbnails so you know which feature to match next.
-   Offset, rotation, scale **and skew** are solved by least squares. Use the opacity sliders to onion-skin
+   Offset, rotation, scale **and skew** are solved by least squares. Or use the
+   **Deskew** button: click two lines that should be parallel & axis-aligned (e.g.
+   two board edges) and the image is straightened and perspective-corrected (the
+   correction is baked into the layer bitmap). Use the opacity sliders to onion-skin
    layers while aligning. Number keys 1…0 switch the view to a layer
    (Shift = +10), or toggle visibility - pick the behavior in *Board / display*.
 3. **Calibrate**  - Click calibrate in the left toolbar, drag along a known dimension (e.g. a 2.54 mm header pitch

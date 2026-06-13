@@ -136,6 +136,7 @@ UI.refreshLayerList = () => {
           <input type="checkbox" class="mir" ${l.mirror?"checked":""}>⇋</label>
         <label title="Lock layer against accidental dragging"><input type="checkbox" class="lock" ${l.locked?"checked":""}>🔒</label>
         <button class="align2" title="4-point align: click 4 reference features, then the same 4 features on this layer (corrects offset, rotation, scale and skew)">Align</button>
+        <button class="deskew" title="Deskew / straighten: click two lines that should be parallel &amp; axis-aligned (board edges) to remove perspective and rotation">Deskew</button>
       </div>
       <input type="range" class="op" min="0" max="100" value="${Math.round(l.opacity*100)}" title="Opacity">`;
     card.querySelector(".side-sel").value = l.side;
@@ -177,6 +178,10 @@ UI.refreshLayerList = () => {
     card.querySelector(".align2").addEventListener("click", ()=>{
       UI.activeLayerId = l.id; UI.refreshLayerList();
       startPointAlign();
+    });
+    card.querySelector(".deskew").addEventListener("click", ()=>{
+      UI.activeLayerId = l.id; UI.refreshLayerList();
+      startLineDeskew();
     });
     card.querySelector(".op").addEventListener("input", (e)=>{ l.opacity = e.target.value/100; requestRender(); });
     list.appendChild(card);
@@ -463,7 +468,8 @@ UI.inspectComponent = (c, selPin) => {
     UI.refreshNets(); UI.refreshInspector(); requestRender();
   }));
   pinSec.querySelectorAll("tr[data-i]").forEach(tr => tr.addEventListener("click", e => {
-    if (e.target.tagName === "INPUT") return;
+    // ignore clicks on any form control (rebuilding the table would close a <select>)
+    if (e.target.closest("input,select,button,option")) return;
     UI.sel = {type:"pin", comp:c, pinIdx:+tr.dataset.i};
     UI.refreshInspector(); requestRender();
   }));

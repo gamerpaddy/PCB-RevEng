@@ -155,6 +155,11 @@ select:focus,input:focus,textarea:focus{outline:1px solid var(--accent);}
 .pin-table td{padding:1px 2px; border-bottom:1px solid #1d242d;}
 .pin-table input{width:100%; font-size:11px; padding:1px 4px; border:none; background:transparent;}
 .pin-table input:hover{background:var(--bg);}
+.pin-table select{width:100%; font-size:11px; padding:1px 2px;}
+/* hide native number spinners in the cramped pad-size cell so arrows don't overlap the digits */
+.pin-table input[type=number]{-moz-appearance:textfield; appearance:textfield;}
+.pin-table input[type=number]::-webkit-outer-spin-button,
+.pin-table input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none; margin:0;}
 .pin-table tr.sel{background:#1c3a5e;}
 .insp-actions{display:flex; gap:6px; flex-wrap:wrap;}
 .insp-actions button{font-size:11px; padding:3px 8px;}
