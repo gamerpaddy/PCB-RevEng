@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PCB RevEng — Reverse Engineering Workbench</title>
+<link rel="stylesheet" href="css/style.css?v=15">
+</head>
+<body>
+<div id="loading-overlay">
+  <div class="ld-box">
+    <div class="ld-spin"></div>
+    <div id="loading-text">Wait, loading saved session…</div>
+  </div>
+</div>
+<div id="app">
+
+  <!-- ======= TOP BAR ======= -->
+  <header id="topbar">
+    <div class="brand">PCB<span>RevEng</span></div>
+
+    <div class="tb-group">
+      <button id="btn-new"        title="New project">New</button>
+      <button id="btn-open"       title="Open project (.pcbrev.json)  [Ctrl+O]">Open</button>
+      <button id="btn-save"       title="Save project  [Ctrl+S]">Save</button>
+      <button id="btn-export"     title="Export netlist  [Ctrl+E]">Export Netlist</button>
+    </div>
+
+    <div class="tb-group" id="toolbar">
+      <button class="tool" data-tool="select"    title="Select / Move  [S]">&#9650;<span>Select</span></button>
+      <button class="tool" data-tool="component" title="Place component  [C]">&#11034;<span>Comp</span></button>
+      <button class="tool" data-tool="trace"     title="Draw trace / connect pins  [W]">&#8767;<span>Trace</span></button>
+      <button class="tool" data-tool="via"       title="Place via  [V]">&#9673;<span>Via</span></button>
+      <button class="tool" data-tool="cut"       title="Cut trace into two nets  [K]">&#9986;<span>Cut</span></button>
+    </div>
+
+    <div class="tb-group">
+      <label class="tb-label" for="draw-side">Draw on</label>
+      <select id="draw-side" title="Active copper side for traces &amp; new components  [D cycles]">
+        <option value="front">Front (F.Cu)</option>
+        <option value="back">Back (B.Cu)</option>
+        <option value="inner1">Inner 1</option>
+        <option value="inner2">Inner 2</option>
+      </select>
+      <button id="btn-flip" title="Flip board view (look from the back)  [F]">Flip view</button>
+      <button id="btn-mask" title="Coverage mask — tints board areas without components  [H]">Mask</button>
+    </div>
+
+    <div class="tb-group">
+      <button id="btn-undo" title="Undo  [Ctrl+Z]">&#8630;</button>
+      <button id="btn-redo" title="Redo  [Ctrl+Y]">&#8631;</button>
+      <button id="btn-history" title="Undo timeline — revert single actions selectively">&#128338;</button>
+      <button id="btn-options" title="Options — board &amp; display settings">&#9881; Options</button>
+      <button id="btn-keys" title="Hotkey editor">&#9000;</button>
+      <button id="btn-help" title="Help / hotkeys  [?]">?</button>
+    </div>
+
+    <span id="save-status" title="Autosaves to this browser">not saved yet</span>
+  </header>
+
+  <!-- ======= MAIN AREA ======= -->
+  <div id="main">
+
+    <!-- left: layers -->
+    <aside id="left-panel">
+      <div class="panel-title">Image layers
+        <span style="display:flex;gap:4px">
+          <button id="btn-measure" title="Measure a distance on the board  [M]">Measure</button>
+          <button id="btn-calibrate" title="Calibrate board scale: drag along a known distance, then enter its real mm length">Calibrate</button>
+          <button id="btn-add-layer" title="Add image layer (or drag &amp; drop images onto the canvas)">+ Add</button>
+        </span>
+      </div>
+      <div id="layer-list"></div>
+      <div class="panel-hint">Drop PCB photos onto the canvas.<br>Keys 1…0 switch the view to that layer (Shift = +10; configurable below).</div>
+
+      <div class="panel-title">Nets <span id="net-count"></span>
+        <button id="btn-check" title="Check for pads with no net assigned">Check</button>
+      </div>
+      <div id="net-list"></div>
+    </aside>
+
+    <!-- center: canvas -->
+    <div id="canvas-wrap">
+      <canvas id="canvas"></canvas>
+      <div id="status-bar">
+        <span id="status-tool"></span>
+        <span id="status-pos"></span>
+        <span id="status-zoom"></span>
+        <span id="status-hint"></span>
+      </div>
+      <div id="drop-hint">Drop front / back / inner layer photos here<br><small>…or use “+ Add” in the Layers panel</small></div>
+    </div>
+
+    <!-- right: inspector -->
+    <aside id="right-panel">
+      <div class="panel-title">Inspector</div>
+      <div id="inspector"><div class="panel-hint">Nothing selected.</div></div>
+    </aside>
+  </div>
+
+  <!-- ======= FOOTPRINT DIALOG ======= -->
+  <dialog id="fp-dialog">
+    <div class="dlg-title">Footprint selector</div>
+    <div class="fp-body">
+      <div class="fp-left">
+        <div id="fp-cats"></div>
+      </div>
+      <div class="fp-mid">
+        <div id="fp-params"></div>
+        <canvas id="fp-preview" width="260" height="200"></canvas>
+      </div>
+      <div class="fp-right">
+        <label>Reference <input id="fp-ref" placeholder="auto (e.g. U1)"></label>
+        <label>Value
+          <span style="display:flex;gap:4px">
+            <input id="fp-value" placeholder="e.g. 10k / ATmega328" style="flex:1;min-width:0">
+            <button id="fp-resolve" title="Value resolver — SMD codes &amp; color bands" type="button">&#937;</button>
+          </span></label>
+        <label>Part name <input id="fp-part" placeholder="e.g. LM358"></label>
+        <label>KiCad footprint <input id="fp-kicad" placeholder="lib:name"></label>
+        <div class="dlg-buttons">
+          <button id="fp-cancel">Cancel</button>
+          <button id="fp-ok" class="primary">Place (click on board)</button>
+        </div>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- ======= EXPORT DIALOG ======= -->
+  <dialog id="export-dialog">
+    <div class="dlg-title">Export netlist</div>
+    <label class="dlg-row">Format
+      <select id="export-format">
+        <option value="kicad">KiCad netlist (.net) — import in Pcbnew</option>
+        <option value="sch">KiCad schematic (.kicad_sch) — open in Eeschema</option>
+        <option value="csv">CSV (ref, pin, net)</option>
+        <option value="json">JSON</option>
+      </select>
+    </label>
+    <textarea id="export-preview" spellcheck="false"></textarea>
+    <div class="dlg-buttons">
+      <button id="export-close">Close</button>
+      <button id="export-copy">Copy</button>
+      <button id="export-download" class="primary">Download</button>
+    </div>
+  </dialog>
+
+  <!-- ======= OPTIONS ======= -->
+  <dialog id="options-dialog">
+    <div class="dlg-title">Options</div>
+    <div id="settings-panel">
+      <div class="set-row">
+        <label for="set-layers" title="Copper layer count of the board — adds inner layers to the side selectors">Copper layers</label>
+        <select id="set-layers"></select>
+      </div>
+      <div class="set-row">
+        <label for="set-via" title="Display size of all vias">Via size <span id="set-via-val"></span></label>
+        <input type="range" id="set-via" min="3" max="40" step="1">
+      </div>
+      <div class="set-row">
+        <label for="set-trace" title="Display width of all traces">Trace width <span id="set-trace-val"></span></label>
+        <input type="range" id="set-trace" min="1" max="30" step="1">
+      </div>
+      <div class="set-row">
+        <label for="set-compview" title="Hide component bodies that are on the far side of the board (their through-hole pads and vias stay visible)">Components</label>
+        <select id="set-compview">
+          <option value="side">Viewed side only</option>
+          <option value="both">Both sides</option>
+        </select>
+      </div>
+      <div class="set-row">
+        <label for="set-traceview" title="Hide traces that are not on the active draw side (vias and pads stay visible)">Traces</label>
+        <select id="set-traceview">
+          <option value="active">Active side only</option>
+          <option value="all">All sides</option>
+        </select>
+      </div>
+      <div class="set-row">
+        <label for="set-reftext" title="Component reference label size">Reference text <span id="set-reftext-val"></span></label>
+        <input type="range" id="set-reftext" min="8" max="28" step="1">
+      </div>
+      <div class="set-row">
+        <label for="set-overlap" title="Warn when a moved pad overlaps copper of another net">Overlap check</label>
+        <select id="set-overlap">
+          <option value="on">On</option>
+          <option value="off">Off</option>
+        </select>
+      </div>
+      <div class="set-row">
+        <label for="set-bigmerge" title="Warn before joining two nets that each have more than 3 pads">Big-merge warning</label>
+        <select id="set-bigmerge">
+          <option value="on">On</option>
+          <option value="off">Off</option>
+        </select>
+      </div>
+      <div class="set-row">
+        <label for="set-histlen" title="How many actions the undo timeline keeps">History length <span id="set-histlen-val"></span></label>
+        <input type="range" id="set-histlen" min="5" max="100" step="5">
+      </div>
+      <div class="set-row">
+        <label for="set-units" title="Units for the position readout, measure tool and footprint grid">Units</label>
+        <select id="set-units">
+          <option value="mm">Millimetres (mm)</option>
+          <option value="mil">Mils / thou (mil)</option>
+        </select>
+      </div>
+      <div class="set-row">
+        <label for="set-keymode" title="What the number keys 1…9, 0 do (Shift adds +10)">Keys 1…0</label>
+        <select id="set-keymode">
+          <option value="switch">Switch view to layer</option>
+          <option value="toggle">Toggle layer visibility</option>
+        </select>
+      </div>
+    </div>
+    <div class="dlg-buttons"><button id="options-close" class="primary">Close</button></div>
+  </dialog>
+
+  <!-- ======= CHECKER ======= -->
+  <dialog id="checker-dialog">
+    <div class="dlg-title">Design check</div>
+    <div id="checker-list" style="min-width:380px"></div>
+    <div class="dlg-buttons"><button id="checker-close" class="primary">Close</button></div>
+  </dialog>
+
+  <!-- ======= HISTORY (SELECTIVE UNDO) ======= -->
+  <dialog id="history-dialog">
+    <div class="dlg-title">Undo timeline</div>
+    <div class="panel-hint" style="margin-bottom:8px">“Undo this” reverts only what that action touched — later changes to other objects are kept.</div>
+    <div id="history-list"></div>
+    <div class="dlg-buttons"><button id="history-close" class="primary">Close</button></div>
+  </dialog>
+
+  <!-- ======= OVERLAP AFTER MOVE ======= -->
+  <dialog id="overlap-dialog">
+    <div class="dlg-title">&#9888; Pad overlaps another net</div>
+    <div id="overlap-list" style="margin-bottom:10px"></div>
+    <div class="dlg-buttons">
+      <button id="overlap-undo">Undo move</button>
+      <button id="overlap-keep">Keep as is</button>
+      <button id="overlap-merge" class="primary">Merge nets</button>
+    </div>
+  </dialog>
+
+  <!-- ======= QUICK EDIT ======= -->
+  <dialog id="quick-dialog">
+    <div class="dlg-title" id="quick-title">Edit</div>
+    <div class="dlg-row"><label style="width:80px">Reference</label><input id="quick-ref" style="width:120px"></div>
+    <div class="dlg-row"><label style="width:80px">Value</label><input id="quick-value" style="width:120px" placeholder="10k / 01C / 103">
+      <span id="quick-resolve" class="res-out" style="cursor:pointer"></span></div>
+    <div class="dlg-buttons">
+      <button id="quick-cancel">Cancel</button>
+      <button id="quick-ok" class="primary">OK</button>
+    </div>
+  </dialog>
+
+  <!-- ======= NET NAME POPUP ======= -->
+  <dialog id="netname-dialog">
+    <div class="dlg-title" id="netname-title">Net name</div>
+    <div class="dlg-row">
+      <input id="netname-input" placeholder="net name" style="width:200px" autocomplete="off">
+    </div>
+    <div class="panel-hint" style="margin:6px 0 3px">Quick select:</div>
+    <div id="netname-quick"></div>
+    <div class="dlg-buttons">
+      <button id="netname-clear">Clear net</button>
+      <button id="netname-cancel">Cancel</button>
+      <button id="netname-ok" class="primary">OK</button>
+    </div>
+  </dialog>
+
+  <!-- ======= VALUE RESOLVER ======= -->
+  <dialog id="res-dialog">
+    <div class="dlg-title">Value resolver</div>
+    <div class="dlg-row">
+      <label style="width:90px">SMD code</label>
+      <input id="res-code" placeholder="103 · 01C · 4R7 · 4k7" style="width:140px">
+      <span id="res-code-out" class="res-out"></span>
+    </div>
+    <hr style="border-color:#2e3742;margin:10px 0">
+    <div class="dlg-row">
+      <label style="width:90px">Color bands</label>
+      <select id="res-bands"><option value="4">4 bands</option><option value="5">5 bands</option></select>
+      <span id="res-band-out" class="res-out"></span>
+    </div>
+    <div class="dlg-row" id="res-band-row" style="margin-left:98px"></div>
+    <div class="dlg-buttons">
+      <button id="res-close">Close</button>
+      <button id="res-use" class="primary">Use value</button>
+    </div>
+  </dialog>
+
+  <!-- ======= HOTKEY EDITOR ======= -->
+  <dialog id="keys-dialog">
+    <div class="dlg-title">Hotkey editor</div>
+    <div class="panel-hint" style="margin-bottom:8px">Click a binding, then press the new key. Esc cancels.
+      Ctrl-shortcuts, Esc, Enter, Space and 1–9 are fixed.</div>
+    <div id="keys-list"></div>
+    <div class="dlg-buttons">
+      <button id="keys-reset">Reset to defaults</button>
+      <button id="keys-close" class="primary">Close</button>
+    </div>
+  </dialog>
+
+  <!-- ======= HELP OVERLAY ======= -->
+  <dialog id="help-dialog">
+    <div class="dlg-title">Hotkeys &amp; workflow</div>
+    <div id="help-body"></div>
+    <div class="dlg-buttons"><button id="help-close" class="primary">Close</button></div>
+  </dialog>
+
+  <input type="file" id="file-images" accept="image/*" multiple hidden>
+  <input type="file" id="file-project" accept=".json,.pcbrev" hidden>
+</div>
+
+<script src="js/state.js?v=15"></script>
+<script src="js/footprints/core.js?v=15"></script>
+<script src="js/footprints/passives.js?v=15"></script>
+<script src="js/footprints/discrete.js?v=15"></script>
+<script src="js/footprints/connectors.js?v=15"></script>
+<script src="js/footprints/ics.js?v=15"></script>
+<script src="js/footprints/misc.js?v=15"></script>
+<script src="js/view.js?v=15"></script>
+<script src="js/tools.js?v=15"></script>
+<script src="js/keymap.js?v=15"></script>
+<script src="js/resolver.js?v=15"></script>
+<script src="js/netlist.js?v=15"></script>
+<script src="js/ui.js?v=15"></script>
+<script src="js/main.js?v=15"></script>
+</body>
+</html>
