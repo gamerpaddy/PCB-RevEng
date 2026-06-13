@@ -567,12 +567,14 @@ function addImageLayer(file){
   reader.onload = () => {
     const img = new Image();
     img.onload = () => {
-      // guess side from filename
+      // guess side from filename, then clamp to a side that exists at the current
+      // layer count (e.g. don't assign Inner 1 on a 2-layer board)
       const n = file.name.toLowerCase();
       let side = "front";
       if (/x-?ray/.test(n)) side = "xray";
       else if (/back|bottom|b\.|_b/.test(n)) side = "back";
       else if (/inner|in1|l2/.test(n)) side = "inner1";
+      if (side !== "xray" && !availableSides().includes(side)) side = "front";
       const center = screenToWorld(View.width/2, View.height/2);
       const layer = {
         id: nextId(), name: file.name.replace(/\.[^.]+$/,""),

@@ -194,15 +194,21 @@ function distToSeg(px,py,a,b){
 }
 
 /* snap to nearest pin/via/trace within radius; returns {x,y,netId,attach} or null.
-   traceSide: "front"/"back"/"inner1"/"inner2" limits trace snapping to that copper side,
-   "any" snaps to traces on every side, omitted/null disables trace snapping. */
+   traceSide: copper side being drawn ("front"/"back"/"inner1"…). Pads only snap if
+   they're reachable from that side — through-hole pads (circles) reach every layer,
+   SMD pads only their own side. "any" (via tool) snaps to everything;
+   omitted/null disables trace snapping. */
 function snapToConductor(wx, wy, traceSide){
   const tol = 12 / View.zoom;
   let best = null, bestD = tol;
+  const filterPads = traceSide && traceSide !== "any";
   for (const c of State.components){
     const fp = compFootprint(c);
     for (let pi=0; pi<c.pins.length; pi++){
-      const wp = pinWorldPos(c, fp.pins[pi]);
+      const fpin = fp.pins[pi];
+      // skip pads not reachable from this copper side (SMD pad on a different side)
+      if (filterPads && fpin.shape !== "circle" && c.side !== traceSide) continue;
+      const wp = pinWorldPos(c, fpin);
       const d = Math.hypot(wx-wp.x, wy-wp.y);
       if (d < bestD){ bestD=d; best={x:wp.x,y:wp.y,attach:{type:"pin",comp:c,pinIdx:pi},netId:c.pins[pi].netId}; }
     }
