@@ -1,5 +1,7 @@
 # PCB RevEng — PCB Reverse-Engineering Workbench
 
+### ▶ TRY IT OUT HERE: https://gamerpaddy.github.io/PCB-RevEng/
+
 A zero-dependency web app for re-tracing electronic PCBs from photos and exporting
 a netlist you can import into KiCad (or any EDA that reads KiCad netlists / CSV / JSON).
 
