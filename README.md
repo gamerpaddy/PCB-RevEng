@@ -29,7 +29,7 @@ want to keep or move between machines.
    rotation, scale **and skew** are solved by least squares. Use the opacity sliders to onion-skin
    layers while aligning. Number keys 1…0 switch the view to a layer
    (Shift = +10), or toggle visibility - pick the behavior in *Board / display*.
-3. **Calibrate** (`M`) - drag along a known dimension (e.g. a 2.54 mm header pitch
+3. **Calibrate**  - Click calibrate in the left toolbar, drag along a known dimension (e.g. a 2.54 mm header pitch
    ×10) and enter the real length in mm. Footprints then render at true board scale.
 4. **Place components** (`C`) - footprint selector with parametric DIP / SOIC / TSSOP /
    QFP / QFN / SOT-23-323-523-723 / SOT-223 / SOT-89 / DPAK / TO-92 / TO-220 /
