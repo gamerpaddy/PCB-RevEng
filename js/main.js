@@ -429,7 +429,7 @@ function wireKeyboard(){
       case "Escape":
         if (Tools.addPinFor){ Tools.addPinFor=null; UI.setHint(TOOL_HINTS[Tools.name]||""); UI.refreshInspector(); }
         else if (Tools.tracePts) cancelTrace();
-        else if (Tools.alignPts){ Tools.alignPts=null; UI.setHint(TOOL_HINTS.align); requestRender(); }
+        else if (Tools.alignPts){ Tools.alignPts=null; Tools.alignLayer=null; UI.setHint(TOOL_HINTS.align); requestRender(); }
         else if (Tools.name==="component"){ setTool("select"); }
         else { UI.select(null); View.hoverNetId=null; requestRender(); }
         break;

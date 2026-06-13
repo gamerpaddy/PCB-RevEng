@@ -16,6 +16,7 @@ const Tools = {
   measureA: null, measureB: null,
   // align
   alignPts: null,      // 4 ref pts + 4 layer pts
+  alignLayer: null,    // layer captured when 4-point align started (the one that moves)
   // freestyle pin placement
   addPinFor: null,     // component receiving clicked pins
   // via net memory (reused for non-shift placements)
@@ -42,6 +43,7 @@ function setTool(name){
   if (Tools.name === "trace") cancelTrace();
   Tools.measureA = Tools.measureB = null;
   Tools.alignPts = null;
+  Tools.alignLayer = null;
   Tools.addPinFor = null;
   if (name !== "component"){ Tools.ghostFp = null; Tools.pending = null; }
   Tools.name = name;
@@ -602,24 +604,27 @@ function viaDown(w, e){
 
 /* ---------------- align tool ---------------- */
 function alignDown(w, pt, e){
-  const layer = UI.activeLayer();
-  if (!layer){ UI.toast("Select an image layer in the Layers panel first"); return; }
-
-  if (Tools.alignPts){           // 4+4 point alignment: first the moving layer, then the destinations
+  // during a 4+4 point alignment the target is the layer captured when it started,
+  // NOT the currently-active layer (which the user switches to place destination points)
+  if (Tools.alignPts){
+    const target = Tools.alignLayer;
+    if (!target){ Tools.alignPts = null; UI.setHint(TOOL_HINTS.align); return; }
     Tools.alignPts.push({x:w.x, y:w.y});
     const n = Tools.alignPts.length;
     if (n < 4){
-      UI.setHint("Layer “" + layer.name + "” — feature " + (n+1) + " of 4 (spread them towards the corners)");
+      UI.setHint("Layer “" + target.name + "” — feature " + (n+1) + " of 4 (spread them towards the corners)");
     } else if (n === 4){
       UI.setHint("Now click where those 4 features BELONG (same order, on the board / aligned layer) — destination 1 of 4");
     } else if (n < 8){
       UI.setHint("Destination point " + (n-3) + " of 4");
     }
-    if (n === 8) applyPointAlign(layer);
+    if (n === 8) applyPointAlign(target);
     requestRender();
     return;
   }
 
+  const layer = UI.activeLayer();
+  if (!layer){ UI.toast("Select an image layer in the Layers panel first"); return; }
   if (layer.locked){ UI.toast("Layer is locked"); return; }
   pushUndo();
   if (e.shiftKey){
@@ -635,6 +640,7 @@ function startPointAlign(){
   if (!layer){ UI.toast("Select the layer to align first"); return; }
   setTool("align");
   Tools.alignPts = [];
+  Tools.alignLayer = layer;   // lock the target now; switching active layers mid-procedure won't change it
   UI.setHint("4-point align: click feature 1 of 4 ON layer “" + layer.name + "” (this is the image that will move)");
 }
 
@@ -669,6 +675,7 @@ function solveAffine(src, dst){
 function applyPointAlign(layer){
   const pts = Tools.alignPts;
   Tools.alignPts = null;
+  Tools.alignLayer = null;
   const mov = pts.slice(0,4), ref = pts.slice(4); // clicked layer's features first, destinations second
   const T = solveAffine(mov, ref);
   if (!T){ UI.toast("Points are collinear / too close — alignment aborted"); UI.setHint(TOOL_HINTS.align); return; }
