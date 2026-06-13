@@ -23,6 +23,8 @@ const Tools = {
   addPinFor: null,     // component receiving clicked pins
   // via net memory (reused for non-shift placements)
   lastViaNet: null,
+  // last real copper side, used when drawing while the X-ray view is active
+  lastCopperSide: "front",
   // drag state
   drag: null,
   dragVert: null,      // {trace,i} currently-dragged trace vertex (for render)
@@ -40,6 +42,11 @@ const TOOL_HINTS = {
   pan:       "Drag to pan",
 };
 
+function toolCursor(name){
+  return { select:"default", component:"crosshair", trace:"crosshair", via:"crosshair",
+           align:"move", measure:"crosshair", calibrate:"crosshair", cut:"crosshair", pan:"grab" }[name] || "default";
+}
+
 function setTool(name){
   // leaving cleanup
   if (Tools.name === "trace") cancelTrace();
@@ -53,9 +60,7 @@ function setTool(name){
   Tools.name = name;
   document.querySelectorAll("#toolbar .tool").forEach(b =>
     b.classList.toggle("active", b.dataset.tool === name));
-  const cur = { select:"default", component:"crosshair", trace:"crosshair",
-                via:"crosshair", align:"move", measure:"crosshair", calibrate:"crosshair", cut:"crosshair", pan:"grab" }[name] || "default";
-  View.canvas.style.cursor = cur;
+  View.canvas.style.cursor = toolCursor(name);
   UI.setStatusTool(name);
   UI.setHint(TOOL_HINTS[name] || "");
   if (name === "component" && !Tools.pending) UI.openFootprintDialog();
@@ -110,7 +115,7 @@ function onPointerMove(e){
 
   // snap preview for relevant tools
   if (Tools.name === "trace"){
-    Tools.snap = snapToConductor(w.x, w.y, Tools.tracePts ? Tools.traceSide : UI.drawSide());
+    Tools.snap = snapToConductor(w.x, w.y, Tools.tracePts ? Tools.traceSide : UI.copperSide());
   } else if (Tools.name === "via"){
     Tools.snap = snapToConductor(w.x, w.y, "any");
   } else Tools.snap = null;
@@ -138,7 +143,7 @@ function onPointerUp(e){
   const d = Tools.drag;
   Tools.drag = null;
   if (d.kind === "pan"){
-    View.canvas.style.cursor = Tools.name === "pan" ? "grab" : "default";
+    View.canvas.style.cursor = toolCursor(Tools.name); // restore the tool's cursor (e.g. crosshair for via)
   }
   if (d.kind === "move-comp" || d.kind === "move-via" || d.kind === "move-layer" || d.kind === "rot-layer" || d.kind === "move-vert"){
     if (!d.moved) Undo.stack.pop(); // no-op drag, drop the snapshot
@@ -463,12 +468,12 @@ function componentDown(w, e){
 
 /* ---------------- trace tool ---------------- */
 function traceDown(w, e){
-  const snap = snapToConductor(w.x, w.y, Tools.tracePts ? Tools.traceSide : UI.drawSide());
+  const snap = snapToConductor(w.x, w.y, Tools.tracePts ? Tools.traceSide : UI.copperSide());
   const p = snap ? {x:snap.x, y:snap.y} : {x:w.x, y:w.y};
   if (!Tools.tracePts){
     Tools.tracePts = [p];
     Tools.traceStartSnap = snap;
-    Tools.traceSide = UI.drawSide();
+    Tools.traceSide = UI.copperSide();
     const netNote = snap && snap.netId ? " — continuing net “" + (getNet(snap.netId)?.name || "?") + "”" : "";
     UI.setHint("Routing on " + SIDE_LABELS[Tools.traceSide] + netNote + " — click to add points, Enter/double-click to finish, Esc to cancel");
   } else {

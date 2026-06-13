@@ -7,8 +7,8 @@ const NET_COLORS = [
   "#ffc6ff","#74c0fc","#ffd8a8","#a9e34b","#f783ac","#66d9e8"
 ];
 
-const SIDE_COLORS = { front:"#ff4d4d", back:"#4d7dff" };
-const SIDE_LABELS = { front:"Front", back:"Back" };
+const SIDE_COLORS = { front:"#ff4d4d", back:"#4d7dff", xray:"#9aa3ad" };
+const SIDE_LABELS = { front:"Front", back:"Back", xray:"X-ray (both sides)" };
 const INNER_COLORS = ["#37c871","#c87de0","#d8c44a","#4ac8c8","#e08a4a","#8a9ae0","#9ad84a","#e04a8a","#4a8ae0","#c8a37d"];
 for (let i = 1; i <= 10; i++){
   SIDE_COLORS["inner"+i] = INNER_COLORS[i-1];
@@ -49,8 +49,10 @@ function availableSides(){
 /* ---------- nets ---------- */
 /* prefab power nets — protected: cannot be renamed, and never lose a merge */
 const PROTECTED_NET_NAMES = ["GND","AGND","DGND","VCC","VDD","VSS","VEE","+3V3","+5V","+12V","-12V","VBAT"];
-const PROTECTED_COLORS = { GND:"#66d96f", AGND:"#4caf50", DGND:"#2e7d32", VCC:"#ff6e6e", VDD:"#ff8a65",
-                           VSS:"#90a4ae", VEE:"#78909c", "+3V3":"#ffd24d", "+5V":"#ffa94d", "+12V":"#f06292", "-12V":"#ba68c8", VBAT:"#4dd2ff" };
+// ground nets black (schematic convention), power/supply nets red
+const PROTECTED_COLORS = { GND:"#000000", AGND:"#1a1a1a", DGND:"#333333",
+                           VCC:"#ff2b2b", VDD:"#ff4d4d", VSS:"#000000", VEE:"#3a3a3a",
+                           "+3V3":"#ff6e2b", "+5V":"#ff2b2b", "+12V":"#ff5da0", "-12V":"#b04dff", VBAT:"#ff8a3b" };
 
 function createNet(name){
   const id = nextId();

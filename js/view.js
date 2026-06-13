@@ -294,19 +294,20 @@ function requestRender(){
    (front/back); when an inner layer is active, fall back to the flip orientation. */
 function activeSide(){
   const ds = UI.drawSide();
+  if (ds === "xray") return "xray";          // X-ray view shows both sides
   if (ds === "front" || ds === "back") return ds;
   return View.flip ? "back" : "front";
 }
 
 /* full component (body + SMD pads + label) shown only when it's on the active
-   side; on the other side only its through-hole pads remain (drawn elsewhere). */
+   side; X-ray view shows everything; on the other side only its through-hole pads remain */
 function compBodyVisible(c){
-  return State.compView !== "side" || c.side === activeSide();
+  return State.compView !== "side" || activeSide() === "xray" || c.side === activeSide();
 }
 
-/* traces shown only for the active draw side (vias & pads always shown) */
+/* traces shown only for the active draw side (X-ray shows all; vias & pads always shown) */
 function traceVisible(t){
-  return State.traceView !== "active" || t.side === UI.drawSide();
+  return State.traceView !== "active" || UI.drawSide() === "xray" || t.side === UI.drawSide();
 }
 
 function render(){
@@ -361,11 +362,11 @@ function render(){
     ctx.restore();
   }
 
-  // --- vias ---
-  for (const v of State.vias) drawVia(ctx, v, selNet);
-
   // --- components (other-side parts: pads only, dimmed) ---
   for (const c of State.components) drawComponent(ctx, c, selNet, !compBodyVisible(c));
+
+  // --- vias (drawn AFTER components so a via inside a pad stays visible) ---
+  for (const v of State.vias) drawVia(ctx, v, selNet);
 
   // --- trace vertex handles (selected trace, select tool) ---
   if (Tools.name === "select" && UI.sel && UI.sel.type === "trace" && traceVisible(UI.sel.trace)){
@@ -470,21 +471,37 @@ function netColor(netId){
   return n ? n.color : "#999";
 }
 
+/* dark net colors (e.g. black GND) get a light outline so they stay visible */
+function isDarkHex(c){
+  if (typeof c !== "string" || c[0] !== "#") return false;
+  const h = c.length === 4 ? c.replace(/#(.)(.)(.)/,"#$1$1$2$2$3$3") : c;
+  const r=parseInt(h.substr(1,2),16), g=parseInt(h.substr(3,2),16), b=parseInt(h.substr(5,2),16);
+  return (0.299*r + 0.587*g + 0.114*b) < 70;
+}
+
+/* when a net is focused (selected/hovered), everything not on it is dimmed so the
+   focused net pops; selNet === -1 is the blink-off frame (dim everything). */
+function focusAlpha(netId, selNet){
+  if (!selNet) return 1;
+  if (selNet === -1) return 0.16;
+  return netId === selNet ? 1 : 0.16;
+}
+
 function drawTrace(ctx, t, selNet){
-  const hl = selNet && t.netId === selNet;
+  const hl = selNet && selNet !== -1 && t.netId === selNet;
+  const fa = focusAlpha(t.netId, selNet);
   ctx.save();
   ctx.lineCap = "round"; ctx.lineJoin = "round";
   if (hl){
     ctx.strokeStyle = "#ffffff";
-    ctx.lineWidth = (t.width||3) + 6/View.zoom;
-    ctx.globalAlpha = 0.35;
+    ctx.lineWidth = (t.width||3) + 7/View.zoom;
+    ctx.globalAlpha = 0.5;
     pathTrace(ctx, t); ctx.stroke();
-    ctx.globalAlpha = 1;
   }
   const sel = (UI.sel && UI.sel.type==="trace" && UI.sel.trace===t) || UI.isTraceSelected(t);
   ctx.strokeStyle = sel ? "#ffffff" : (t.netId ? netColor(t.netId) : SIDE_COLORS[t.side]);
   ctx.lineWidth = t.width || 3;
-  ctx.globalAlpha = 0.85;
+  ctx.globalAlpha = 0.85 * fa;
   pathTrace(ctx, t); ctx.stroke();
   // thin side-colored core so layer is identifiable
   ctx.strokeStyle = SIDE_COLORS[t.side] || "#fff";
@@ -501,16 +518,18 @@ function pathTrace(ctx, t){
 function drawVia(ctx, v, selNet){
   const pth = v.kind === "pth";
   const r = v.r || 5;
-  const hl = selNet && v.netId === selNet;
+  const hl = selNet && selNet !== -1 && v.netId === selNet;
+  const fa = focusAlpha(v.netId, selNet);
   const sel = UI.sel && UI.sel.type==="via" && UI.sel.via===v;
   ctx.save();
   if (hl){
-    ctx.fillStyle="#fff"; ctx.globalAlpha=0.35;
+    ctx.fillStyle="#fff"; ctx.globalAlpha=0.4;
     ctx.beginPath(); ctx.arc(v.x,v.y,r+5/View.zoom,0,Math.PI*2); ctx.fill();
-    ctx.globalAlpha=1;
   }
-  ctx.fillStyle = v.netId ? netColor(v.netId) : (pth ? "#b8a06a" : "#cccccc");
-  ctx.strokeStyle = sel ? "#fff" : (pth ? "#5a4a20" : "#222");
+  ctx.globalAlpha = fa;
+  const viaCol = v.netId ? netColor(v.netId) : (pth ? "#b8a06a" : "#cccccc");
+  ctx.fillStyle = viaCol;
+  ctx.strokeStyle = sel ? "#fff" : (isDarkHex(viaCol) ? "#9aa3ad" : (pth ? "#5a4a20" : "#222"));
   // PTH = thicker annular ring (plated through hole / mounting pad), via = thin ring
   ctx.lineWidth = (pth ? 2.5 : 1.5)/View.zoom;
   ctx.beginPath(); ctx.arc(v.x,v.y,r,0,Math.PI*2); ctx.fill(); ctx.stroke();
@@ -530,12 +549,15 @@ function drawComponent(ctx, c, selNet, padsOnly){
   if (c.side === "back") ctx.scale(-1,1);
 
   const sideCol = c.side === "back" ? "#7da0ff" : "#ffd24d";
-  const padDim = padsOnly ? 0.45 : 1;
+  // dim the whole part when a different net is focused (pads on the focused net stay bright)
+  const onFocusNet = selNet && selNet !== -1 && c.pins.some(p => p.netId === selNet);
+  const compFa = (!selNet) ? 1 : (onFocusNet ? 1 : (selNet === -1 ? 0.16 : 0.3));
+  const padDim = (padsOnly ? 0.45 : 1) * compFa;
   if (!padsOnly){
     // body (dashed outline = locked)
     ctx.strokeStyle = isSel ? "#ffffff" : (c.side==="back" ? "#5a78c8" : "#b9c2cf");
     ctx.lineWidth = (isSel?2.2:1.4)/View.zoom;
-    ctx.globalAlpha = 0.95;
+    ctx.globalAlpha = 0.95 * compFa;
     if (compMoveLocked(c)) ctx.setLineDash([5/View.zoom, 4/View.zoom]);
     ctx.fillStyle = c.side==="back" ? "rgba(77,125,255,.10)" : "rgba(255,210,77,.08)";
     if (fp.body.shape === "circle"){
@@ -561,18 +583,24 @@ function drawComponent(ctx, c, selNet, padsOnly){
     const x=fpin.xmm*s, y=fpin.ymm*s, w=fpin.w*s, h=fpin.h*s;
     const selPin = (UI.sel && UI.sel.type==="pin" && UI.sel.comp===c && UI.sel.pinIdx===pi) ||
                    UI.isPinSelected(c, pi);
+    // a pad on the focused net stays full-bright even if its component is dimmed
+    const padA = (selNet && selNet !== -1 && st.netId === selNet) ? (padsOnly?0.45:1) : padDim;
     if (hl){
-      ctx.fillStyle="#fff"; ctx.globalAlpha=.4;
+      ctx.fillStyle="#fff"; ctx.globalAlpha=.5;
       ctx.beginPath(); ctx.arc(x,y,Math.max(w,h)/2+4/View.zoom,0,Math.PI*2); ctx.fill();
-      ctx.globalAlpha=padDim;
     }
-    ctx.fillStyle = hasNet ? netColor(st.netId) : (c.side==="back" ? "#41599c" : "#9b8338");
+    ctx.globalAlpha = padA;
+    const padCol = hasNet ? netColor(st.netId) : (c.side==="back" ? "#41599c" : "#9b8338");
+    ctx.fillStyle = padCol;
+    const darkNet = hasNet && isDarkHex(padCol);
     if (fpin.shape==="circle"){
       ctx.beginPath(); ctx.arc(x,y,w/2,0,Math.PI*2); ctx.fill();
+      if (darkNet){ ctx.strokeStyle="#9aa3ad"; ctx.lineWidth=1/View.zoom; ctx.stroke(); }
       ctx.fillStyle="#0d0f12";
       ctx.beginPath(); ctx.arc(x,y,w/5,0,Math.PI*2); ctx.fill();
     } else {
       ctx.fillRect(x-w/2,y-h/2,w,h);
+      if (darkNet){ ctx.strokeStyle="#9aa3ad"; ctx.lineWidth=1/View.zoom; ctx.strokeRect(x-w/2,y-h/2,w,h); }
     }
     if (selPin){
       ctx.strokeStyle="#fff"; ctx.lineWidth=2/View.zoom;
@@ -582,6 +610,7 @@ function drawComponent(ctx, c, selNet, padsOnly){
   // pin1 marker (skip on far-side pad-only render)
   const p1 = fp.pins[0];
   if (p1 && !(padsOnly && p1.shape !== "circle")){
+    ctx.globalAlpha = compFa;
     ctx.fillStyle = "#ff5d5d";
     ctx.beginPath(); ctx.arc(p1.xmm*s, p1.ymm*s, Math.max(2.2/View.zoom, Math.max(p1.w,0.4)*s*0.18), 0, Math.PI*2); ctx.fill();
   }

@@ -7,6 +7,14 @@ a netlist you can import into KiCad (or any EDA that reads KiCad netlists / CSV 
 
 Plain HTML + CSS + vanilla JS. No build step, no CDN, no server-side code.
 
+## Screenshots
+
+![Whole GUI overview](images/whole-gui-overview.jpg)
+
+![Component / footprint picker](images/component-picker.png)
+
+![Trace routing close-up](images/traces-closeup.jpg)
+
 ## Running
 
 - **Locally:** just open `index.html` in any modern browser (double-click works - no server needed).
@@ -74,6 +82,18 @@ Board & display settings live in the ⚙ **Options** menu. Components have separ
 The **Mask** toggle (`H`) darkens board areas that have no components yet (and
 tints them red), leaving placed parts bright, so you can see at a glance what's
 left to identify on a crowded board.
+
+**More interaction.** **Right-click** anything for a context menu whose options
+match what's under the cursor - right-clicking a *pad* offers pad actions (set/clear
+net, mark no-connect, change pad type) and never deletes the whole component, while
+the component body offers duplicate / rotate / flip / lock / delete. Each net has a
+**colour picker** in the Nets list (GND defaults to black, power rails to red, and
+dark colours get a light outline so they stay visible). Selecting or hovering a net
+**dims everything else** so it stands out; double-click a pad/via/trace to open the
+net popup and press **1-9** to instantly pick a common net (GND, VCC, …). Vias and
+PTHs always draw on top of pads so they stay visible. An **X-ray** view (in the
+"Draw on" selector) shows components on *both* sides at once over an uploaded X-ray
+image; drawing still targets the last copper side you used.
 
 **Nets & protection.** Power nets (GND, VCC, VDD, VSS, +3V3, +5V…) are *protected
 prefabs* (🛡): they can't be renamed and never get silently merged into a signal

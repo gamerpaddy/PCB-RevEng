@@ -61,6 +61,8 @@ UI.toast = (msg) => {
 };
 
 UI.drawSide = () => $("#draw-side").value;
+/* the copper side new traces/components target — falls back to last copper side in X-ray view */
+UI.copperSide = () => { const d = UI.drawSide(); return d === "xray" ? (Tools.lastCopperSide || "front") : d; };
 UI.activeLayer = () => getLayer(UI.activeLayerId);
 UI.layerKeyMode = () => localStorage.getItem("pcbreveng.layerKeyMode") || "switch";
 
@@ -71,29 +73,32 @@ function fmtLen(mm){
   return UI.unit() === "mil" ? (mm/MM_PER_MIL).toFixed(1) + " mil" : mm.toFixed(2) + " mm";
 }
 
-/* options html for a copper-side <select>; keeps `current` listed even if out of range */
+/* options html for a layer-side <select> (copper sides + X-ray); keeps `current` if odd */
 function sideOptionsHtml(current){
-  const sides = availableSides();
+  const sides = [...availableSides(), "xray"];
   if (current && !sides.includes(current)) sides.push(current);
   return sides.map(s => `<option value="${s}">${SIDE_LABELS[s] || s}</option>`).join("");
 }
 
-/* rebuild the toolbar draw-side selector for the current layer count */
+/* rebuild the toolbar draw-side selector for the current layer count (+ X-ray view) */
 UI.rebuildSideSelect = () => {
   const sel = $("#draw-side");
   const cur = sel.value;
-  sel.innerHTML = availableSides().map(s =>
+  const opts = [...availableSides(), "xray"];
+  sel.innerHTML = opts.map(s =>
     `<option value="${s}">${SIDE_LABELS[s]}${s==="front"?" (F.Cu)":s==="back"?" (B.Cu)":""}</option>`).join("");
-  sel.value = availableSides().includes(cur) ? cur : "front";
+  sel.value = opts.includes(cur) ? cur : "front";
 };
 
 /* switch the active draw side (e.g. when activating an image layer of that side) */
 UI.setDrawSide = (side) => {
-  if (!availableSides().includes(side)) return;
+  const ok = side === "xray" || availableSides().includes(side);
+  if (!ok) return;
   if ($("#draw-side").value === side) return;
   $("#draw-side").value = side;
-  UI.toast("Drawing on " + SIDE_LABELS[side]);
-  requestRender(); // trace visibility follows the draw side
+  if (side !== "xray") Tools.lastCopperSide = side;
+  UI.toast(side === "xray" ? "X-ray view — both sides shown, drawing on " + SIDE_LABELS[UI.copperSide()] : "Drawing on " + SIDE_LABELS[side]);
+  requestRender(); // trace/component visibility follows the draw side
 };
 
 /* ---------------- selection ---------------- */
@@ -201,9 +206,13 @@ UI.refreshNets = () => {
     const item = document.createElement("div");
     item.className = "net-item" + (UI.activeNetId === n.id ? " active" : "");
     const pinCount = (map.get(n.id) || []).length;
-    item.innerHTML = `<span class="net-swatch" style="background:${n.color}"></span>
+    item.innerHTML = `<input type="color" class="net-color" value="${/^#[0-9a-fA-F]{6}$/.test(n.color)?n.color:"#888888"}" title="Net colour">
       <span class="nname" title="${n.name}${n.protected?" (protected prefab)":""}">${n.protected?"🛡 ":""}${n.name}</span>
       <span class="ncount">${pinCount}p</span>`;
+    item.querySelector(".net-color").addEventListener("click", e => e.stopPropagation());
+    item.querySelector(".net-color").addEventListener("input", e => {
+      pushUndo("net colour"); n.color = e.target.value; requestRender();
+    });
     item.addEventListener("click", ()=>{
       const turnOn = UI.activeNetId !== n.id;
       UI.activeNetId = turnOn ? n.id : null;
@@ -698,7 +707,7 @@ UI.confirmFootprint = () => {
   } else {
     Tools.pending = vals;
     Tools.ghostFp = fp;
-    Tools.ghostSide = UI.drawSide() === "back" ? "back" : "front";
+    Tools.ghostSide = UI.copperSide() === "back" ? "back" : "front";
     setTool("component");
     UI.setHint("Click on the board to place " + fp.label + " — R rotate, B flip side, Esc cancel");
   }
@@ -716,32 +725,72 @@ UI.openExport = () => {
   dlg.showModal();
 };
 
+/* ---------------- right-click context menu ---------------- */
+UI._ctxDismiss = (e) => { if (!e.target.closest("#ctx-menu")) UI.hideContextMenu(); };
+UI.hideContextMenu = () => {
+  const m = document.getElementById("ctx-menu");
+  if (m) m.remove();
+  document.removeEventListener("pointerdown", UI._ctxDismiss, true);
+};
+UI.showContextMenu = (x, y, items) => {
+  UI.hideContextMenu();
+  const m = document.createElement("div");
+  m.id = "ctx-menu";
+  for (const it of items){
+    if (it.sep){ const s = document.createElement("div"); s.className = "ctx-sep"; m.appendChild(s); continue; }
+    const b = document.createElement("div");
+    b.className = "ctx-item" + (it.danger ? " danger" : "");
+    b.textContent = it.label;
+    b.addEventListener("click", () => { UI.hideContextMenu(); it.action(); });
+    m.appendChild(b);
+  }
+  document.body.appendChild(m);
+  const r = m.getBoundingClientRect();
+  m.style.left = Math.min(x, window.innerWidth  - r.width  - 6) + "px";
+  m.style.top  = Math.min(y, window.innerHeight - r.height - 6) + "px";
+  setTimeout(() => document.addEventListener("pointerdown", UI._ctxDismiss, true), 0);
+};
+
 /* ---------------- net name popup ---------------- */
 UI.openNetPopup = (title, current, onPick) => {
   const dlg = $("#netname-dialog");
   $("#netname-title").textContent = title || "Net name";
   const inp = $("#netname-input");
   inp.value = current || "";
-  // quick-select: protected prefab names + nets already in the project
+  // quick-select: protected prefab names + nets already in the project.
+  // The first 9 get a number key (1-9) for instant pick.
   const quick = $("#netname-quick");
   quick.innerHTML = "";
   const seen = new Set();
+  const quickNames = [];
   const addBtn = (name, prot) => {
     if (seen.has(name)) return; seen.add(name);
+    const idx = quickNames.length; quickNames.push(name);
     const b = document.createElement("button");
-    b.textContent = name;
+    b.innerHTML = (idx < 9 ? `<b style="color:var(--accent)">${idx+1}</b> ` : "") + name;
     if (prot) b.className = "prot";
-    b.addEventListener("click", ()=>{ inp.value = name; });
+    b.addEventListener("click", ()=> finish(name));
     quick.appendChild(b);
   };
+  const finish = (val) => { dlg.close(); document.removeEventListener("keydown", keyPick, true); onPick(val); };
   PROTECTED_NET_NAMES.forEach(n => addBtn(n, true));
   State.nets.filter(n => !n.auto && netMembers(n.id).length).forEach(n => addBtn(n.name, n.protected));
 
-  const finish = (val) => { dlg.close(); onPick(val); };
   $("#netname-ok").onclick = () => finish(inp.value.trim());
   $("#netname-clear").onclick = () => finish("");
-  $("#netname-cancel").onclick = () => dlg.close();
+  $("#netname-cancel").onclick = () => { dlg.close(); document.removeEventListener("keydown", keyPick, true); };
   inp.onkeydown = (e) => { if (e.key === "Enter"){ e.preventDefault(); finish(inp.value.trim()); } };
+  // number keys 1-9 pick a quick net even while the input is focused
+  const keyPick = (e) => {
+    if (e.target === inp && inp.value !== "" && !/^[1-9]$/.test(inp.value)) {
+      // allow typing digits into a name only if the field already has non-digit content
+    }
+    if (/^[1-9]$/.test(e.key) && quickNames[+e.key - 1] && (e.target !== inp || inp.value === "")){
+      e.preventDefault(); finish(quickNames[+e.key - 1]);
+    }
+  };
+  document.addEventListener("keydown", keyPick, true);
+  dlg.addEventListener("close", () => document.removeEventListener("keydown", keyPick, true), { once:true });
   dlg.showModal();
   inp.focus(); inp.select();
 };

@@ -190,7 +190,10 @@ function wireToolbar(){
   $("#btn-open").addEventListener("click", ()=> $("#file-project").click());
   $("#btn-export").addEventListener("click", ()=> UI.openExport());
   $("#btn-add-layer").addEventListener("click", ()=> $("#file-images").click());
-  $("#draw-side").addEventListener("change", ()=> requestRender()); // visibility follows active side
+  $("#draw-side").addEventListener("change", e => {
+    if (e.target.value !== "xray") Tools.lastCopperSide = e.target.value;
+    requestRender(); // visibility follows active side
+  });
   $("#btn-measure").addEventListener("click", ()=> setTool("measure"));
   $("#btn-calibrate").addEventListener("click", ()=> setTool("calibrate"));
   $("#btn-history").addEventListener("click", ()=> UI.openHistory());
@@ -342,7 +345,10 @@ function wireCanvas(){
   cv.addEventListener("dblclick", onDoubleClick);
   cv.addEventListener("contextmenu", e => {
     e.preventDefault();
-    if (Tools.name === "trace" && Tools.tracePts) finishTrace();
+    if (Tools.name === "trace" && Tools.tracePts){ finishTrace(); return; }
+    const pt = canvasPoint(e);
+    const w = screenToWorld(pt.x, pt.y);
+    showCanvasContextMenu(e.clientX, e.clientY, w);
   });
   cv.addEventListener("wheel", e => {
     e.preventDefault();
@@ -376,6 +382,53 @@ function wireCanvas(){
       else if (/\.json$/i.test(f.name)) openProjectFile(f);
     }
   });
+}
+
+/* build the right-click menu from whatever is under the cursor (pad-aware) */
+function showCanvasContextMenu(cx, cy, w){
+  const h = hitTest(w.x, w.y);
+  const items = [];
+  if (h && h.type === "pin"){
+    const c = h.comp, p = c.pins[h.pinIdx];
+    UI.select(h);
+    items.push({ label:"Set net…", action:()=>promptNetName(h) });
+    if (p.netId) items.push({ label:"Clear net", action:()=>{ pushUndo("clear pin net"); assignNetToObject(h,""); UI.refreshNets(); UI.refreshInspector(); requestRender(); } });
+    items.push({ label: p.nc ? "Unset no-connect" : "Mark no-connect (NC)", action:()=>{ pushUndo("pin NC"); p.nc=!p.nc; if(p.nc)p.netId=null; pruneNets(); UI.refreshNets(); UI.refreshInspector(); requestRender(); } });
+    if (c.fpId === "free"){
+      const pl = ensureFreePin(c, h.pinIdx);
+      items.push({ sep:true });
+      items.push({ label: pl.shape==="rect" ? "Pad → THT (round)" : "Pad → SMD (rect)", action:()=>{ pushUndo("pad type"); pl.shape = pl.shape==="rect"?"circle":"rect"; c._fp=null; UI.refreshInspector(); requestRender(); } });
+      items.push({ label:"Remove this pad", danger:true, action:()=>{ pushUndo("remove pad"); removeFreePin(c, h.pinIdx); UI.select({type:"comp",comp:c}); UI.refreshInspector(); UI.refreshNets(); requestRender(); } });
+    }
+    items.push({ sep:true });
+    items.push({ label:"Select component "+c.ref, action:()=>{ UI.select({type:"comp",comp:c}); requestRender(); } });
+  } else if (h && h.type === "comp"){
+    const c = h.comp; UI.select(h);
+    items.push({ label:"Edit ref / value…", action:()=>UI.openQuickEdit(c) });
+    items.push({ label:"Duplicate", action:()=>duplicateSelection() });
+    items.push({ label:"Rotate 90°", action:()=>rotateSelection(90) });
+    items.push({ label:"Flip to other side", action:()=>flipSelectionSide() });
+    items.push({ label: compMoveLocked(c) ? "Unlock" : "Lock (move)", action:()=>toggleLockSelection() });
+    items.push({ sep:true });
+    items.push({ label:"Delete component "+c.ref, danger:true, action:()=>deleteSelection() });
+  } else if (h && h.type === "via"){
+    UI.select(h);
+    items.push({ label:"Set net…", action:()=>promptNetName(h) });
+    items.push({ label: h.via.kind==="pth" ? "Change to via" : "Change to PTH", action:()=>{ pushUndo("via type"); h.via.kind = h.via.kind==="pth"?"via":"pth"; UI.refreshInspector(); requestRender(); } });
+    items.push({ sep:true });
+    items.push({ label: h.via.kind==="pth"?"Delete PTH":"Delete via", danger:true, action:()=>deleteSelection() });
+  } else if (h && h.type === "trace"){
+    UI.select(h);
+    items.push({ label:"Set net…", action:()=>promptNetName(h) });
+    items.push({ label:"Select whole net", action:()=>{ if(h.trace.netId) UI.selectNetTraces(h.trace.netId); requestRender(); } });
+    items.push({ label:"Cut here", action:()=>{ setTool("cut"); cutDown(w,{}); } });
+    items.push({ sep:true });
+    items.push({ label:"Delete trace", danger:true, action:()=>deleteSelection() });
+  } else {
+    items.push({ label:"Place component here…", action:()=>{ Tools.pending=null; setTool("component"); } });
+    if (View.mask !== undefined) items.push({ label: View.mask?"Hide coverage mask":"Show coverage mask", action:()=>toggleMask() });
+  }
+  if (items.length) UI.showContextMenu(cx, cy, items);
 }
 
 /* ---------------- keyboard ---------------- */
@@ -444,20 +497,17 @@ function wireKeyboard(){
   window.addEventListener("keyup", e => {
     if (e.code === "Space"){
       Keys.space = false;
-      if (!Tools.drag){
-        const cur = { select:"default", component:"crosshair", trace:"crosshair",
-                      via:"crosshair", align:"move", measure:"crosshair" }[Tools.name] || "default";
-        View.canvas.style.cursor = cur;
-      }
+      if (!Tools.drag) View.canvas.style.cursor = toolCursor(Tools.name);
     }
   });
 }
 
 function cycleDrawSide(){
   const sel = $("#draw-side");
-  const order = availableSides();
+  const order = [...availableSides(), "xray"];
   sel.value = order[(order.indexOf(sel.value)+1) % order.length];
-  UI.toast("Drawing on " + SIDE_LABELS[sel.value]);
+  if (sel.value !== "xray") Tools.lastCopperSide = sel.value;
+  UI.toast(sel.value === "xray" ? "X-ray view (both sides) — drawing on " + SIDE_LABELS[UI.copperSide()] : "Drawing on " + SIDE_LABELS[sel.value]);
   requestRender(); // trace/component visibility follows the active side
 }
 
@@ -520,7 +570,8 @@ function addImageLayer(file){
       // guess side from filename
       const n = file.name.toLowerCase();
       let side = "front";
-      if (/back|bottom|b\.|_b/.test(n)) side = "back";
+      if (/x-?ray/.test(n)) side = "xray";
+      else if (/back|bottom|b\.|_b/.test(n)) side = "back";
       else if (/inner|in1|l2/.test(n)) side = "inner1";
       const center = screenToWorld(View.width/2, View.height/2);
       const layer = {
