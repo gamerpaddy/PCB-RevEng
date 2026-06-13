@@ -873,7 +873,7 @@ UI.buildHelp = () => {
       [k("tool.select"),"Select / move"],[k("tool.component"),"Place component (footprint dialog)"],
       [k("tool.trace"),"Draw trace / connect pins"],[k("tool.via"),"Place via"],
       [k("tool.cut"),"Cut a trace into two nets"],
-      [k("tool.align"),"Align image layer"],[k("tool.measure"),"Measure / calibrate mm scale"],
+      [k("tool.align"),"Align image layer"],[k("tool.measure"),"Measure a distance"],
     ]],
     ["View", [
       ["Mouse wheel","Zoom at cursor"],["Space + drag / middle drag","Pan"],
@@ -896,7 +896,7 @@ UI.buildHelp = () => {
     ]],
     ["Workflow", [
       ["1.","Drop front & back photos · set the back photo's side to Back + Mirror ⇋"],
-      ["2.",k("tool.align")+": drag/2-point-align layers so pads coincide · "+k("tool.measure")+": calibrate scale from a known dimension"],
+      ["2.",k("tool.align")+": drag/2-point-align layers so pads coincide · Calibrate button: set scale from a known dimension · "+k("tool.measure")+": measure a distance"],
       ["3.",k("tool.component")+": place components with footprints, refs and values"],
       ["4.",k("tool.trace")+": click a pad or an existing trace → route along the copper → click the destination (crossing same-side traces auto-join)"],
       ["5.",k("tool.via")+": vias where traces change sides · double-click pads to name power nets"],

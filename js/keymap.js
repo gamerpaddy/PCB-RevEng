@@ -8,7 +8,7 @@ const KeyActions = [
   { id:"tool.via",       label:"Via tool",                      def:"V",      run:()=>setTool("via") },
   { id:"tool.cut",       label:"Cut trace tool",                def:"K",      run:()=>setTool("cut") },
   { id:"tool.align",     label:"Align image layer tool",        def:"G",      run:()=>setTool("align") },
-  { id:"tool.measure",   label:"Measure / calibrate tool",      def:"M",      run:()=>setTool("measure") },
+  { id:"tool.measure",   label:"Measure tool",                  def:"M",      run:()=>setTool("measure") },
   { id:"view.flip",      label:"Flip board view (front/back)",  def:"F",      run:()=>toggleFlip() },
   { id:"view.fit",       label:"Zoom to fit",                   def:"Z",      run:()=>zoomToFit() },
   { id:"edit.rotate",    label:"Rotate 90° (Shift = 15°)",      def:"R",      run:(e)=>rotateSelection(e && e.shiftKey ? 15 : 90) },
