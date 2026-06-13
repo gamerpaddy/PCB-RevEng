@@ -24,7 +24,11 @@ Footprints.register({
   params:[{key:"w",label:"Body W mm",type:"int",def:10,min:1,max:200,step:1},
           {key:"h",label:"Body H mm",type:"int",def:10,min:1,max:200,step:1}],
   gen(p){
-    const pins = (p.pinList || []).map(pl => _pin(pl.num, pl.x, pl.y, {shape:"circle", w:1.6, h:1.6}));
+    const pins = (p.pinList || []).map(pl => {
+      const shape = pl.shape || "circle";          // "circle" = THT, "rect" = SMD
+      const sz = pl.size || (shape==="circle" ? 1.6 : 1.2);
+      return _pin(pl.num, pl.x, pl.y, { shape, w: sz, h: sz });
+    });
     return { label:"Free-"+pins.length, pins, body:{w:p.w, h:p.h}, kicad:"" };
   }
 });

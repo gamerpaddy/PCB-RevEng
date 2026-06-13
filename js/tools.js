@@ -609,7 +609,7 @@ function alignDown(w, pt, e){
   if (Tools.alignPts){
     const target = Tools.alignLayer;
     if (!target){ Tools.alignPts = null; UI.setHint(TOOL_HINTS.align); return; }
-    Tools.alignPts.push({x:w.x, y:w.y});
+    Tools.alignPts.push({x:w.x, y:w.y, thumb: captureAlignThumb(pt)});
     const n = Tools.alignPts.length;
     if (n < 4){
       UI.setHint("Layer “" + target.name + "” — feature " + (n+1) + " of 4 (spread them towards the corners)");
@@ -890,7 +890,10 @@ function addFreePin(comp, w){
   const pl = comp.fpParams.pinList = (comp.fpParams.pinList || []);
   let num = pl.length + 1;
   while (pl.some(p => String(p.num) === String(num))) num++;
-  pl.push({ num: String(num), x: +(lx/s).toFixed(3), y: +(ly/s).toFixed(3) });
+  // new pins inherit the last pin's pad type/size for quick repeat placement
+  const last = pl[pl.length-1];
+  pl.push({ num: String(num), x: +(lx/s).toFixed(3), y: +(ly/s).toFixed(3),
+            shape: last ? last.shape : "circle", size: last ? last.size : 1.6 });
   comp._fp = null;
   comp.pins.push({ num: String(num), name: "", netId: null });
   UI.setHint("Pin " + num + " added to " + comp.ref + " — keep clicking, Esc to finish");
@@ -902,6 +905,13 @@ function removeFreePin(comp, idx){
   comp.pins.splice(idx, 1);
   comp._fp = null;
   pruneNets();
+}
+
+/* the pinList entry for pin index i, created if a legacy pin lacks one */
+function ensureFreePin(comp, idx){
+  const pl = comp.fpParams.pinList = (comp.fpParams.pinList || []);
+  if (!pl[idx]) pl[idx] = { num: comp.pins[idx]?.num || String(idx+1), x:0, y:0, shape:"circle", size:1.6 };
+  return pl[idx];
 }
 
 /* legacy single `locked` flag becomes two separate locks */

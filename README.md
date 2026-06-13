@@ -24,9 +24,10 @@ want to keep or move between machines.
    are auto-mirrored (⇋) so they overlay the front view correctly.
 2. **Align** (`G`) - drag the active layer to move, `Shift`+drag to rotate,
    `Alt`+wheel to scale, or use the **Align** button on a layer: click four
-   reference features (e.g. mounting holes / corner pads) on the aligned view,
-   features **on that layer**, then the four positions they belong at - offset,
-   rotation, scale **and skew** are solved by least squares. Use the opacity sliders to onion-skin
+   features **on that layer** (each click is numbered and shows a thumbnail of what
+   you clicked), then click the four matching positions on the reference - a side
+   strip shows the source thumbnails so you know which feature to match next.
+   Offset, rotation, scale **and skew** are solved by least squares. Use the opacity sliders to onion-skin
    layers while aligning. Number keys 1…0 switch the view to a layer
    (Shift = +10), or toggle visibility - pick the behavior in *Board / display*.
 3. **Calibrate**  - Click calibrate in the left toolbar, drag along a known dimension (e.g. a 2.54 mm header pitch
@@ -35,7 +36,8 @@ want to keep or move between machines.
    QFP / QFN / SOT-23-323-523-723 / SOT-223 / SOT-89 / DPAK / TO-92 / TO-220 /
    chip R-C / headers / BGA-grid / test points,
    plus a **Freestyle** footprint: place the body anywhere (even off-board) and drop
-   its pins one by one with “+ Add pins” in the Inspector. The selector has a
+   its pins one by one with “+ Add pins” in the Inspector; each freestyle pad's type
+(THT / SMD) and size are editable per-pin. The selector has a
    quick-search box (type to filter, ↑/↓ to pick, Enter to place), and the **Ω**
    button next to Value decodes SMD resistor codes (103, 01C, 4R7, 4k7…) or
    computes THT color bands.
@@ -66,8 +68,9 @@ Press `?` in the app for the full hotkey list. All single-key shortcuts are
 rebindable via the ⌨ **Hotkey editor** in the top bar (saved in the browser).
 Board & display settings live in the ⚙ **Options** menu. Components have separate
 **move** and **edit** locks (`L` toggles the move lock); locked parts show a 🔒.
-The **Mask** toggle (`H`) tints board areas that have no components yet, so you
-can see at a glance what's left to identify on a crowded board.
+The **Mask** toggle (`H`) darkens board areas that have no components yet (and
+tints them red), leaving placed parts bright, so you can see at a glance what's
+left to identify on a crowded board.
 
 **Nets & protection.** Power nets (GND, VCC, VDD, VSS, +3V3, +5V…) are *protected
 prefabs* (🛡): they can't be renamed and never get silently merged into a signal

@@ -421,20 +421,22 @@ function render(){
     ctx.restore();
   }
 
-  // --- alignment reference points ---
+  // --- alignment reference points (world-space crosshair at exact location) ---
   if (Tools.alignPts){
     ctx.save();
     Tools.alignPts.forEach((p,i)=>{
       ctx.strokeStyle = i<4 ? "#ffb648" : "#4fd07f"; // orange = points on the moving layer, green = destination
-      ctx.lineWidth = 2/View.zoom;
-      const r = 10/View.zoom;
-      ctx.beginPath(); ctx.arc(p.x,p.y,r,0,Math.PI*2); ctx.stroke();
+      ctx.lineWidth = 1.5/View.zoom;
+      const r = 9/View.zoom;
       ctx.beginPath(); ctx.moveTo(p.x-r,p.y); ctx.lineTo(p.x+r,p.y); ctx.moveTo(p.x,p.y-r); ctx.lineTo(p.x,p.y+r); ctx.stroke();
     });
     ctx.restore();
   }
 
   ctx.restore();
+
+  // numbered badges + click thumbnails (screen space, after the world transform)
+  drawAlignOverlay(ctx);
 }
 
 function currentHighlightNet(){
@@ -596,6 +598,81 @@ function drawComponent(ctx, c, selNet, padsOnly){
   }
 }
 
+/* grab a small square crop of the rendered canvas around a click (CSS-px point)
+   to use as a "what you clicked" thumbnail for alignment guidance */
+const ALIGN_THUMB = 60;     // thumbnail size in px
+function captureAlignThumb(pt){
+  const dpr = View.dpr || 1;
+  const css = 50;           // captured region (CSS px) around the click
+  const c = document.createElement("canvas");
+  c.width = ALIGN_THUMB; c.height = ALIGN_THUMB;
+  const x = c.getContext("2d");
+  x.imageSmoothingEnabled = true;
+  try {
+    x.drawImage(View.canvas, (pt.x - css/2)*dpr, (pt.y - css/2)*dpr, css*dpr, css*dpr,
+                0, 0, ALIGN_THUMB, ALIGN_THUMB);
+  } catch(e){ /* tainted/empty — skip */ }
+  // crosshair marking the exact clicked centre
+  x.strokeStyle = "rgba(255,255,255,.85)"; x.lineWidth = 1;
+  x.beginPath(); x.moveTo(ALIGN_THUMB/2,6); x.lineTo(ALIGN_THUMB/2,ALIGN_THUMB-6);
+  x.moveTo(6,ALIGN_THUMB/2); x.lineTo(ALIGN_THUMB-6,ALIGN_THUMB/2); x.stroke();
+  return c;
+}
+
+/* numbered markers + click thumbnails for the 4+4 alignment, drawn in screen space */
+function drawAlignOverlay(ctx){
+  if (!Tools.alignPts || !Tools.alignPts.length) return;
+  ctx.save();
+  ctx.setTransform(View.dpr,0,0,View.dpr,0,0);
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  Tools.alignPts.forEach((p,i) => {
+    const moving = i < 4;
+    const num = (i % 4) + 1;
+    const col = moving ? "#ffb648" : "#4fd07f";
+    const sc = worldToScreen(p.x, p.y);
+    // numbered badge on the marker
+    ctx.fillStyle = col;
+    ctx.beginPath(); ctx.arc(sc.x, sc.y, 9, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = "#10141a"; ctx.font = "bold 12px Segoe UI";
+    ctx.fillText(num, sc.x, sc.y+0.5);
+    // thumbnail of what was clicked, just up-right of the marker
+    if (p.thumb){
+      const tx = sc.x + 12, ty = sc.y - 12 - ALIGN_THUMB;
+      ctx.drawImage(p.thumb, tx, ty);
+      ctx.strokeStyle = col; ctx.lineWidth = 2;
+      ctx.strokeRect(tx, ty, ALIGN_THUMB, ALIGN_THUMB);
+      ctx.fillStyle = col;
+      ctx.fillRect(tx, ty-13, 15, 13);
+      ctx.fillStyle = "#10141a"; ctx.font = "bold 10px Segoe UI";
+      ctx.fillText(num, tx+7, ty-6);
+    }
+  });
+  // during the destination phase, show the moving-layer thumbnails as a reference
+  // strip so you know which feature to match next
+  if (Tools.alignPts.length >= 4){
+    const need = Tools.alignPts.length - 4; // index of the next destination to place (0..3)
+    const pad = 8, sz = ALIGN_THUMB, x0 = 10, y0 = 60;
+    ctx.fillStyle = "rgba(16,20,26,.92)";
+    ctx.fillRect(x0-pad, y0-26, sz+pad*2, 26 + (sz+pad)*4);
+    ctx.fillStyle = "#cfd6df"; ctx.font = "11px Segoe UI"; ctx.textAlign = "left";
+    ctx.fillText("Match these features:", x0, y0-13);
+    ctx.textAlign = "center";
+    for (let i=0;i<4 && i<Tools.alignPts.length;i++){
+      const yy = y0 + i*(sz+pad);
+      if (Tools.alignPts[i].thumb) ctx.drawImage(Tools.alignPts[i].thumb, x0, yy);
+      const active = i === need;
+      ctx.strokeStyle = active ? "#ffffff" : "#ffb648";
+      ctx.lineWidth = active ? 3 : 1.5;
+      ctx.strokeRect(x0, yy, sz, sz);
+      ctx.fillStyle = "#ffb648"; ctx.fillRect(x0, yy, 16, 14);
+      ctx.fillStyle = "#10141a"; ctx.font = "bold 11px Segoe UI";
+      ctx.fillText(i+1, x0+8, yy+7);
+      if (active){ ctx.fillStyle="#ffffff"; ctx.font="11px Segoe UI"; ctx.textAlign="left"; ctx.fillText("◄ place now", x0+sz+6, yy+sz/2); ctx.textAlign="center"; }
+    }
+  }
+  ctx.restore();
+}
+
 /* ---------- coverage mask: tint board areas not yet covered by components ---------- */
 let _maskCv = null;
 function renderMask(ctx){
@@ -607,17 +684,22 @@ function renderMask(ctx){
   const fx = View.flip ? -1 : 1;
   m.translate(View.panX, View.panY);
   m.scale(View.zoom * fx, View.zoom);
-  // tint every visible photo area
-  m.fillStyle = "rgba(255,70,70,0.27)";
-  for (const l of State.layers){
-    if (!l.visible || !l.img || !l.img.width) continue;
-    m.save();
-    m.translate(l.tx, l.ty);
-    if (l.warp) m.transform(l.warp.a, l.warp.b, l.warp.c, l.warp.d, 0, 0);
-    else { m.rotate(l.rot*Math.PI/180); m.scale(l.scale*(l.mirror?-1:1), l.scale); }
-    m.fillRect(-l.img.width/2, -l.img.height/2, l.img.width, l.img.height);
-    m.restore();
-  }
+  // strong dark-red tint over every visible photo area (covered areas get punched
+  // out below, so they stay bright — high contrast against the darkened rest)
+  const tintLayers = (style) => {
+    m.fillStyle = style;
+    for (const l of State.layers){
+      if (!l.visible || !l.img || !l.img.width) continue;
+      m.save();
+      m.translate(l.tx, l.ty);
+      if (l.warp) m.transform(l.warp.a, l.warp.b, l.warp.c, l.warp.d, 0, 0);
+      else { m.rotate(l.rot*Math.PI/180); m.scale(l.scale*(l.mirror?-1:1), l.scale); }
+      m.fillRect(-l.img.width/2, -l.img.height/2, l.img.width, l.img.height);
+      m.restore();
+    }
+  };
+  tintLayers("rgba(8,9,12,0.62)");    // darken
+  tintLayers("rgba(255,55,55,0.42)"); // then red
   // punch holes that follow each component's actual footprint shape (+ margin),
   // so a wide connector only clears its own outline, not a huge circle
   m.globalCompositeOperation = "destination-out";

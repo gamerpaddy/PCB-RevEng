@@ -398,21 +398,42 @@ UI.inspectComponent = (c, selPin) => {
   const pinSec = document.createElement("div");
   pinSec.className = "insp-section";
   const isFree = c.fpId === "free";
+  const plist = isFree ? (c.fpParams.pinList || []) : null;
   let rows = "";
   for (let i=0;i<c.pins.length;i++){
     const p = c.pins[i];
     const netName = p.nc ? "" : (p.netId ? (getNet(p.netId)?.name || "") : "");
+    const pl = plist && plist[i];
+    const padCells = isFree ? `
+      <td><select class="pshape" data-i="${i}" title="Pad type">
+        <option value="circle"${pl&&pl.shape!=="rect"?" selected":""}>THT</option>
+        <option value="rect"${pl&&pl.shape==="rect"?" selected":""}>SMD</option></select></td>
+      <td style="width:42px"><input class="psize" data-i="${i}" type="number" step="0.1" min="0.2" value="${pl?(pl.size||(pl.shape==="rect"?1.2:1.6)):1.6}" title="Pad size (mm)"></td>
+      <td style="width:18px"><button class="pdel" data-i="${i}" title="Remove pin" style="padding:0 5px;color:var(--danger);border:none;background:none">✕</button></td>` : "";
     rows += `<tr data-i="${i}" class="${i===selPin?'sel':''}">
       <td style="width:30px;color:#8b96a5">${p.num}</td>
       <td><input class="pname" data-i="${i}" value="${escAttr(p.name)}" placeholder="name"></td>
       <td><input class="pnet" data-i="${i}" value="${escAttr(netName)}" placeholder="net" ${p.nc?"disabled":""}></td>
       <td style="width:24px;text-align:center" title="No-connect (excluded from checker)"><input type="checkbox" class="pnc" data-i="${i}" ${p.nc?"checked":""}></td>
-      ${isFree ? `<td style="width:18px"><button class="pdel" data-i="${i}" title="Remove pin" style="padding:0 5px;color:var(--danger);border:none;background:none">✕</button></td>` : ""}</tr>`;
+      ${padCells}</tr>`;
   }
   pinSec.innerHTML = `<div class="insp-title" style="font-size:12px">Pins (${c.pins.length})
-    <span style="color:#8b96a5;font-weight:400;font-size:10px">— net · NC = no-connect</span></div>
-    <table class="pin-table"><tr><th>#</th><th>Name</th><th>Net</th><th>NC</th>${isFree?"<th></th>":""}</tr>${rows}</table>`;
+    <span style="color:#8b96a5;font-weight:400;font-size:10px">— net · NC = no-connect${isFree?" · pad type/size":""}</span></div>
+    <table class="pin-table"><tr><th>#</th><th>Name</th><th>Net</th><th>NC</th>${isFree?"<th>Pad</th><th>mm</th><th></th>":""}</tr>${rows}</table>`;
   box.appendChild(pinSec);
+
+  if (isFree){
+    pinSec.querySelectorAll(".pshape").forEach(sel => sel.addEventListener("change", e => {
+      const i = +e.target.dataset.i;
+      pushUndo("pad type"); ensureFreePin(c, i).shape = e.target.value; c._fp = null;
+      UI.refreshInspector(); requestRender();
+    }));
+    pinSec.querySelectorAll(".psize").forEach(inp => inp.addEventListener("change", e => {
+      const i = +e.target.dataset.i;
+      pushUndo("pad size"); ensureFreePin(c, i).size = Math.max(0.2, parseFloat(e.target.value)||1.0); c._fp = null;
+      requestRender();
+    }));
+  }
 
   pinSec.querySelectorAll(".pnc").forEach(cb => cb.addEventListener("change", e => {
     const i = +e.target.dataset.i;
