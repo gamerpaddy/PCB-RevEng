@@ -14,16 +14,26 @@ const EIA96_MULT = { Z:0.001, Y:0.01, R:0.01, X:0.1, S:0.1, A:1, B:10, H:10, C:1
 
 function formatOhms(v){
   if (!(v > 0)) return String(v);
-  const fmt = (x)=> (+x.toFixed(2)).toString();
+  const fmt = (x)=> (+x.toFixed(x < 1 ? 4 : 2)).toString();
   if (v >= 1e9) return fmt(v/1e9) + "G";
   if (v >= 1e6) return fmt(v/1e6) + "M";
   if (v >= 1e3) return fmt(v/1e3) + "k";
+  if (v < 1)    return (+(v*1000).toFixed(2)).toString() + "m"; // milliohms (5mΩ etc.)
   return fmt(v);
 }
 
 /* decode an SMD marking; returns {ohms, text, how} or null */
 function decodeSMD(input){
-  const s = (input || "").trim().toUpperCase();
+  const raw = (input || "").trim();
+  if (!raw) return null;
+  let mm;
+  // milliohm notation — lowercase 'm' as the decimal marker (5m = 5mΩ, 5m0, 5mR, R005)
+  if ((mm = /^(\d*)m(\d*)R?$/.exec(raw)) && (mm[1] || mm[2])){
+    const base = parseFloat((mm[1]||"0") + "." + (mm[2]||"0"));
+    const ohms = base * 0.001;
+    return { ohms, text: formatOhms(ohms), how: "milliohm notation" };
+  }
+  const s = raw.toUpperCase();
   if (!s) return null;
   let m;
   // EIA-96: two digits + multiplier letter (01C = 10k)
@@ -85,6 +95,8 @@ function decodeBands(idx){ // idx = array of BAND_COLORS indices, length 4 or 5
 function autoResolveValue(v){
   v = (v || "").trim();
   if (!v) return v;
+  // milliohm / R-notation small values (5m, 5mR, R005) → resolve to a tidy mΩ value
+  if (/^(\d*)m(\d*)R?$/.test(v) || /^R\d{2,}$/i.test(v)){ const d = decodeSMD(v); if (d) return d.text; }
   if (/[a-zA-ZµΩ]/.test(v)){
     // EIA-96 (two digits + a single multiplier letter) is the one lettered form we still resolve
     if (/^\d{2}[ZYRXSABHCDEF]$/i.test(v)){ const d = decodeSMD(v); if (d) return d.text; }

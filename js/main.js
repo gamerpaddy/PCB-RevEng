@@ -3,169 +3,8 @@
 
 const Keys = { space:false };
 
-/* ---------------- autosave (IndexedDB — survives F5) ---------------- */
-const Autosave = { db:null, dirty:false, restoring:false };
-
-function idbOpen(){
-  return new Promise((res, rej) => {
-    const rq = indexedDB.open("pcbreveng", 1);
-    rq.onupgradeneeded = () => rq.result.createObjectStore("kv");
-    rq.onsuccess = () => res(rq.result);
-    rq.onerror = () => rej(rq.error);
-  });
-}
-function idbPut(key, val){
-  return new Promise((res, rej) => {
-    const tx = Autosave.db.transaction("kv", "readwrite");
-    tx.objectStore("kv").put(val, key);
-    tx.oncomplete = res; tx.onerror = () => rej(tx.error);
-  });
-}
-function idbGet(key){
-  return new Promise((res, rej) => {
-    const tx = Autosave.db.transaction("kv", "readonly");
-    const rq = tx.objectStore("kv").get(key);
-    rq.onsuccess = () => res(rq.result); rq.onerror = () => rej(rq.error);
-  });
-}
-function idbDel(key){
-  return new Promise((res) => {
-    const tx = Autosave.db.transaction("kv", "readwrite");
-    tx.objectStore("kv").delete(key);
-    tx.oncomplete = res; tx.onerror = res;
-  });
-}
-
-function markDirty(){ Autosave.dirty = true; }
-
-/* first visit (empty cache): load the bundled sample project so the site isn't blank */
-function loadDefaultProject(overlay, ltext){
-  return new Promise((resolve) => {
-    if (overlay) overlay.classList.add("show");
-    if (ltext) ltext.textContent = "Loading sample project…";
-    fetch("sampleproject.pcbrev.json?v=22")
-      .then(r => r.ok ? r.text() : Promise.reject(new Error("fetch " + r.status)))
-      .then(text => {
-        Autosave.restoring = true; // don't autosave the untouched sample
-        loadProject(text, () => {
-          Autosave.restoring = false;
-          UI.activeLayerId = State.layers[0]?.id ?? null;
-          UI.rebuildSideSelect(); syncSettings();
-          UI.refreshLayerList(); UI.refreshNets(); UI.refreshInspector();
-          if (State.layers.length || State.components.length) zoomToFit();
-          if (overlay) overlay.classList.remove("show");
-          UI.toast("Loaded sample project — use “New” to start your own");
-          resolve();
-        });
-      })
-      .catch(() => { if (overlay) overlay.classList.remove("show"); resolve(); });
-  });
-}
-/* heavy image data changed (layer added/removed/edited) — re-save images once */
-function markImagesDirty(){ Autosave.imagesDirty = true; Autosave.dirty = true; }
-
-/* lightweight project JSON WITHOUT the base64 images (the slow part).
-   Images are stored separately and only when they actually change, so the
-   2.5 s autosave no longer re-encodes megabytes every tick. */
-function serializeLight(){
-  const full = JSON.parse(serializeProject());
-  full.layers = (full.layers || []).map(l => { const { dataURL, ...rest } = l; return rest; });
-  return JSON.stringify(full);
-}
-function serializeImages(){
-  return JSON.stringify(State.layers.map(l => ({ id: l.id, dataURL: l.dataURL })));
-}
-
-function relTime(ts){
-  if (!ts) return "never";
-  const s = Math.round((Date.now()-ts)/1000);
-  if (s < 5) return "just now";
-  if (s < 60) return s + "s ago";
-  const m = Math.round(s/60);
-  if (m < 60) return m + "m ago";
-  const h = Math.round(m/60);
-  if (h < 24) return h + "h ago";
-  return new Date(ts).toLocaleString();
-}
-function updateSaveStatus(saving){
-  const el = document.getElementById("save-status");
-  if (!el) return;
-  el.classList.toggle("saving", !!saving);
-  if (saving){ el.textContent = "saving…"; return; }
-  el.textContent = Autosave.lastSaved ? ("saved " + relTime(Autosave.lastSaved)) : "not saved yet";
-}
-
-async function autosaveInit(){
-  const overlay = document.getElementById("loading-overlay");
-  const ltext = document.getElementById("loading-text");
-  try { Autosave.db = await idbOpen(); }
-  catch (e){ updateSaveStatus(); return; }
-  // restore a previous session (merge light project + stored images + undo timeline)
-  try {
-    const light = await idbGet("autosave");
-    if (light){
-      if (overlay) overlay.classList.add("show");
-      const meta = await idbGet("autosave_meta");
-      if (meta){ try { Autosave.lastSaved = JSON.parse(meta).savedAt; } catch(e){} }
-      if (ltext && Autosave.lastSaved) ltext.textContent = "Wait, loading saved session… (saved " + relTime(Autosave.lastSaved) + ")";
-      const imgs = await idbGet("autosave_imgs");
-      const undoData = await idbGet("autosave_undo");
-      const proj = JSON.parse(light);
-      if (imgs){
-        const map = new Map(JSON.parse(imgs).map(i => [i.id, i.dataURL]));
-        for (const l of (proj.layers || [])) l.dataURL = map.get(l.id) || l.dataURL || "";
-      }
-      Autosave.restoring = true;
-      loadProject(JSON.stringify(proj), () => {
-        // restore the undo/redo timeline (loadProject clears it)
-        if (undoData){
-          try {
-            const u = JSON.parse(undoData);
-            if (Array.isArray(u.stack)) Undo.stack = u.stack;
-            if (Array.isArray(u.redo)) Undo.redo = u.redo;
-          } catch(e){}
-        }
-        Autosave.restoring = false;
-        UI.activeLayerId = State.layers[0]?.id ?? null;
-        UI.rebuildSideSelect(); syncSettings();
-        UI.refreshLayerList(); UI.refreshNets(); UI.refreshInspector();
-        if (State.layers.length || State.components.length) zoomToFit();
-        if (overlay) overlay.classList.remove("show");
-        updateSaveStatus();
-        if (State.components.length || State.layers.length || State.traces.length)
-          UI.toast("Session restored (saved " + relTime(Autosave.lastSaved) + ") — use “New” to start fresh");
-      });
-    } else {
-      // no saved session → let the user choose: empty project or the bundled sample
-      updateSaveStatus();
-      $("#welcome-dialog").showModal();
-    }
-  } catch (e){ if (overlay) overlay.classList.remove("show"); updateSaveStatus(); }
-  // periodic save while dirty (uses idle time so it never blocks interaction)
-  const idle = window.requestIdleCallback || ((fn)=>setTimeout(()=>fn({timeRemaining:()=>5}),0));
-  setInterval(() => {
-    if (!Autosave.dirty || Autosave.restoring || !Autosave.db || Autosave.saving) return;
-    Autosave.dirty = false;
-    Autosave.saving = true;
-    updateSaveStatus(true);
-    idle(async () => {
-      try {
-        await idbPut("autosave", serializeLight());
-        await idbPut("autosave_undo", JSON.stringify({ stack: Undo.stack, redo: Undo.redo }));
-        if (Autosave.imagesDirty){ Autosave.imagesDirty = false; await idbPut("autosave_imgs", serializeImages()); }
-        Autosave.lastSaved = Date.now();
-        await idbPut("autosave_meta", JSON.stringify({ savedAt: Autosave.lastSaved }));
-      } catch (e){ /* quota — keep working without autosave */ }
-      Autosave.saving = false;
-      updateSaveStatus();
-    });
-  }, 2500);
-  // refresh the "saved Xm ago" label periodically
-  setInterval(() => { if (!Autosave.saving) updateSaveStatus(); }, 15000);
-  // catch mutations centrally: every undo snapshot marks the project dirty
-  const origPush = window.pushUndo;
-  window.pushUndo = function(...a){ origPush(...a); markDirty(); };
-}
+/* autosave (IndexedDB) lives in autosave.js — autosaveInit, markDirty,
+   markImagesDirty, loadDefaultProject, updateSaveStatus, etc. are defined there */
 
 window.addEventListener("DOMContentLoaded", () => {
   viewInit(document.getElementById("canvas"));
@@ -187,6 +26,7 @@ window.addEventListener("DOMContentLoaded", () => {
   wireSettings();
   Resolver.wire();
   UI.wireFpSearch();
+  UI.wireNetSearch();
   autosaveInit();
   window.addEventListener("resize", viewResize);
   requestRender();
@@ -248,12 +88,12 @@ function toggleMask(){
 }
 
 function toggleXray(){
-  if (!State.layers.some(l => l.side === "xray")){
-    UI.toast("Add an X-ray image layer first (set a layer's side to X-ray)"); return;
-  }
   View.xray = !View.xray;
   $("#btn-xray").classList.toggle("active", View.xray);
-  UI.toast(View.xray ? "X-ray overlay ON — components & traces from BOTH sides shown" : "X-ray overlay off");
+  const hasXrayImg = State.layers.some(l => l.side === "xray");
+  UI.toast(View.xray
+    ? "X-ray ON — both sides shown" + (hasXrayImg ? " (with X-ray image)" : "; other-side traces are dimmed")
+    : "X-ray off");
   requestRender();
 }
 
@@ -576,6 +416,13 @@ function wireDialogs(){
   $("#fp-cancel").addEventListener("click", ()=>{
     $("#fp-dialog").close();
     if (Tools.name === "component" && !Tools.pending) setTool("select");
+  });
+  // clicking the backdrop (outside the dialog box) closes the footprint selector
+  $("#fp-dialog").addEventListener("click", e => {
+    if (e.target === $("#fp-dialog")){
+      $("#fp-dialog").close();
+      if (Tools.name === "component" && !Tools.pending) setTool("select");
+    }
   });
   $("#options-close").addEventListener("click", ()=> $("#options-dialog").close());
   $("#history-close").addEventListener("click", ()=> $("#history-dialog").close());

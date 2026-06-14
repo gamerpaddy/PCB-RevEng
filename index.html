@@ -44,7 +44,7 @@
       </select>
       <button id="btn-flip" title="Flip board view (look from the back)  [F]">Flip view</button>
       <button id="btn-mask" title="Coverage mask — tints board areas without components  [H]">Mask</button>
-      <button id="btn-xray" style="display:none" title="X-ray overlay — show components &amp; traces from BOTH sides at once (needs an X-ray image layer). Drawing stays on the selected side.">X-ray</button>
+      <button id="btn-xray" title="X-ray overlay — show components &amp; traces from BOTH sides at once. Inactive-side copper is dimmed; if an X-ray image layer exists it is shown too. Drawing stays on the selected side.">X-ray</button>
     </div>
 
     <div class="tb-group">
@@ -78,6 +78,8 @@
       <div class="panel-title">Nets <span id="net-count"></span>
         <button id="btn-check" title="Check for pads with no net assigned">Check</button>
       </div>
+      <input id="net-search" placeholder="Search nets…" autocomplete="off"
+             style="width:100%;box-sizing:border-box;margin:0 0 6px;padding:4px 7px;background:#1c222b;border:1px solid #2e3742;border-radius:5px;color:#d7dde5;font-size:12px">
       <div id="net-list"></div>
     </aside>
 
@@ -310,23 +312,37 @@
     <div class="dlg-buttons"><button id="help-close" class="primary">Close</button></div>
   </dialog>
 
+  <!-- ======= WELCOME (first launch, empty cache) ======= -->
+  <dialog id="welcome-dialog">
+    <div class="dlg-title">Welcome to PCB RevEng</div>
+    <div class="panel-hint" style="margin-bottom:12px">No saved session found. Start fresh, or load the bundled sample board to explore the workflow.</div>
+    <div class="dlg-buttons">
+      <button id="welcome-new" class="primary">New project</button>
+      <button id="welcome-sample">Load sample project</button>
+    </div>
+  </dialog>
+
   <input type="file" id="file-images" accept="image/*" multiple hidden>
   <input type="file" id="file-project" accept=".json,.pcbrev" hidden>
 </div>
 
-<script src="js/state.js?v=22"></script>
-<script src="js/footprints/core.js?v=22"></script>
-<script src="js/footprints/passives.js?v=22"></script>
-<script src="js/footprints/discrete.js?v=22"></script>
-<script src="js/footprints/connectors.js?v=22"></script>
-<script src="js/footprints/ics.js?v=22"></script>
-<script src="js/footprints/misc.js?v=22"></script>
-<script src="js/view.js?v=22"></script>
-<script src="js/tools.js?v=22"></script>
-<script src="js/keymap.js?v=22"></script>
-<script src="js/resolver.js?v=22"></script>
-<script src="js/netlist.js?v=22"></script>
-<script src="js/ui.js?v=22"></script>
-<script src="js/main.js?v=22"></script>
+<script src="js/state.js?v=25"></script>
+<script src="js/footprints/core.js?v=25"></script>
+<script src="js/footprints/passives.js?v=25"></script>
+<script src="js/footprints/discrete.js?v=25"></script>
+<script src="js/footprints/connectors.js?v=25"></script>
+<script src="js/footprints/ics.js?v=25"></script>
+<script src="js/footprints/misc.js?v=25"></script>
+<script src="js/view.js?v=25"></script>
+<script src="js/tools.js?v=25"></script>
+<script src="js/align.js?v=25"></script>
+<script src="js/keymap.js?v=25"></script>
+<script src="js/resolver.js?v=25"></script>
+<script src="js/netlist.js?v=25"></script>
+<script src="js/ui.js?v=25"></script>
+<script src="js/kicadsearch.js?v=25"></script>
+<script src="js/fpdialog.js?v=25"></script>
+<script src="js/autosave.js?v=25"></script>
+<script src="js/main.js?v=25"></script>
 </body>
 </html>
