@@ -15,7 +15,7 @@ Plain HTML + CSS + vanilla JS. No build step, no CDN, no server-side code.
 
 ![Trace routing close-up](images/traces-closeup.jpg)
 
-![Trace routing close-up](images/xray-closeup.jpg)
+![Trace routing close-up](images/xray-closeup.png)
 
 
 ## Running
