@@ -437,6 +437,11 @@ function wireDialogs(){
     downloadFile("netlist." + f.ext, f.text, f.mime);
   });
   $("#help-close").addEventListener("click", ()=> $("#help-dialog").close());
+  $("#help-sample").addEventListener("click", ()=>{
+    if (!confirm("Load the sample project? This replaces the current board. Unsaved work will be lost.")) return;
+    $("#help-dialog").close();
+    loadDefaultProject();
+  });
 
   $("#btn-keys").addEventListener("click", ()=> UI.openKeysDialog());
   $("#keys-close").addEventListener("click", ()=> $("#keys-dialog").close());

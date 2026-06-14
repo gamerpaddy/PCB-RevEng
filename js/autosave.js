@@ -63,7 +63,7 @@ function loadDefaultProject(overlay, ltext){
     if (ltext) ltext.textContent = "Loading sample project…";
     ensureSampleData().then((text) => {
       if (!text){ if (overlay) overlay.classList.remove("show"); UI.toast("Could not load the sample project file"); resolve(); return; }
-      Autosave.restoring = true; // don't autosave the untouched sample
+      Autosave.restoring = true; // hold off autosave until the project is fully built
       loadProject(text, () => {
         Autosave.restoring = false;
         UI.activeLayerId = State.layers[0]?.id ?? null;
@@ -71,6 +71,9 @@ function loadDefaultProject(overlay, ltext){
         UI.refreshLayerList(); UI.refreshNets(); UI.refreshInspector();
         if (State.layers.length || State.components.length) zoomToFit();
         if (overlay) overlay.classList.remove("show");
+        // adopt the sample (including its images) into the autosave slot, so a
+        // page refresh restores the board with its photos intact
+        markImagesDirty();
         UI.toast("Loaded sample project — use “New” to start your own");
         resolve();
       });

@@ -783,15 +783,22 @@ function splitNetByConnectivity(netId){
       const fpin = fp.pins[pi]; if (!fpin) continue;
       const wp = pinWorldPos(c, fpin);
       const s = State.pxPerMm * (c.scale||1);
-      items.push({ kind:"pin", comp:c, pi, x:wp.x, y:wp.y, r: Math.max(fpin.w, fpin.h)*s/2 });
+      // a through-hole (round) pad reaches every copper layer; an SMD (rect) pad
+      // is copper on its component side only
+      items.push({ kind:"pin", comp:c, pi, x:wp.x, y:wp.y, r: Math.max(fpin.w, fpin.h)*s/2,
+                   thru: fpin.shape === "circle", side: c.side });
     }
   }
   for (const v of State.vias)
-    if (v.netId === netId) items.push({ kind:"via", via:v, x:v.x, y:v.y, r:(v.r||5) });
+    if (v.netId === netId) items.push({ kind:"via", via:v, x:v.x, y:v.y, r:(v.r||5), thru:true, side:null });
   for (const t of State.traces)
-    if (t.netId === netId) items.push({ kind:"trace", trace:t });
+    if (t.netId === netId) items.push({ kind:"trace", trace:t, side:t.side });
 
   if (items.length < 2) return 1;
+
+  // a pad/via only shares copper with something on another side when it is
+  // through-hole (or a via, which bridges every layer)
+  const reaches = (p, side) => p.thru || p.side === side;
 
   const touches = (A, B) => {
     const tA = A.kind === "trace", tB = B.kind === "trace";
@@ -799,12 +806,15 @@ function splitNetByConnectivity(netId){
       return A.trace.side === B.trace.side && tracesTouch(A.trace, B.trace);
     if (tA || tB){
       const tr = tA ? A.trace : B.trace, p = tA ? B : A;
+      if (!reaches(p, tr.side)) return false;   // SMD pad does not touch a trace on a different layer
       const thr = p.r + (tr.width||3)/2 + 2;
       for (let i=0;i<tr.points.length-1;i++)
         if (distToSeg(p.x, p.y, tr.points[i], tr.points[i+1]) <= thr) return true;
       return false;
     }
-    // pad/via to pad/via: vias bridge sides; pins of different sides only meet via a shared hole position
+    // pad/via to pad/via: two SMD pads on different sides never share copper;
+    // a through-hole pad or via bridges layers
+    if (!(A.thru || B.thru) && A.side !== B.side) return false;
     return Math.hypot(A.x-B.x, A.y-B.y) <= A.r + B.r;
   };
 
