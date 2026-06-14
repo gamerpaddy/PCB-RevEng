@@ -36,7 +36,8 @@ body{
 }
 @keyframes ld-rot{to{transform:rotate(360deg);}}
 #loading-text{font-size:14px; color:var(--fg-dim);}
-.brand{font-weight:700; font-size:15px; letter-spacing:.5px; color:var(--fg);}
+.brand{font-weight:700; font-size:15px; letter-spacing:.5px; color:var(--fg); text-decoration:none; cursor:pointer;}
+.brand:hover{opacity:.85;}
 .brand span{color:var(--accent);}
 .tb-group{display:flex; align-items:center; gap:4px;}
 .tb-group + .tb-group{border-left:1px solid var(--line); padding-left:14px;}
