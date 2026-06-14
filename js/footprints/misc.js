@@ -9,7 +9,7 @@ Footprints.register({
       return { label:"Crystal THT", pins:[_pin(1,-2.45,0,{shape:"circle",w:1.4,h:1.4}),_pin(2,2.45,0,{shape:"circle",w:1.4,h:1.4})],
         body:{w:11,h:4.5}, kicad:"Crystal:Crystal_HC49-U_Vertical" };
     if (p.pkg === "HC-49")
-      return { label:"HC-49 SMD", pins:[_pin(1,-4.8,0,{w:2.6,h:3.6}),_pin(2,4.8,0,{w:2.6,h:3.6})],
+      return { label:"HC-49 SMD", pins:[_pin(1,-4.8,0,{w:2.6,h:2.2}),_pin(2,4.8,0,{w:2.6,h:2.2})],
         body:{w:11.4,h:4.7}, kicad:"Crystal:Crystal_SMD_HC49-SD" };
     const d = p.pkg === "3225 SMD" ? [3.2,2.5] : [5.0,3.2];
     const px = d[0]/2 - 0.5;

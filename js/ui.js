@@ -61,8 +61,9 @@ UI.toast = (msg) => {
 };
 
 UI.drawSide = () => $("#draw-side").value;
-/* the copper side new traces/components target — falls back to last copper side in X-ray view */
-UI.copperSide = () => { const d = UI.drawSide(); return d === "xray" ? (Tools.lastCopperSide || "front") : d; };
+/* the copper side new traces/components target (X-ray is now a separate overlay,
+   so the draw side is always a real copper side) */
+UI.copperSide = () => UI.drawSide();
 UI.activeLayer = () => getLayer(UI.activeLayerId);
 UI.layerKeyMode = () => localStorage.getItem("pcbreveng.layerKeyMode") || "switch";
 
@@ -80,24 +81,36 @@ function sideOptionsHtml(current){
   return sides.map(s => `<option value="${s}">${SIDE_LABELS[s] || s}</option>`).join("");
 }
 
-/* rebuild the toolbar draw-side selector for the current layer count (+ X-ray view) */
+/* rebuild the toolbar draw-side selector for the current layer count
+   (X-ray is a separate overlay toggle, not a draw side) */
 UI.rebuildSideSelect = () => {
   const sel = $("#draw-side");
   const cur = sel.value;
-  const opts = [...availableSides(), "xray"];
+  const opts = availableSides();
   sel.innerHTML = opts.map(s =>
     `<option value="${s}">${SIDE_LABELS[s]}${s==="front"?" (F.Cu)":s==="back"?" (B.Cu)":""}</option>`).join("");
   sel.value = opts.includes(cur) ? cur : "front";
+  UI.refreshXrayBtn();
+};
+
+/* show the X-ray overlay toggle only when an X-ray image layer exists */
+UI.refreshXrayBtn = () => {
+  const btn = $("#btn-xray");
+  if (!btn) return;
+  const hasXray = State.layers.some(l => l.side === "xray");
+  btn.style.display = hasXray ? "" : "none";
+  if (!hasXray && View.xray){ View.xray = false; requestRender(); }
+  btn.classList.toggle("active", !!View.xray);
 };
 
 /* switch the active draw side (e.g. when activating an image layer of that side) */
 UI.setDrawSide = (side) => {
-  const ok = side === "xray" || availableSides().includes(side);
-  if (!ok) return;
+  if (side === "xray") return; // X-ray is an overlay toggle, not a draw side
+  if (!availableSides().includes(side)) return;
   if ($("#draw-side").value === side) return;
   $("#draw-side").value = side;
-  if (side !== "xray") Tools.lastCopperSide = side;
-  UI.toast(side === "xray" ? "X-ray view — both sides shown, drawing on " + SIDE_LABELS[UI.copperSide()] : "Drawing on " + SIDE_LABELS[side]);
+  Tools.lastCopperSide = side;
+  UI.toast("Drawing on " + SIDE_LABELS[side]);
   requestRender(); // trace/component visibility follows the draw side
 };
 
@@ -141,7 +154,6 @@ UI.refreshLayerList = () => {
           <input type="checkbox" class="mir" ${l.mirror?"checked":""}>⇋</label>
         <label title="Lock layer against accidental dragging"><input type="checkbox" class="lock" ${l.locked?"checked":""}>🔒</label>
         <button class="align2" title="4-point align: click 4 reference features, then the same 4 features on this layer (corrects offset, rotation, scale and skew)">Align</button>
-        <button class="deskew" title="Deskew / straighten: click two lines that should be parallel &amp; axis-aligned (board edges) to remove perspective and rotation">Deskew</button>
       </div>
       <input type="range" class="op" min="0" max="100" value="${Math.round(l.opacity*100)}" title="Opacity">`;
     card.querySelector(".side-sel").value = l.side;
@@ -184,13 +196,10 @@ UI.refreshLayerList = () => {
       UI.activeLayerId = l.id; UI.refreshLayerList();
       startPointAlign();
     });
-    card.querySelector(".deskew").addEventListener("click", ()=>{
-      UI.activeLayerId = l.id; UI.refreshLayerList();
-      startLineDeskew();
-    });
     card.querySelector(".op").addEventListener("input", (e)=>{ l.opacity = e.target.value/100; requestRender(); });
     list.appendChild(card);
   }
+  UI.refreshXrayBtn();
 };
 
 /* ---------------- net list ---------------- */
@@ -296,11 +305,15 @@ UI.inspectMultiTraces = () => {
   sec.className = "insp-section";
   const nets = [...new Set(UI.traceSel.map(t => t.netId))];
   const netLabel = nets.length === 1 ? (getNet(nets[0])?.name || "(none)") : nets.length + " nets";
+  // common width across the selection (blank if they differ, so ↑ starts from a sane value)
+  const widths = [...new Set(UI.traceSel.map(t => t.width || 3))];
+  const wVal = widths.length === 1 ? widths[0] : "";
+  const wPlace = widths.length === 1 ? "px" : "mixed";
   sec.innerHTML = `
     <div class="insp-title">${UI.traceSel.length} trace segments</div>
     <div class="panel-hint">Net: ${netLabel}</div>
     ${inspRow("Set net", `<span style="display:flex;gap:4px;flex:1;min-width:0"><input id="i-tsnet" placeholder="net for all" style="flex:1;min-width:0"><button id="i-tsgen" title="Generate a new unique net name">⊕</button></span>`)}
-    ${inspRow("Width", `<input id="i-tsw" type="number" step="0.5" min="0.5" placeholder="px"> px`)}
+    ${inspRow("Width", `<input id="i-tsw" type="number" step="0.5" min="0.5" value="${wVal}" placeholder="${wPlace}"> px`)}
     <div class="insp-actions">
       <button id="i-tsdel" class="danger">Delete all</button>
       <button id="i-tsclear">Clear selection</button>
@@ -328,6 +341,26 @@ UI.inspectMultiTraces = () => {
   sec.querySelector("#i-tsclear").addEventListener("click", ()=>{ UI.traceSel = []; UI.refreshInspector(); requestRender(); });
 };
 
+/* footprints that expose a "polarized" param (caps) → optional capability */
+function compPolarParam(c){
+  const def = c && getFootprintDef(c.fpId);
+  return (def && def.params.find(p => p.key === "polarized")) || null;
+}
+function compIsPolarized(c){
+  const prm = compPolarParam(c); if (!prm) return false;
+  return c.fpParams.polarized !== undefined ? !!c.fpParams.polarized : !!prm.def;
+}
+function setCompPolarized(c, val){
+  if (!compPolarParam(c)) return;
+  pushUndo((val ? "polarize " : "unpolarize ") + c.ref);
+  c.fpParams = {...c.fpParams, polarized: !!val};
+  c._fp = null;
+  const fp = compFootprint(c);                 // sync +/- pin names to the new state
+  for (let i=0; i<c.pins.length; i++) if (fp.pins[i]) c.pins[i].name = fp.pins[i].name;
+  if (UI.sel && UI.sel.comp === c) UI.refreshInspector();
+  UI.refreshNets(); requestRender();
+}
+
 UI.inspectComponent = (c, selPin) => {
   const box = $("#inspector");
   const fp = compFootprint(c);
@@ -347,6 +380,7 @@ UI.inspectComponent = (c, selPin) => {
     ${inspRow("Side", `<select id="i-side"><option value="front">Front</option><option value="back">Back</option></select>`)}
     ${inspRow("Rotation", `<input id="i-rot" type="number" step="any" value="${c.rot.toFixed(1)}"> °`)}
     ${inspRow("Scale ×", `<input id="i-scale" type="number" step="0.05" min="0.1" value="${(c.scale||1).toFixed(2)}">`)}
+    ${compPolarParam(c) ? inspRow("Polarized", `<label style="display:flex;align-items:center;gap:6px;width:auto;color:#aab4c2;font-size:11px"><input type="checkbox" id="i-polar" ${compIsPolarized(c)?"checked":""}>+ marker on pin 1</label>`) : ""}
     <div class="insp-actions">
       <button id="i-fp">Change footprint…</button>
       <button id="i-dup">Duplicate</button>
@@ -381,6 +415,8 @@ UI.inspectComponent = (c, selPin) => {
   sec.querySelector("#i-side").addEventListener("change", e => commit(()=>{ c.side = e.target.value; }));
   sec.querySelector("#i-rot").addEventListener("change", e => commit(()=>{ c.rot = parseFloat(e.target.value)||0; }));
   sec.querySelector("#i-scale").addEventListener("change", e => commit(()=>{ c.scale = Math.max(0.1, parseFloat(e.target.value)||1); }));
+  const polCb = sec.querySelector("#i-polar");
+  if (polCb) polCb.addEventListener("change", e => setCompPolarized(c, e.target.checked));
   sec.querySelector("#i-del").addEventListener("click", deleteSelection);
   sec.querySelector("#i-dup").addEventListener("click", duplicateSelection);
   sec.querySelector("#i-fp").addEventListener("click", ()=> UI.openFootprintDialog(c));
@@ -547,7 +583,7 @@ UI.inspectTrace = (t) => {
 function escAttr(s){ return String(s==null?"":s).replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;"); }
 
 /* ---------------- footprint dialog ---------------- */
-const FPD = { catId: "dip", params: {}, editComp: null };
+const FPD = { catId: "dip", params: {}, editComp: null, paramCache: {} };
 
 /* remember the last category/params/value/part across opens */
 function fpSaveLast(){
@@ -594,16 +630,52 @@ UI.openFootprintDialog = (editComp) => {
 function buildFpCats(){
   const box = $("#fp-cats");
   box.innerHTML = "";
-  for (const def of Footprints.catalog){
+  Footprints.catalog.forEach((def, i) => {
     const b = document.createElement("button");
-    b.textContent = def.name;
+    // quick-select keys: 1–9 first nine, Shift+1–9 next nine, Ctrl+1–9 the rest
+    const key = i < 9 ? String(i+1) : i < 18 ? "⇧" + (i-8) : i < 27 ? "^" + (i-17) : "";
+    b.innerHTML = (key ? `<kbd class="catkey">${key}</kbd>` : "") + escAttr(def.name);
     b.classList.toggle("active", def.id === FPD.catId);
-    b.addEventListener("click", ()=>{
-      FPD.catId = def.id; FPD.params = {};
-      buildFpCats(); buildFpParams();
-    });
+    b.addEventListener("click", ()=>{ selectFpCat(def.id); });
     box.appendChild(b);
+  });
+  // keep the selected category visible (e.g. when picked via number-key hotkey)
+  box.querySelector("button.active")?.scrollIntoView({ block: "nearest" });
+}
+
+/* pick a footprint category by id (shared by click + number-key shortcuts) */
+function selectFpCat(id){
+  if (!getFootprintDef(id) || id === FPD.catId) return;
+  // remember the params of the category we're leaving, restore those of the one we enter
+  FPD.paramCache[FPD.catId] = {...FPD.params};
+  FPD.catId = id;
+  FPD.params = FPD.paramCache[id] ? {...FPD.paramCache[id]} : {};
+  buildFpCats(); buildFpParams();
+}
+
+/* keyboard category shortcuts while the footprint dialog is open:
+   1–9 → first nine, Shift+1–9 → next nine, Ctrl+1–9 → the rest */
+function fpDialogKey(e){
+  // Enter (from anywhere, including the text fields) = activate the Place / Apply button
+  if (e.key === "Enter" && !e.altKey && !e.ctrlKey && !e.metaKey){
+    e.preventDefault();
+    UI.confirmFootprint();
+    return;
   }
+  if (e.altKey || e.metaKey) return;
+  if (e.ctrlKey && e.shiftKey) return; // reserve combined modifiers
+  // don't steal digits the user is typing into ref/value/part/kicad fields
+  const t = e.target;
+  if (t && (t.tagName === "INPUT" || t.tagName === "SELECT" || t.tagName === "TEXTAREA")) return;
+  // key off the physical digit (e.code), not e.key — with Shift held, e.key is the
+  // shifted symbol (!, /, …), which also triggers Firefox's "/" quick-find
+  const m = /^(?:Digit|Numpad)([1-9])$/.exec(e.code);
+  if (!m) return;
+  const base = e.ctrlKey ? 18 : e.shiftKey ? 9 : 0;
+  const def = Footprints.catalog[base + (+m[1] - 1)];
+  if (!def) return;
+  e.preventDefault(); // note: Ctrl+1–9 is Firefox's tab-switch and may not be suppressible
+  selectFpCat(def.id);
 }
 
 UI.wireFpSearch = () => {}; // search field removed (it stole the “C” keypress)
@@ -612,11 +684,14 @@ function buildFpParams(){
   const def = getFootprintDef(FPD.catId);
   const box = $("#fp-params");
   box.innerHTML = "";
+  const read = (prm, inp) => prm.type === "bool" ? inp.checked
+                           : prm.type === "int" ? (parseInt(inp.value,10)||prm.def)
+                           : inp.value;
   for (const prm of def.params){
     const label = document.createElement("label");
-    label.textContent = prm.label;
     let inp;
     if (prm.type === "select"){
+      label.textContent = prm.label;
       inp = document.createElement("select");
       for (const o of prm.options){
         const opt = document.createElement("option");
@@ -624,15 +699,32 @@ function buildFpParams(){
         inp.appendChild(opt);
       }
       inp.value = FPD.params[prm.key] !== undefined ? FPD.params[prm.key] : prm.def;
+    } else if (prm.type === "bool"){
+      label.classList.add("fp-check");
+      inp = document.createElement("input");
+      inp.type = "checkbox";
+      inp.checked = FPD.params[prm.key] !== undefined ? !!FPD.params[prm.key] : !!prm.def;
+      label.appendChild(inp);
+      label.appendChild(document.createTextNode(" " + prm.label));
     } else {
+      label.textContent = prm.label;
       inp = document.createElement("input");
       inp.type = "number"; inp.min = prm.min; inp.max = prm.max; inp.step = prm.step;
       inp.value = FPD.params[prm.key] !== undefined ? FPD.params[prm.key] : prm.def;
     }
-    inp.addEventListener("input", ()=>{ FPD.params[prm.key] = prm.type==="int" ? parseInt(inp.value,10)||prm.def : inp.value; drawFpPreview(); });
-    label.appendChild(inp);
+    const evt = prm.type === "bool" ? "change" : "input";
+    inp.addEventListener(evt, ()=>{ FPD.params[prm.key] = read(prm, inp); drawFpPreview(); });
+    if (prm.type !== "bool") label.appendChild(inp);
     box.appendChild(label);
-    FPD.params[prm.key] = prm.type==="int" ? parseInt(inp.value,10)||prm.def : inp.value;
+    FPD.params[prm.key] = read(prm, inp);
+  }
+  // R/C/L chip: spell out the modifier-click → refdes mapping right in the dialog
+  if (FPD.catId === "chip2"){
+    const note = document.createElement("div");
+    note.className = "fp-rcl-note";
+    note.innerHTML = "Reference set by how you click the board:" +
+      "<span><b>click</b> = R</span><span><kbd>Shift</kbd>+click = C</span><span><kbd>Ctrl</kbd>+click = L</span>";
+    box.appendChild(note);
   }
   drawFpPreview();
 }
@@ -709,7 +801,10 @@ UI.confirmFootprint = () => {
     Tools.ghostFp = fp;
     Tools.ghostSide = UI.copperSide() === "back" ? "back" : "front";
     setTool("component");
-    UI.setHint("Click on the board to place " + fp.label + " — R rotate, B flip side, Esc cancel");
+    if (vals.fpId === "chip2")
+      UI.setHint("Place " + fp.label + " — click = R · Shift-click = C · Ctrl-click = L · R rotate, B flip side, Esc cancel");
+    else
+      UI.setHint("Click on the board to place " + fp.label + " — R rotate, B flip side, Esc cancel");
   }
   // clear for next time
   $("#fp-ref").value = ""; $("#fp-value").value = ""; $("#fp-part").value = ""; $("#fp-kicad").value = "";
@@ -883,8 +978,10 @@ UI.openOverlapDialog = (conflicts) => {
   const box = $("#overlap-list");
   box.innerHTML = conflicts.map(c => `<div class="hk"><span>${c.text}</span></div>`).join("");
   const dlg = $("#overlap-dialog");
+  const clearMarks = ()=>{ View.overlapMarks = null; requestRender(); };
+  dlg.addEventListener("close", clearMarks, { once:true }); // also covers Esc-dismiss
   $("#overlap-merge").onclick = ()=>{
-    dlg.close();
+    dlg.close(); clearMarks();
     pushUndo("merge overlapping nets");
     let merged = 0, blocked = 0;
     for (const c of conflicts){
@@ -896,11 +993,11 @@ UI.openOverlapDialog = (conflicts) => {
     UI.refreshNets(); UI.refreshInspector(); requestRender();
   };
   $("#overlap-undo").onclick = ()=>{
-    dlg.close();
+    dlg.close(); clearMarks();
     if (undo()) afterHistory();
     UI.toast("Move undone");
   };
-  $("#overlap-keep").onclick = ()=> dlg.close();
+  $("#overlap-keep").onclick = ()=>{ dlg.close(); clearMarks(); };
   dlg.showModal();
 };
 

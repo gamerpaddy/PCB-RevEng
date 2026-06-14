@@ -72,6 +72,11 @@ function drawFootprintShape(ctx, fp, pxPerMm, opts){
       ctx.fillRect(x-w/2,y-h/2,w,h);
     }
   }
+  // overlay symbols (diode bar/triangle, polarity +) drawn on the body
+  ctx.globalAlpha = (opts.alpha!==undefined?opts.alpha:1);
+  if (fp.symbol === "diode") drawDiodeSymbol(ctx, fp, s, opts);
+  if (fp.polar) drawPolaritySymbol(ctx, fp, s, opts);
+
   // pin-1 marker
   const p1 = fp.pins[0];
   if (p1){
@@ -82,4 +87,43 @@ function drawFootprintShape(ctx, fp, pxPerMm, opts){
     ctx.fill();
   }
   ctx.globalAlpha = 1;
+}
+
+/* diode schematic glyph (triangle → cathode bar) drawn between anode & cathode pads.
+   Cathode = pin named "K" (else pin 1); anode = pin named "A" (else pin 2). */
+function drawDiodeSymbol(ctx, fp, s, opts){
+  const pins = fp.pins; if (pins.length < 2) return;
+  const k = pins.find(p => p.name === "K") || pins[0];
+  const a = pins.find(p => p.name === "A") || pins[1];
+  const cx = (k.xmm + a.xmm)/2, cy = (k.ymm + a.ymm)/2;
+  let dx = k.xmm - a.xmm, dy = k.ymm - a.ymm;          // toward cathode
+  const len = Math.hypot(dx, dy) || 1; dx/=len; dy/=len;
+  const px = -dy, py = dx;                              // perpendicular
+  const r = Math.min(fp.body.w, fp.body.h) * 0.34;     // glyph half-size (mm)
+  const baseX = cx - dx*r, baseY = cy - dy*r;          // triangle base (anode side)
+  const apX = cx + dx*r,  apY = cy + dy*r;             // triangle apex (cathode side)
+  ctx.strokeStyle = ctx.fillStyle = (opts.symbol || "#5ec8ff");
+  ctx.lineWidth = Math.max(1.3/(opts.zoom||1), 1);
+  ctx.beginPath();                                     // filled triangle
+  ctx.moveTo((baseX + px*r)*s, (baseY + py*r)*s);
+  ctx.lineTo((baseX - px*r)*s, (baseY - py*r)*s);
+  ctx.lineTo(apX*s, apY*s);
+  ctx.closePath(); ctx.fill();
+  ctx.beginPath();                                     // cathode bar at apex
+  ctx.moveTo((apX + px*r)*s, (apY + py*r)*s);
+  ctx.lineTo((apX - px*r)*s, (apY - py*r)*s);
+  ctx.stroke();
+}
+
+/* polarity "+" mark placed by the pin-1 (red marker) pad, nudged toward the body centre */
+function drawPolaritySymbol(ctx, fp, s, opts){
+  const p1 = fp.pins[0]; if (!p1) return;
+  const cx = p1.xmm * 0.7, cy = p1.ymm * 0.7;          // between pin 1 and centre
+  const r = Math.min(fp.body.w, fp.body.h) * 0.09 + 0.18;
+  ctx.strokeStyle = (opts.symbol || "#ff8a4d");
+  ctx.lineWidth = Math.max(1.4/(opts.zoom||1), 1.1);
+  ctx.beginPath();
+  ctx.moveTo((cx - r)*s, cy*s); ctx.lineTo((cx + r)*s, cy*s);
+  ctx.moveTo(cx*s, (cy - r)*s); ctx.lineTo(cx*s, (cy + r)*s);
+  ctx.stroke();
 }

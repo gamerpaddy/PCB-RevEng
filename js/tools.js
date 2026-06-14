@@ -17,6 +17,7 @@ const Tools = {
   // align
   alignPts: null,      // 4 ref pts + 4 layer pts
   alignLayer: null,    // layer captured when 4-point align started (the one that moves)
+  alignReturnId: null, // layer id to re-activate once a 4-point align finishes
   deskewPts: null,     // 2-line deskew clicks
   deskewLayer: null,
   // freestyle pin placement
@@ -53,6 +54,7 @@ function setTool(name){
   Tools.measureA = Tools.measureB = null;
   Tools.alignPts = null;
   Tools.alignLayer = null;
+  Tools.alignReturnId = null;
   Tools.deskewPts = null;
   Tools.deskewLayer = null;
   Tools.addPinFor = null;
@@ -147,7 +149,9 @@ function onPointerUp(e){
   }
   if (d.kind === "move-comp" || d.kind === "move-via" || d.kind === "move-layer" || d.kind === "rot-layer" || d.kind === "move-vert"){
     if (!d.moved) Undo.stack.pop(); // no-op drag, drop the snapshot
+    if (d.kind === "move-vert" && d.moved && d.snap && d.snap.attach) connectVertToSnap(d.trace, d.snap);
     Tools.dragVert = null;
+    Tools.snap = null;
     UI.refreshInspector();
     if (d.kind === "move-comp" && d.moved) checkMoveOverlaps(d.comp); // only after the move ends
   }
@@ -174,9 +178,14 @@ function handleDrag(pt, w, e){
       break;
     case "move-vert": {
       d.moved = true;
-      // free movement — anchors follow the cursor exactly (no grid/conductor snap)
-      d.trace.points[d.i].x = w.x;
-      d.trace.points[d.i].y = w.y;
+      // snap the anchor onto a nearby pad/via/other-trace so it can connect
+      let snap = snapToConductor(w.x, w.y, d.trace.side);
+      // don't let an anchor snap onto its own trace
+      if (snap && snap.attach && snap.attach.type === "trace" && snap.attach.trace === d.trace) snap = null;
+      d.snap = snap;
+      Tools.snap = snap; // white ring indicator
+      d.trace.points[d.i].x = snap ? snap.x : w.x;
+      d.trace.points[d.i].y = snap ? snap.y : w.y;
       break;
     }
     case "move-layer":
@@ -364,18 +373,20 @@ function checkMoveOverlaps(comp){
   const s = State.pxPerMm * (comp.scale||1);
   const conflicts = [];
   const seenPairs = new Set();
+  const thru = (pin) => pin.shape === "circle"; // through-hole pads reach every copper side
   for (let pi=0; pi<comp.pins.length; pi++){
     const myNet = comp.pins[pi].netId;
     if (!myNet) continue;
     const fpin = fp.pins[pi]; if (!fpin) continue;
     const wp = pinWorldPos(comp, fpin);
     const myR = Math.max(fpin.w, fpin.h)*s/2;
+    const myThru = thru(fpin);
     const hitNet = (otherNet, label) => {
       if (!otherNet || otherNet === myNet) return;
       const key = Math.min(myNet,otherNet)+"-"+Math.max(myNet,otherNet);
       if (seenPairs.has(key)) return;
       seenPairs.add(key);
-      conflicts.push({ a:myNet, b:otherNet,
+      conflicts.push({ a:myNet, b:otherNet, pos:{x:wp.x, y:wp.y},
         text: comp.ref + "." + comp.pins[pi].num + " (" + (getNet(myNet)?.name||"?") + ")  ⟂  " + label + " (" + (getNet(otherNet)?.name||"?") + ")" });
     };
     for (const o of State.components){
@@ -384,6 +395,8 @@ function checkMoveOverlaps(comp){
       const os = State.pxPerMm * (o.scale||1);
       for (let oi=0; oi<o.pins.length; oi++){
         const opin = ofp.pins[oi]; if (!opin) continue;
+        // copper only touches if they share a side, or either pad is through-hole
+        if (!(myThru || thru(opin) || o.side === comp.side)) continue;
         const op = pinWorldPos(o, opin);
         if (Math.hypot(wp.x-op.x, wp.y-op.y) <= myR + Math.max(opin.w,opin.h)*os/2)
           hitNet(o.pins[oi].netId, o.ref + "." + o.pins[oi].num);
@@ -391,11 +404,15 @@ function checkMoveOverlaps(comp){
     }
     for (const v of State.vias)
       if (Math.hypot(wp.x-v.x, wp.y-v.y) <= myR + (v.r||5)) hitNet(v.netId, "via");
-    for (const t of State.traces)
+    for (const t of State.traces){
+      // a trace is copper on a single side — ignore unless the pad reaches that side
+      if (!(myThru || t.side === comp.side)) continue;
       for (let k=0;k<t.points.length-1;k++)
         if (distToSeg(wp.x,wp.y,t.points[k],t.points[k+1]) <= myR + (t.width||3)/2){ hitNet(t.netId, "trace"); break; }
+    }
   }
-  if (conflicts.length) UI.openOverlapDialog(conflicts);
+  View.overlapMarks = conflicts.length ? conflicts.map(c => c.pos) : null;
+  if (conflicts.length){ requestRender(); UI.openOverlapDialog(conflicts); }
 }
 
 /* ---------------- checker ---------------- */
@@ -447,6 +464,10 @@ function componentDown(w, e){
     // remember the typed prefix so subsequent placements continue it (D1 → D2, not R11)
     const m = /^([A-Za-z]+)/.exec(ref);
     if (m) p.refPrefix = m[1];
+  } else if (p.fpId === "chip2"){
+    // R/C/L chip: click = R, Shift = C, Ctrl = L — modifier decides the refdes prefix
+    const prefix = e.ctrlKey ? "L" : e.shiftKey ? "C" : "R";
+    ref = nextRef(prefix);
   } else {
     ref = nextRef(p.refPrefix || refPrefixFor(p.fpId, p.value));
   }
@@ -571,6 +592,29 @@ function applyAttach(snap, netId){
   else if (a.type === "trace") a.trace.netId = netId;
 }
 
+/* connect a dragged trace anchor that was dropped on a pad/via/trace.
+   Joins nets (with the usual protected-net checks) so the anchor really wires up. */
+function connectVertToSnap(trace, snap){
+  const tNet = trace.netId, sNet = snap.netId;
+  let net = tNet;
+  if (tNet && sNet && tNet !== sNet){
+    const merged = mergeNetsChecked(tNet, sNet);
+    if (merged === MERGE_DECLINED) { UI.toast("Anchor moved — nets not merged"); pruneNets(); UI.refreshNets(); requestRender(); return; }
+    net = merged === null ? tNet : merged; // null = both protected, keep trace's net
+    if (merged === null) UI.toast("⚠ Protected nets not merged");
+  } else {
+    net = tNet || sNet || createNet().id;
+  }
+  trace.netId = net;
+  applyAttach(snap, net);
+  pruneNets(); UI.refreshNets();
+  const where = snap.attach.type === "pin"
+    ? snap.attach.comp.ref + "." + snap.attach.comp.pins[snap.attach.pinIdx].num
+    : snap.attach.type === "via" ? "via" : "trace";
+  UI.toast("Anchor connected to " + where + " → " + (getNet(net)?.name || "net"));
+  requestRender();
+}
+
 function cancelTrace(){
   Tools.tracePts = null; Tools.traceStartSnap = null;
   UI.setHint(TOOL_HINTS.trace);
@@ -631,11 +675,11 @@ function alignDown(w, pt, e){
     Tools.alignPts.push({x:w.x, y:w.y, thumb: captureAlignThumb(pt)});
     const n = Tools.alignPts.length;
     if (n < 4){
-      UI.setHint("Layer “" + target.name + "” — feature " + (n+1) + " of 4 (spread them towards the corners)");
+      UI.setHint("STEP 1/2 · Layer “" + target.name + "” — feature " + (n+1) + " of 4 (spread them towards the corners)");
     } else if (n === 4){
-      UI.setHint("Now click where those 4 features BELONG (same order, on the board / aligned layer) — destination 1 of 4");
+      UI.setHint("STEP 2/2 · Switch to the base layer, then click where those 4 features BELONG (same order) — destination 1 of 4");
     } else if (n < 8){
-      UI.setHint("Destination point " + (n-3) + " of 4");
+      UI.setHint("STEP 2/2 · destination point " + (n-3) + " of 4");
     }
     if (n === 8) applyPointAlign(target);
     requestRender();
@@ -654,13 +698,36 @@ function alignDown(w, pt, e){
   }
 }
 
+/* count placed annotations sitting on a layer's side — re-warping the image would
+   leave these where they are and misalign them against the moved photo */
+function layerAnnotationCount(layer){
+  if (!layer) return 0;
+  const side = layer.side;
+  let n = 0;
+  for (const c of State.components) if (c.side === side) n++;
+  for (const t of State.traces)     if (t.side === side) n++;
+  return n;
+}
+/* returns true if it's OK to proceed (no elements, or user accepted the risk) */
+function confirmRewarpIfPopulated(layer, action){
+  const n = layerAnnotationCount(layer);
+  if (!n) return true;
+  return confirm(
+    "Layer “" + layer.name + "” already has " + n + " element" + (n===1?"":"s") +
+    " (components/traces) placed on its side.\n\n" +
+    action + " moves the image but NOT those elements, so they may no longer line up.\n\n" +
+    "OK = go ahead and risk misalignment\nCancel = abort");
+}
+
 function startPointAlign(){
   const layer = UI.activeLayer();
   if (!layer){ UI.toast("Select the layer to align first"); return; }
+  if (!confirmRewarpIfPopulated(layer, "Aligning")) return;
   setTool("align");
   Tools.alignPts = [];
   Tools.alignLayer = layer;   // lock the target now; switching active layers mid-procedure won't change it
-  UI.setHint("4-point align: click feature 1 of 4 ON layer “" + layer.name + "” (this is the image that will move)");
+  Tools.alignReturnId = layer.id; // switch back to this layer once alignment is done
+  UI.setHint("STEP 1/2 · 4-point align: click feature 1 of 4 ON layer “" + layer.name + "” (this is the image that will move)");
 }
 
 /* least-squares affine mapping src[i] → dst[i]; returns {a,b,c,d,e,f} (canvas convention) or null */
@@ -714,9 +781,15 @@ function applyPointAlign(layer){
     const p = mov[i];
     err = Math.max(err, Math.hypot(T.a*p.x+T.c*p.y+T.e - ref[i].x, T.b*p.x+T.d*p.y+T.f - ref[i].y));
   }
+  // jump back to the layer that was aligned (the user had switched to the base layer for step 2)
+  if (Tools.alignReturnId != null && getLayer(Tools.alignReturnId)){
+    UI.activeLayerId = Tools.alignReturnId;
+    UI.setDrawSide(getLayer(Tools.alignReturnId).side);
+  }
+  Tools.alignReturnId = null;
   UI.refreshLayerList();
   UI.setHint(TOOL_HINTS.align);
-  UI.toast("Layer aligned (skew corrected, max residual " + err.toFixed(1) + " px)");
+  UI.toast("Layer aligned (skew corrected, max residual " + err.toFixed(1) + " px) — back on “" + layer.name + "”");
   requestRender();
 }
 
@@ -799,6 +872,7 @@ function warpImageMesh(srcImg, H, outW, outH){
 function startLineDeskew(){
   const layer = UI.activeLayer();
   if (!layer || !layer.img){ UI.toast("Select an image layer first"); return; }
+  if (!confirmRewarpIfPopulated(layer, "Deskewing")) return;
   setTool("align");
   Tools.deskewPts = [];
   Tools.deskewLayer = layer;

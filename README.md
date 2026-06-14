@@ -35,10 +35,15 @@ want to keep or move between machines.
    features **on that layer** (each click is numbered and shows a thumbnail of what
    you clicked), then click the four matching positions on the reference - a side
    strip shows the source thumbnails so you know which feature to match next.
-   Offset, rotation, scale **and skew** are solved by least squares. Or use the
-   **Deskew** button: click two lines that should be parallel & axis-aligned (e.g.
-   two board edges) and the image is straightened and perspective-corrected (the
-   correction is baked into the layer bitmap). Use the opacity sliders to onion-skin
+   Offset, rotation, scale **and skew** are solved by least squares. After step 2
+   (clicking the destinations on the base layer) the active layer automatically
+   switches back to the layer you just aligned. Tip: only the base layer needs the
+   **Deskew** button (next to *Calibrate*): click two lines that should be parallel
+   & axis-aligned (e.g. two board edges) and the image is straightened and
+   perspective-corrected (the correction is baked into the layer bitmap); every other
+   layer can then just be 4-point-aligned to it. Aligning or deskewing a layer that
+   already has components/traces on its side prompts a warning first, since the image
+   moves but the placed elements don't. Use the opacity sliders to onion-skin
    layers while aligning. Number keys 1…0 switch the view to a layer
    (Shift = +10), or toggle visibility - pick the behavior in *Board / display*.
 3. **Calibrate**  - Click calibrate in the left toolbar, drag along a known dimension (e.g. a 2.54 mm header pitch
@@ -48,10 +53,13 @@ want to keep or move between machines.
    chip R-C / headers / BGA-grid / test points,
    plus a **Freestyle** footprint: place the body anywhere (even off-board) and drop
    its pins one by one with “+ Add pins” in the Inspector; each freestyle pad's type
-(THT / SMD) and size are editable per-pin. The selector has a
-   quick-search box (type to filter, ↑/↓ to pick, Enter to place), and the **Ω**
-   button next to Value decodes SMD resistor codes (103, 01C, 4R7, 4k7…) or
-   computes THT color bands.
+(THT / SMD) and size are editable per-pin. In the selector, **1–9** jump to the
+   first nine categories and **Shift+1–9** to the next nine (the number is shown on
+   each category button). The **Ω** button next to Value decodes SMD resistor codes
+   (103, 01C, 4R7, 4k7…) or computes THT color bands.
+   For the **R / C / L chip** the click modifier sets the refdes prefix:
+   click = **R**, Shift-click = **C**, Ctrl-click = **L** (diodes live in MELF / SOD
+   packages, so they're separate categories rather than a chip variant).
    Assign reference, value, part name and KiCad footprint; `R` rotates, `B` flips side.
    Pin names and per-pin nets are editable in the Inspector.
 5. **Trace** (`W`) - click a pad, follow the copper, click the destination pad.
@@ -91,9 +99,10 @@ the component body offers duplicate / rotate / flip / lock / delete. Each net ha
 dark colours get a light outline so they stay visible). Selecting or hovering a net
 **dims everything else** so it stands out; double-click a pad/via/trace to open the
 net popup and press **1-9** to instantly pick a common net (GND, VCC, …). Vias and
-PTHs always draw on top of pads so they stay visible. An **X-ray** view (in the
-"Draw on" selector) shows components on *both* sides at once over an uploaded X-ray
-image; drawing still targets the last copper side you used.
+PTHs always draw on top of pads so they stay visible. The **X-ray** toggle (a knob
+next to *Mask*, shown only once a layer's side is set to *X-ray*) overlays components
+and traces from *both* sides at once over an uploaded X-ray image; it is independent
+of *Draw on*, so drawing still targets the copper side you have selected.
 
 **Nets & protection.** Power nets (GND, VCC, VDD, VSS, +3V3, +5V…) are *protected
 prefabs* (🛡): they can't be renamed and never get silently merged into a signal

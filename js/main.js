@@ -37,6 +37,30 @@ function idbDel(key){
 }
 
 function markDirty(){ Autosave.dirty = true; }
+
+/* first visit (empty cache): load the bundled sample project so the site isn't blank */
+function loadDefaultProject(overlay, ltext){
+  return new Promise((resolve) => {
+    if (overlay) overlay.classList.add("show");
+    if (ltext) ltext.textContent = "Loading sample project…";
+    fetch("sampleproject.pcbrev.json?v=22")
+      .then(r => r.ok ? r.text() : Promise.reject(new Error("fetch " + r.status)))
+      .then(text => {
+        Autosave.restoring = true; // don't autosave the untouched sample
+        loadProject(text, () => {
+          Autosave.restoring = false;
+          UI.activeLayerId = State.layers[0]?.id ?? null;
+          UI.rebuildSideSelect(); syncSettings();
+          UI.refreshLayerList(); UI.refreshNets(); UI.refreshInspector();
+          if (State.layers.length || State.components.length) zoomToFit();
+          if (overlay) overlay.classList.remove("show");
+          UI.toast("Loaded sample project — use “New” to start your own");
+          resolve();
+        });
+      })
+      .catch(() => { if (overlay) overlay.classList.remove("show"); resolve(); });
+  });
+}
 /* heavy image data changed (layer added/removed/edited) — re-save images once */
 function markImagesDirty(){ Autosave.imagesDirty = true; Autosave.dirty = true; }
 
@@ -112,7 +136,9 @@ async function autosaveInit(){
           UI.toast("Session restored (saved " + relTime(Autosave.lastSaved) + ") — use “New” to start fresh");
       });
     } else {
+      // no saved session → let the user choose: empty project or the bundled sample
       updateSaveStatus();
+      $("#welcome-dialog").showModal();
     }
   } catch (e){ if (overlay) overlay.classList.remove("show"); updateSaveStatus(); }
   // periodic save while dirty (uses idle time so it never blocks interaction)
@@ -191,11 +217,13 @@ function wireToolbar(){
   $("#btn-export").addEventListener("click", ()=> UI.openExport());
   $("#btn-add-layer").addEventListener("click", ()=> $("#file-images").click());
   $("#draw-side").addEventListener("change", e => {
-    if (e.target.value !== "xray") Tools.lastCopperSide = e.target.value;
+    Tools.lastCopperSide = e.target.value;
     requestRender(); // visibility follows active side
   });
+  $("#btn-xray").addEventListener("click", toggleXray);
   $("#btn-measure").addEventListener("click", ()=> setTool("measure"));
   $("#btn-calibrate").addEventListener("click", ()=> setTool("calibrate"));
+  $("#btn-deskew").addEventListener("click", ()=> startLineDeskew());
   $("#btn-history").addEventListener("click", ()=> UI.openHistory());
   $("#btn-check").addEventListener("click", ()=> UI.openChecker());
 }
@@ -216,6 +244,16 @@ function toggleMask(){
   View.mask = !View.mask;
   $("#btn-mask").classList.toggle("active", View.mask);
   UI.toast(View.mask ? "Coverage mask ON — red tint = no components placed there yet" : "Coverage mask off");
+  requestRender();
+}
+
+function toggleXray(){
+  if (!State.layers.some(l => l.side === "xray")){
+    UI.toast("Add an X-ray image layer first (set a layer's side to X-ray)"); return;
+  }
+  View.xray = !View.xray;
+  $("#btn-xray").classList.toggle("active", View.xray);
+  UI.toast(View.xray ? "X-ray overlay ON — components & traces from BOTH sides shown" : "X-ray overlay off");
   requestRender();
 }
 
@@ -343,9 +381,22 @@ function wireCanvas(){
   cv.addEventListener("pointermove", onPointerMove);
   cv.addEventListener("pointerup", onPointerUp);
   cv.addEventListener("dblclick", onDoubleClick);
+  let lastPlaceRC = 0; // timestamp of last right-click while placing (double = cancel)
   cv.addEventListener("contextmenu", e => {
     e.preventDefault();
     if (Tools.name === "trace" && Tools.tracePts){ finishTrace(); return; }
+    // while a component is armed for placement, a double right-click cancels it
+    if (Tools.name === "component" && Tools.pending){
+      const now = Date.now();
+      if (now - lastPlaceRC < 450){
+        lastPlaceRC = 0;
+        UI.hideContextMenu();
+        setTool("select");
+        UI.toast("Placement cancelled");
+        return;
+      }
+      lastPlaceRC = now;
+    }
     const pt = canvasPoint(e);
     const w = screenToWorld(pt.x, pt.y);
     showCanvasContextMenu(e.clientX, e.clientY, w);
@@ -409,6 +460,7 @@ function showCanvasContextMenu(cx, cy, w){
     items.push({ label:"Rotate 90°", action:()=>rotateSelection(90) });
     items.push({ label:"Flip to other side", action:()=>flipSelectionSide() });
     items.push({ label: compMoveLocked(c) ? "Unlock" : "Lock (move)", action:()=>toggleLockSelection() });
+    if (compPolarParam(c)) items.push({ label: compIsPolarized(c) ? "Make non-polarized" : "Make polarized (+)", action:()=>setCompPolarized(c, !compIsPolarized(c)) });
     items.push({ sep:true });
     items.push({ label:"Delete component "+c.ref, danger:true, action:()=>deleteSelection() });
   } else if (h && h.type === "via"){
@@ -484,7 +536,7 @@ function wireKeyboard(){
         if (Tools.addPinFor){ Tools.addPinFor=null; UI.setHint(TOOL_HINTS[Tools.name]||""); UI.refreshInspector(); }
         else if (Tools.tracePts) cancelTrace();
         else if (Tools.deskewPts){ Tools.deskewPts=null; Tools.deskewLayer=null; UI.setHint(TOOL_HINTS.align); requestRender(); }
-        else if (Tools.alignPts){ Tools.alignPts=null; Tools.alignLayer=null; UI.setHint(TOOL_HINTS.align); requestRender(); }
+        else if (Tools.alignPts){ Tools.alignPts=null; Tools.alignLayer=null; Tools.alignReturnId=null; UI.setHint(TOOL_HINTS.align); requestRender(); }
         else if (Tools.name==="component"){ setTool("select"); }
         else { UI.select(null); View.hoverNetId=null; requestRender(); }
         break;
@@ -504,16 +556,17 @@ function wireKeyboard(){
 
 function cycleDrawSide(){
   const sel = $("#draw-side");
-  const order = [...availableSides(), "xray"];
+  const order = availableSides();
   sel.value = order[(order.indexOf(sel.value)+1) % order.length];
-  if (sel.value !== "xray") Tools.lastCopperSide = sel.value;
-  UI.toast(sel.value === "xray" ? "X-ray view (both sides) — drawing on " + SIDE_LABELS[UI.copperSide()] : "Drawing on " + SIDE_LABELS[sel.value]);
+  Tools.lastCopperSide = sel.value;
+  UI.toast("Drawing on " + SIDE_LABELS[sel.value]);
   requestRender(); // trace/component visibility follows the active side
 }
 
 /* ---------------- dialogs ---------------- */
 function wireDialogs(){
   $("#fp-ok").addEventListener("click", ()=> UI.confirmFootprint());
+  $("#fp-dialog").addEventListener("keydown", fpDialogKey);
   $("#fp-resolve").addEventListener("click", ()=>{
     const inp = $("#fp-value");
     const dec = decodeSMD(inp.value);

@@ -299,8 +299,8 @@ function requestRender(){
 /* the side you are currently working on: driven by the active draw side
    (front/back); when an inner layer is active, fall back to the flip orientation. */
 function activeSide(){
+  if (View.xray) return "xray";              // X-ray overlay shows both sides
   const ds = UI.drawSide();
-  if (ds === "xray") return "xray";          // X-ray view shows both sides
   if (ds === "front" || ds === "back") return ds;
   return View.flip ? "back" : "front";
 }
@@ -308,12 +308,18 @@ function activeSide(){
 /* full component (body + SMD pads + label) shown only when it's on the active
    side; X-ray view shows everything; on the other side only its through-hole pads remain */
 function compBodyVisible(c){
-  return State.compView !== "side" || activeSide() === "xray" || c.side === activeSide();
+  return State.compView !== "side" || View.xray || c.side === activeSide();
 }
 
 /* traces shown only for the active draw side (X-ray shows all; vias & pads always shown) */
 function traceVisible(t){
-  return State.traceView !== "active" || UI.drawSide() === "xray" || t.side === UI.drawSide();
+  return State.traceView !== "active" || View.xray || t.side === UI.drawSide();
+}
+
+/* in X-ray mode, fade objects that aren't on the side currently being drawn on
+   (so the active side stands out over the see-through other side) */
+function xrayDim(side){
+  return (View.xray && side !== UI.drawSide()) ? 0.4 : 1;
 }
 
 function render(){
@@ -394,6 +400,20 @@ function render(){
     const r = 12/View.zoom;
     for (const m of View.checkMarks){
       ctx.beginPath(); ctx.arc(m.x, m.y, r, 0, Math.PI*2); ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  // --- overlap markers (red cross where a pad collided with another net) ---
+  if (View.overlapMarks && View.overlapMarks.length){
+    ctx.save();
+    ctx.strokeStyle = "#ff3b3b"; ctx.lineWidth = 2.5/View.zoom;
+    const r = 9/View.zoom;
+    for (const m of View.overlapMarks){
+      ctx.beginPath();
+      ctx.moveTo(m.x-r, m.y-r); ctx.lineTo(m.x+r, m.y+r);
+      ctx.moveTo(m.x+r, m.y-r); ctx.lineTo(m.x-r, m.y+r);
+      ctx.stroke();
     }
     ctx.restore();
   }
@@ -495,7 +515,7 @@ function focusAlpha(netId, selNet){
 
 function drawTrace(ctx, t, selNet){
   const hl = selNet && selNet !== -1 && t.netId === selNet;
-  const fa = focusAlpha(t.netId, selNet);
+  const fa = focusAlpha(t.netId, selNet) * xrayDim(t.side);
   ctx.save();
   ctx.lineCap = "round"; ctx.lineJoin = "round";
   if (hl){
@@ -557,7 +577,7 @@ function drawComponent(ctx, c, selNet, padsOnly){
   const sideCol = c.side === "back" ? "#7da0ff" : "#ffd24d";
   // dim the whole part when a different net is focused (pads on the focused net stay bright)
   const onFocusNet = selNet && selNet !== -1 && c.pins.some(p => p.netId === selNet);
-  const compFa = (!selNet) ? 1 : (onFocusNet ? 1 : (selNet === -1 ? 0.16 : 0.3));
+  const compFa = ((!selNet) ? 1 : (onFocusNet ? 1 : (selNet === -1 ? 0.16 : 0.3))) * xrayDim(c.side);
   const padDim = (padsOnly ? 0.45 : 1) * compFa;
   if (!padsOnly){
     // body (dashed outline = locked)
@@ -612,6 +632,12 @@ function drawComponent(ctx, c, selNet, padsOnly){
       ctx.strokeStyle="#fff"; ctx.lineWidth=2/View.zoom;
       ctx.beginPath(); ctx.arc(x,y,Math.max(w,h)/2+3/View.zoom,0,Math.PI*2); ctx.stroke();
     }
+  }
+  // overlay symbols (diode glyph, polarity +) — full part view only
+  if (!padsOnly){
+    ctx.globalAlpha = compFa;
+    if (fp.symbol === "diode") drawDiodeSymbol(ctx, fp, s, {zoom:View.zoom});
+    if (fp.polar) drawPolaritySymbol(ctx, fp, s, {zoom:View.zoom});
   }
   // pin1 marker (skip on far-side pad-only render)
   const p1 = fp.pins[0];

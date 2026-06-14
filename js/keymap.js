@@ -18,6 +18,7 @@ const KeyActions = [
   { id:"edit.lock",      label:"Move-lock / unlock component",  def:"L",      run:()=>toggleLockSelection() },
   { id:"edit.delete",    label:"Delete selection",              def:"Delete", run:()=>deleteSelection() },
   { id:"view.mask",      label:"Toggle coverage mask",          def:"H",      run:()=>toggleMask() },
+  { id:"view.xray",      label:"Toggle X-ray overlay",          def:"X",      run:()=>toggleXray() },
 ];
 
 const RESERVED_KEYS = ["Escape","Enter"," ","Spacebar","Tab","+","=","-","?"];

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PCB RevEng — Reverse Engineering Workbench</title>
-<link rel="stylesheet" href="css/style.css?v=21">
+<link rel="stylesheet" href="css/style.css?v=22">
 </head>
 <body>
 <div id="loading-overlay">
@@ -44,6 +44,7 @@
       </select>
       <button id="btn-flip" title="Flip board view (look from the back)  [F]">Flip view</button>
       <button id="btn-mask" title="Coverage mask — tints board areas without components  [H]">Mask</button>
+      <button id="btn-xray" style="display:none" title="X-ray overlay — show components &amp; traces from BOTH sides at once (needs an X-ray image layer). Drawing stays on the selected side.">X-ray</button>
     </div>
 
     <div class="tb-group">
@@ -67,6 +68,7 @@
         <span style="display:flex;gap:4px">
           <button id="btn-measure" title="Measure a distance on the board  [M]">Measure</button>
           <button id="btn-calibrate" title="Calibrate board scale: drag along a known distance, then enter its real mm length">Calibrate</button>
+          <button id="btn-deskew" title="Deskew / straighten the ACTIVE layer: click two lines that should be parallel &amp; axis-aligned (board edges) to remove perspective and rotation. Only the base layer needs this — align other layers to it with 4-point Align.">Deskew</button>
           <button id="btn-add-layer" title="Add image layer (or drag &amp; drop images onto the canvas)">+ Add</button>
         </span>
       </div>
@@ -312,19 +314,19 @@
   <input type="file" id="file-project" accept=".json,.pcbrev" hidden>
 </div>
 
-<script src="js/state.js?v=21"></script>
-<script src="js/footprints/core.js?v=21"></script>
-<script src="js/footprints/passives.js?v=21"></script>
-<script src="js/footprints/discrete.js?v=21"></script>
-<script src="js/footprints/connectors.js?v=21"></script>
-<script src="js/footprints/ics.js?v=21"></script>
-<script src="js/footprints/misc.js?v=21"></script>
-<script src="js/view.js?v=21"></script>
-<script src="js/tools.js?v=21"></script>
-<script src="js/keymap.js?v=21"></script>
-<script src="js/resolver.js?v=21"></script>
-<script src="js/netlist.js?v=21"></script>
-<script src="js/ui.js?v=21"></script>
-<script src="js/main.js?v=21"></script>
+<script src="js/state.js?v=22"></script>
+<script src="js/footprints/core.js?v=22"></script>
+<script src="js/footprints/passives.js?v=22"></script>
+<script src="js/footprints/discrete.js?v=22"></script>
+<script src="js/footprints/connectors.js?v=22"></script>
+<script src="js/footprints/ics.js?v=22"></script>
+<script src="js/footprints/misc.js?v=22"></script>
+<script src="js/view.js?v=22"></script>
+<script src="js/tools.js?v=22"></script>
+<script src="js/keymap.js?v=22"></script>
+<script src="js/resolver.js?v=22"></script>
+<script src="js/netlist.js?v=22"></script>
+<script src="js/ui.js?v=22"></script>
+<script src="js/main.js?v=22"></script>
 </body>
 </html>

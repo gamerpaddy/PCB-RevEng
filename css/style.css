@@ -62,7 +62,7 @@ select:focus,input:focus,textarea:focus{outline:1px solid var(--accent);}
 #toolbar .tool span{font-size:10px; color:var(--fg-dim);}
 #toolbar .tool.active{background:var(--accent); border-color:var(--accent); color:#08233f;}
 #toolbar .tool.active span{color:#08233f;}
-#btn-flip.active,#btn-mask.active{background:var(--accent2); border-color:var(--accent2); color:#3a2600;}
+#btn-flip.active,#btn-mask.active,#btn-xray.active{background:var(--accent2); border-color:var(--accent2); color:#3a2600;}
 
 /* ---------- layout ---------- */
 #main{display:flex; flex:1 1 auto; min-height:0;}
@@ -187,10 +187,21 @@ dialog::backdrop{background:rgba(0,0,0,.55);}
 #fp-cats{display:flex; flex-direction:column; gap:3px; width:100%; max-height:350px; overflow-y:auto;}
 #fp-cats button{text-align:left; padding:4px 8px;}
 #fp-cats button.active{background:var(--accent); border-color:var(--accent); color:#08233f;}
+.fp-rcl-note{margin-top:8px; padding:7px 9px; font-size:11px; color:#aab4c2;
+  background:#1c222b; border:1px solid #38424f; border-left:3px solid var(--accent2); border-radius:4px;
+  display:flex; flex-direction:column; gap:4px;}
+.fp-rcl-note span{color:#d7dde5;}
+.fp-rcl-note b{color:#ffd479;}
+.fp-rcl-note kbd{padding:0 4px; font-size:10px; color:#cfd6df; background:#2a323c; border:1px solid #44505d; border-radius:3px;}
+#fp-cats kbd.catkey{display:inline-block; min-width:20px; margin-right:7px; padding:0 3px; text-align:center;
+  font-size:10px; line-height:15px; color:#9aa6b4; background:#222a34; border:1px solid #38424f; border-radius:3px;}
+#fp-cats button.active kbd.catkey{color:#08233f; background:#bfe0ff; border-color:#9fcdf5;}
 .fp-mid{display:flex; flex-direction:column; gap:8px; width:270px;}
 #fp-params{display:flex; flex-direction:column; gap:6px;}
 #fp-params label{display:flex; align-items:center; gap:6px; font-size:12px; color:var(--fg-dim);}
 #fp-params input,#fp-params select{flex:1;}
+#fp-params label.fp-check{cursor:pointer;}
+#fp-params label.fp-check input{flex:0 0 auto; width:auto;}
 #fp-preview{background:#0d0f12; border:1px solid var(--line); border-radius:6px;}
 .fp-right{display:flex; flex-direction:column; gap:8px; width:210px;}
 .fp-right label{display:flex; flex-direction:column; gap:2px; font-size:11px; color:var(--fg-dim);}

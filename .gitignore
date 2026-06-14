@@ -2,6 +2,7 @@
 Thumbs.db
 .DS_Store
 *~
+footprints_kicad.txt
 
 # Local Claude Code / dev preview config (machine-specific)
 .claude/

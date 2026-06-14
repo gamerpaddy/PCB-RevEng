@@ -57,6 +57,7 @@ Footprints.register({
       label:p.pkg,
       pins:[_pin(1,-pc/2,0,{w:pw,h:ph,name:"K"}), _pin(2,pc/2,0,{w:pw,h:ph,name:"A"})],
       body:{w:L,h:W},
+      symbol:"diode",
       kicad:"Diode_SMD:D_"+p.pkg
     };
   }
