@@ -74,8 +74,12 @@ select:focus,input:focus,textarea:focus{outline:1px solid var(--accent);}
 #right-panel{border-right:none; border-left:1px solid var(--line); width:265px;}
 .panel-title{
   font-weight:600; color:var(--fg-dim); text-transform:uppercase; font-size:11px;
-  letter-spacing:.8px; margin:6px 0 2px; display:flex; justify-content:space-between; align-items:center;
+  letter-spacing:.8px; margin:6px 0 2px; display:flex; justify-content:space-between;
+  align-items:center; flex-wrap:wrap; gap:4px;
 }
+/* the button group beside a panel title wraps onto a new line when it does not
+   fit, so the last button (for example "+ Add") is never clipped by the panel */
+.panel-title > span{flex-wrap:wrap; justify-content:flex-end;}
 .panel-title button{padding:1px 7px; font-size:11px;}
 .panel-hint{color:var(--fg-dim); font-size:11px; padding:4px 2px;}
 
