@@ -114,6 +114,24 @@ function compFootprint(comp){
   if (!comp._fp) comp._fp = generateFootprint(comp.fpId, comp.fpParams);
   return comp._fp;
 }
+
+/* distance in world pixels from a world point to a pad's ACTUAL edge (0 when the
+   point is inside the pad). Rectangular SMD pads use their real rectangle,
+   respecting component rotation, scale and back-side mirror, instead of a round
+   max(w,h)/2 hitbox. This stops long rectangular pads from behaving like big
+   circles that grab traces they do not really touch. */
+function pinEdgeDist(comp, fpin, wx, wy){
+  const s = State.pxPerMm * (comp.scale || 1);
+  let dx = wx - comp.x, dy = wy - comp.y;
+  const a = -comp.rot * Math.PI / 180, ca = Math.cos(a), sa = Math.sin(a);
+  let lx = dx*ca - dy*sa, ly = dx*sa + dy*ca;   // undo component rotation
+  if (comp.side === "back") lx = -lx;            // undo back-side mirror
+  const px = lx - fpin.xmm*s, py = ly - fpin.ymm*s; // offset from pad centre, world px
+  if (fpin.shape === "circle") return Math.max(0, Math.hypot(px, py) - fpin.w*s/2);
+  const ex = Math.max(Math.abs(px) - fpin.w*s/2, 0);
+  const ey = Math.max(Math.abs(py) - fpin.h*s/2, 0);
+  return Math.hypot(ex, ey);
+}
 function compRadius(comp){
   const fp = compFootprint(comp);
   const s = State.pxPerMm * (comp.scale || 1);
@@ -160,9 +178,7 @@ function hitTest(wx, wy){
     const fp = compFootprint(c);
     for (let pi=0; pi<c.pins.length; pi++){
       const fpin = fp.pins[pi]; if (!fpin) continue;
-      const wp = pinWorldPos(c, fpin);
-      const r = Math.max(fpin.w, fpin.h) * s / 2 + tol*0.6;
-      if (Math.hypot(wx-wp.x, wy-wp.y) <= r)
+      if (pinEdgeDist(c, fpin, wx, wy) <= tol*0.9)
         return { type:"pin", comp:c, pinIdx:pi };
     }
   }
@@ -208,9 +224,10 @@ function snapToConductor(wx, wy, traceSide){
       const fpin = fp.pins[pi];
       // skip pads not reachable from this copper side (SMD pad on a different side)
       if (filterPads && fpin.shape !== "circle" && c.side !== traceSide) continue;
-      const wp = pinWorldPos(c, fpin);
-      const d = Math.hypot(wx-wp.x, wy-wp.y);
-      if (d < bestD){ bestD=d; best={x:wp.x,y:wp.y,attach:{type:"pin",comp:c,pinIdx:pi},netId:c.pins[pi].netId}; }
+      // measure to the pad's real edge so a long rectangular pad only snaps near
+      // the actual metal, but snap the trace point to the pad centre
+      const d = pinEdgeDist(c, fpin, wx, wy);
+      if (d < bestD){ const wp = pinWorldPos(c, fpin); bestD=d; best={x:wp.x,y:wp.y,attach:{type:"pin",comp:c,pinIdx:pi},netId:c.pins[pi].netId}; }
     }
   }
   for (const v of State.vias){

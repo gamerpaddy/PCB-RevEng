@@ -407,8 +407,10 @@ function checkMoveOverlaps(comp){
     for (const t of State.traces){
       // a trace is copper on a single side — ignore unless the pad reaches that side
       if (!(myThru || t.side === comp.side)) continue;
-      for (let k=0;k<t.points.length-1;k++)
-        if (distToSeg(wp.x,wp.y,t.points[k],t.points[k+1]) <= myR + (t.width||3)/2){ hitNet(t.netId, "trace"); break; }
+      for (let k=0;k<t.points.length-1;k++){
+        const pr = projectOnSeg(wp.x, wp.y, t.points[k], t.points[k+1]);
+        if (pinEdgeDist(comp, fpin, pr.x, pr.y) <= (t.width||3)/2 + 2){ hitNet(t.netId, "trace"); break; }
+      }
     }
   }
   View.overlapMarks = conflicts.length ? conflicts.map(c => c.pos) : null;
@@ -429,13 +431,13 @@ function runChecker(){
       const wp = pinWorldPos(c, fpin);
       if (!p.netId){ unnetted.push({ comp:c, pinIdx:pi, wp }); continue; }
       // does a trace physically touch this pad but carry a different net?
-      const s = State.pxPerMm*(c.scale||1);
-      const myR = Math.max(fpin.w, fpin.h)*s/2;
       for (const t of State.traces){
         if (t.netId === p.netId || !t.netId) continue;
         let touch = false;
-        for (let k=0;k<t.points.length-1;k++)
-          if (distToSeg(wp.x,wp.y,t.points[k],t.points[k+1]) <= myR + (t.width||3)/2){ touch = true; break; }
+        for (let k=0;k<t.points.length-1;k++){
+          const pr = projectOnSeg(wp.x, wp.y, t.points[k], t.points[k+1]);
+          if (pinEdgeDist(c, fpin, pr.x, pr.y) <= (t.width||3)/2 + 2){ touch = true; break; }
+        }
         if (touch){ mismatches.push({ comp:c, pinIdx:pi, pinNet:p.netId, traceNet:t.netId, trace:t }); break; }
       }
     }
@@ -784,8 +786,8 @@ function splitNetByConnectivity(netId){
       const wp = pinWorldPos(c, fpin);
       const s = State.pxPerMm * (c.scale||1);
       // a through-hole (round) pad reaches every copper layer; an SMD (rect) pad
-      // is copper on its component side only
-      items.push({ kind:"pin", comp:c, pi, x:wp.x, y:wp.y, r: Math.max(fpin.w, fpin.h)*s/2,
+      // is copper on its component side only. fpin lets us test the real pad shape.
+      items.push({ kind:"pin", comp:c, pi, fpin, x:wp.x, y:wp.y, r: Math.max(fpin.w, fpin.h)*s/2,
                    thru: fpin.shape === "circle", side: c.side });
     }
   }
@@ -807,15 +809,26 @@ function splitNetByConnectivity(netId){
     if (tA || tB){
       const tr = tA ? A.trace : B.trace, p = tA ? B : A;
       if (!reaches(p, tr.side)) return false;   // SMD pad does not touch a trace on a different layer
-      const thr = p.r + (tr.width||3)/2 + 2;
-      for (let i=0;i<tr.points.length-1;i++)
-        if (distToSeg(p.x, p.y, tr.points[i], tr.points[i+1]) <= thr) return true;
+      const half = (tr.width||3)/2 + 2;
+      for (let i=0;i<tr.points.length-1;i++){
+        // closest point on this trace segment to the pad/via centre, then measure
+        // to the pad's REAL edge (rectangle aware) rather than a round radius
+        const pr = projectOnSeg(p.x, p.y, tr.points[i], tr.points[i+1]);
+        const edge = p.fpin ? pinEdgeDist(p.comp, p.fpin, pr.x, pr.y)
+                            : Math.max(0, pr.d - (p.r||5));
+        if (edge <= half) return true;
+      }
       return false;
     }
     // pad/via to pad/via: two SMD pads on different sides never share copper;
     // a through-hole pad or via bridges layers
     if (!(A.thru || B.thru) && A.side !== B.side) return false;
-    return Math.hypot(A.x-B.x, A.y-B.y) <= A.r + B.r;
+    if (Math.hypot(A.x-B.x, A.y-B.y) > A.r + B.r) return false; // quick reject
+    // refine with the real pad shapes so two long rectangular pads only count as
+    // connected when their metal actually overlaps
+    const dA = A.fpin ? pinEdgeDist(A.comp, A.fpin, B.x, B.y) : 0;
+    const dB = B.fpin ? pinEdgeDist(B.comp, B.fpin, A.x, A.y) : 0;
+    return dA <= (B.r || 5) || dB <= (A.r || 5);
   };
 
   // union-find over O(n²) pairs
