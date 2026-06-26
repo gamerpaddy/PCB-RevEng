@@ -798,24 +798,33 @@ UI.openChecker = () => {
   requestRender();
   const box = $("#checker-list");
   const issues = [];   // each row → { wp, comp, pinIdx } for the "Go" button to jump to
-  let html = "";
   const row = (label, issue) => {
     const i = issues.push(issue) - 1;
     return `<div class="hk"><span>${label}</span><button class="chk-go" data-i="${i}" title="Jump to this pad">Go</button></div>`;
   };
+  // render one collapsible-looking group box (title + count) wrapping its rows
+  const group = (kind, title, count, rowsHtml) =>
+    `<div class="chk-group ${kind}">
+       <div class="chk-group-head">${title} <span class="chk-count">${count}</span></div>
+       <div class="chk-group-body">${rowsHtml}</div>
+     </div>`;
+
+  let html = "";
+  // ---- group 1: missing pads (pads with no net assigned) ----
   if (res.unnetted.length){
-    html += `<div style="margin-bottom:4px"><b>${res.unnetted.length}</b> pad(s) with no net:</div>`;
-    res.unnetted.forEach(u =>
-      html += row(escAttr(u.comp.ref + "." + u.comp.pins[u.pinIdx].num), { wp:u.wp, comp:u.comp, pinIdx:u.pinIdx }));
+    const rows = res.unnetted.map(u =>
+      row(escAttr(u.comp.ref + "." + u.comp.pins[u.pinIdx].num), { wp:u.wp, comp:u.comp, pinIdx:u.pinIdx })).join("");
+    html += group("missing", "Missing nets — unassigned pads", res.unnetted.length, rows);
   }
+  // ---- group 2: actual issues (pin/trace net mismatches) ----
   if (res.mismatches.length){
-    html += `<div style="margin-top:8px;color:#ffb648">${res.mismatches.length} pin/trace net mismatch(es):</div>`;
-    res.mismatches.forEach(m => {
+    const rows = res.mismatches.map(m => {
       const pinNm = escAttr(m.comp.ref + "." + m.comp.pins[m.pinIdx].num);
       const lbl = `${pinNm}=${escAttr(getNet(m.pinNet)?.name || "?")} ⟂ trace=${escAttr(getNet(m.traceNet)?.name || "?")}`;
       const wp = pinWorldPos(m.comp, compFootprint(m.comp).pins[m.pinIdx]);
-      html += row(lbl, { wp, comp:m.comp, pinIdx:m.pinIdx });
-    });
+      return row(lbl, { wp, comp:m.comp, pinIdx:m.pinIdx });
+    }).join("");
+    html += group("issues", "Net issues — pin / trace mismatches", res.mismatches.length, rows);
   }
   if (!res.unnetted.length && !res.mismatches.length)
     html += `<div class="panel-hint" style="color:#4fd07f">All pads have nets and no mismatches. 🎉</div>`;
