@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PCB RevEng — Reverse Engineering Workbench</title>
 <link rel="stylesheet" href="css/style.css?v=49">
+
 </head>
 <body>
 <div id="loading-overlay">
@@ -146,6 +147,7 @@
         <option value="json">JSON</option>
       </select>
     </label>
+    <div id="export-warn" style="display:none"></div>
     <textarea id="export-preview" spellcheck="false"></textarea>
     <div class="dlg-buttons">
       <button id="export-close">Close</button>
@@ -364,6 +366,7 @@
   <input type="file" id="file-project" accept=".json,.pcbrev" hidden>
 </div>
 
+
 <script src="js/state.js?v=49"></script>
 <script src="js/footprints/core.js?v=49"></script>
 <script src="js/footprints/passives.js?v=49"></script>
@@ -383,5 +386,6 @@
 <script src="js/fpdialog.js?v=49"></script>
 <script src="js/autosave.js?v=49"></script>
 <script src="js/main.js?v=49"></script>
+
 </body>
 </html>

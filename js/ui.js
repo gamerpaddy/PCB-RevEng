@@ -715,7 +715,25 @@ function escAttr(s){ return String(s==null?"":s).replace(/&/g,"&amp;").replace(/
 /* ---------------- export dialog ---------------- */
 UI.openExport = () => {
   const dlg = $("#export-dialog");
-  const update = () => { $("#export-preview").value = netlistFor($("#export-format").value).text; };
+  if (typeof loadKicadFootprints === "function") loadKicadFootprints(); // ensure the list is available for the check
+  const warn = $("#export-warn");
+  const update = () => {
+    const fmt = $("#export-format").value;
+    $("#export-preview").value = netlistFor(fmt).text;
+    // only KiCad exports carry footprints, so only warn for those formats
+    const missing = (fmt === "kicad" || fmt === "sch") ? missingKicadFootprints() : null;
+    if (missing && missing.length){
+      const shown = missing.slice(0, 25);
+      warn.innerHTML = "<b>⚠ " + missing.length + " footprint" + (missing.length>1?"s":"") +
+        " not found in the KiCad library list:</b><br>" +
+        shown.map(m => escAttr(m.ref) + " → " + escAttr(m.footprint)).join("<br>") +
+        (missing.length > shown.length ? "<br>… and " + (missing.length - shown.length) + " more" : "") +
+        "<br><span class=\"export-warn-hint\">Fix the KiCad footprint field on these parts, or they will not load in Pcbnew.</span>";
+      warn.style.display = "";
+    } else {
+      warn.style.display = "none";
+    }
+  };
   $("#export-format").onchange = update;
   update();
   dlg.showModal();
