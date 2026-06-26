@@ -149,7 +149,18 @@ function onPointerUp(e){
   }
   if (d.kind === "move-comp" || d.kind === "move-via" || d.kind === "move-layer" || d.kind === "rot-layer" || d.kind === "move-vert"){
     if (!d.moved) Undo.stack.pop(); // no-op drag, drop the snapshot
-    if (d.kind === "move-vert" && d.moved && d.snap && d.snap.attach) connectVertToSnap(d.trace, d.snap);
+    // a real drag must not also register as a double-click (which would delete a point
+    // or pop open an editor/menu); flag it so the dblclick that may follow is ignored.
+    if (d.moved){
+      if (d.kind === "move-comp" || d.kind === "move-via"){
+        Tools._dragEndedAt = Date.now();
+      } else if (d.kind === "move-vert"){
+        // only when it genuinely moved or snapped — a stationary double-click still removes the vertex
+        const p = d.trace.points[d.i];
+        if (d.snap || (p && Math.hypot(p.x-d.sx, p.y-d.sy) > 4/View.zoom)) Tools._dragEndedAt = Date.now();
+      }
+    }
+    if (d.kind === "move-vert" && d.moved && d.snap && d.snap.attach) connectVertToSnap(d.trace, d.snap, d.i);
     Tools.dragVert = null;
     Tools.snap = null;
     UI.refreshInspector();
@@ -174,7 +185,9 @@ function handleDrag(pt, w, e){
       break;
     case "move-via":
       d.moved = true;
-      d.via.x = w.x; d.via.y = w.y;
+      d.via.x = w.x - d.offX; d.via.y = w.y - d.offY; // keep the grab offset, like components
+      // drag connected trace anchors with the via, preserving their relative position
+      if (d.anchors) for (const a of d.anchors){ a.pts[a.i].x = d.via.x + a.dx; a.pts[a.i].y = d.via.y + a.dy; }
       break;
     case "move-vert": {
       d.moved = true;
@@ -223,7 +236,7 @@ function selectDown(w, pt, e){
     for (let i=0;i<t.points.length;i++){
       if (Math.hypot(w.x-t.points[i].x, w.y-t.points[i].y) <= hr){
         pushUndo("move trace point");
-        Tools.drag = { kind:"move-vert", trace:t, i, moved:false };
+        Tools.drag = { kind:"move-vert", trace:t, i, moved:false, sx:t.points[i].x, sy:t.points[i].y };
         Tools.dragVert = { trace:t, i };
         requestRender();
         return;
@@ -258,7 +271,14 @@ function selectDown(w, pt, e){
     Tools.drag = { kind:"move-comp", comp:c, offX:w.x-c.x, offY:w.y-c.y, moved:false };
   } else if (h.type === "via"){
     pushUndo();
-    Tools.drag = { kind:"move-via", via:h.via, moved:false };
+    // grab every trace vertex sitting on the via so connected anchors move along with it
+    const vtol = Math.max(h.via.r || 5, 6/View.zoom);
+    const anchors = [];
+    for (const t of State.traces)
+      for (let i=0;i<t.points.length;i++)
+        if (Math.hypot(t.points[i].x-h.via.x, t.points[i].y-h.via.y) <= vtol)
+          anchors.push({ pts:t.points, i, dx:t.points[i].x-h.via.x, dy:t.points[i].y-h.via.y });
+    Tools.drag = { kind:"move-via", via:h.via, offX:w.x-h.via.x, offY:w.y-h.via.y, moved:false, anchors };
   }
   requestRender();
 }
@@ -268,14 +288,77 @@ function onDoubleClick(e){
   const w = screenToWorld(pt.x, pt.y);
   if (Tools.name === "trace"){ finishTrace(); return; }
   if (Tools.name === "select"){
+    // ignore a dblclick that immediately follows a drag-drop, so dropping something never
+    // doubles as a "remove this point" / "open editor" double-click
+    if (Tools._dragEndedAt && (Date.now() - Tools._dragEndedAt < 250)){ Tools._dragEndedAt = 0; return; }
+    Tools._dragEndedAt = 0;
+    // a pad / via / component under the cursor wins over trace editing, so double-clicking
+    // a pad opens its settings even when a trace runs beneath it
     const h = hitTest(w.x, w.y);
-    if (h && (h.type==="pin" || h.type==="via" || h.type==="trace")){
-      promptNetName(h);
-    } else if (h && h.type==="comp"){
-      UI.select(h);
-      UI.openQuickEdit(h.comp); // quick ref + value editor
+    if (h && (h.type==="pin" || h.type==="via")){ promptNetName(h); return; }
+    if (h && h.type==="comp"){ UI.select(h); UI.openQuickEdit(h.comp); return; } // quick ref + value editor
+    // otherwise edit the trace under the cursor: on a vertex → remove it, on a segment → add a corner
+    editTraceVertex(w);
+  }
+}
+
+/* double-click trace editing.
+   · on an existing vertex → remove it. Interior vertices straighten the trace
+     between their neighbours; an endpoint just drops that end segment.
+   · on a segment (away from any vertex) → insert a new draggable corner there.
+   Returns true if it handled the double-click. */
+function editTraceVertex(w){
+  // 1) nearest existing vertex within a small radius → remove
+  const vr = 8/View.zoom;
+  let bv = null, bvd = vr;
+  for (let ti=State.traces.length-1; ti>=0; ti--){
+    const t = State.traces[ti];
+    if (!traceVisible(t)) continue;
+    for (let i=0;i<t.points.length;i++){
+      const d = Math.hypot(w.x-t.points[i].x, w.y-t.points[i].y);
+      if (d <= bvd){ bvd = d; bv = { trace:t, i }; }
     }
   }
+  if (bv){ removeTraceVertex(bv.trace, bv.i); return true; }
+
+  // 2) nearest segment within the trace's width → insert a corner
+  let bs = null, bsd = Infinity;
+  for (let ti=State.traces.length-1; ti>=0; ti--){
+    const t = State.traces[ti];
+    if (!traceVisible(t)) continue;
+    const tol = (t.width||3)/2 + 6/View.zoom;
+    for (let k=0;k<t.points.length-1;k++){
+      const pr = projectOnSeg(w.x, w.y, t.points[k], t.points[k+1]);
+      if (pr.d <= tol && pr.d < bsd){ bsd = pr.d; bs = { trace:t, k, x:pr.x, y:pr.y }; }
+    }
+  }
+  if (bs){ insertTraceVertex(bs.trace, bs.k, bs.x, bs.y); return true; }
+  return false;
+}
+
+function insertTraceVertex(t, k, x, y){
+  pushUndo("add trace point");
+  t.points.splice(k+1, 0, { x, y });
+  UI.select({ type:"trace", trace:t }); // show the vertex handles so the new corner can be dragged
+  markDirty();
+  UI.refreshInspector();
+  requestRender();
+}
+
+function removeTraceVertex(t, i){
+  pushUndo("remove trace point");
+  if (t.points.length <= 2){
+    // a trace needs at least two points; dropping one here leaves nothing useful
+    State.traces = State.traces.filter(x => x !== t);
+    UI.select(null);
+  } else {
+    t.points.splice(i, 1); // interior → straightens between neighbours; endpoint → shortens by one segment
+    UI.select({ type:"trace", trace:t });
+  }
+  pruneNets();
+  markDirty();
+  UI.refreshNets(); UI.refreshInspector();
+  requestRender();
 }
 
 /* assign `name` to the geometrically-connected island around obj.
@@ -548,15 +631,78 @@ function finishTrace(endSnap){
   applyAttach(sSnap, netId);
   applyAttach(endSnap, netId);
 
-  const trace = {
-    id: nextId(), side: Tools.traceSide, netId,
-    points: pts.map(p=>({x:p.x,y:p.y})), width: State.traceW,
-  };
-  State.traces.push(trace);
+  // if an endpoint started/ended on the END of an existing same-side trace, weld
+  // the two into a single continuous polyline instead of leaving two objects
+  const trace = weldOrCreateTrace(pts, Tools.traceSide, netId, sSnap, endSnap);
   mergeIntersectingTraces(trace);
   Tools.tracePts = null; Tools.traceStartSnap = null;
   UI.setHint(TOOL_HINTS.trace);
   UI.refreshNets(); requestRender();
+}
+
+/* If a snap landed on (or very near) one END of an existing trace on `side`,
+   return {trace, end} where end is 0 (first point) or 1 (last point). A mid-trace
+   snap (T-junction) returns null — those stay separate and just share a net. */
+function traceEndpointSnap(snap, side){
+  if (!snap || !snap.attach || snap.attach.type !== "trace") return null;
+  const t = snap.attach.trace;
+  if (t.side !== side) return null;
+  const p0 = t.points[0], pL = t.points[t.points.length-1];
+  const tol = Math.max(2, (t.width||3)*0.75);
+  const d0 = Math.hypot(snap.x-p0.x, snap.y-p0.y);
+  const dL = Math.hypot(snap.x-pL.x, snap.y-pL.y);
+  if (d0 <= tol && d0 <= dL) return { trace:t, end:0 };
+  if (dL <= tol) return { trace:t, end:1 };
+  return null;
+}
+
+/* append `extra` (ordered from the shared endpoint outward) onto trace `t` at
+   `end` (0 = before the first point, 1 = after the last). The shared point
+   (extra[0]) is dropped — `t` keeps its own endpoint. */
+function appendToTraceEnd(t, end, extra){
+  const add = extra.slice(1).map(p=>({x:p.x,y:p.y}));
+  if (!add.length) return;
+  if (end === 1) t.points.push(...add);
+  else t.points.unshift(...add.reverse());
+}
+
+/* Create the drawn trace, or — when it begins/ends on the END of an existing
+   same-side trace — weld it into that trace so the result is one polyline.
+   If BOTH ends meet two different traces, all three become a single trace. */
+function weldOrCreateTrace(pts, side, netId, sSnap, endSnap){
+  const sm = traceEndpointSnap(sSnap, side);
+  let em = traceEndpointSnap(endSnap, side);
+  if (sm && em && sm.trace === em.trace && sm.end === em.end) em = null; // same spot, ignore
+
+  if (!sm && !em){
+    const t = { id:nextId(), side, netId, points: pts.map(p=>({x:p.x,y:p.y})), width: State.traceW };
+    State.traces.push(t);
+    return t;
+  }
+
+  const seq = pts.map(p=>({x:p.x,y:p.y}));
+  let host, freeEnd; // freeEnd = which end of host now holds seq's outward (end) point
+  if (sm){
+    host = sm.trace;
+    appendToTraceEnd(host, sm.end, seq);          // seq[0] coincides with host's matched end
+    freeEnd = (sm.end === 1) ? "last" : "first";
+  } else {
+    host = em.trace;
+    appendToTraceEnd(host, em.end, seq.slice().reverse()); // start is the free outward end
+    em = null;
+  }
+  host.netId = netId;
+
+  // both ends met traces → concatenate the second trace onto the host's free end
+  if (sm && em && em.trace !== host){
+    const B = em.trace;
+    const bExtra = (em.end === 0 ? B.points.slice(1) : B.points.slice(0,-1).reverse()).map(p=>({x:p.x,y:p.y}));
+    if (freeEnd === "last") host.points.push(...bExtra);
+    else host.points.unshift(...bExtra.reverse());
+    State.traces = State.traces.filter(t => t !== B);
+    if (UI.sel && UI.sel.type==="trace" && UI.sel.trace===B) UI.select(null);
+  }
+  return host;
 }
 
 /* any same-side trace that genuinely connects to the new one joins its net.
@@ -596,7 +742,7 @@ function applyAttach(snap, netId){
 
 /* connect a dragged trace anchor that was dropped on a pad/via/trace.
    Joins nets (with the usual protected-net checks) so the anchor really wires up. */
-function connectVertToSnap(trace, snap){
+function connectVertToSnap(trace, snap, vi){
   const tNet = trace.netId, sNet = snap.netId;
   let net = tNet;
   if (tNet && sNet && tNet !== sNet){
@@ -609,12 +755,38 @@ function connectVertToSnap(trace, snap){
   }
   trace.netId = net;
   applyAttach(snap, net);
+  // dragging an endpoint anchor onto the END of another same-side trace welds them into one
+  if (vi != null && weldTraceAnchor(trace, vi, snap)){
+    pruneNets(); UI.refreshNets();
+    UI.select({ type:"trace", trace });
+    UI.toast("Traces merged → " + (getNet(net)?.name || "net"));
+    requestRender();
+    return;
+  }
   pruneNets(); UI.refreshNets();
   const where = snap.attach.type === "pin"
     ? snap.attach.comp.ref + "." + snap.attach.comp.pins[snap.attach.pinIdx].num
     : snap.attach.type === "via" ? "via" : "trace";
   UI.toast("Anchor connected to " + where + " → " + (getNet(net)?.name || "net"));
   requestRender();
+}
+
+/* Dragging an ENDPOINT vertex of `trace` (index `vi`) onto the END of another
+   same-side trace joins the two into one polyline. A mid-trace landing (T) or a
+   mid-vertex drag is left alone. Returns true when a weld happened. */
+function weldTraceAnchor(trace, vi, snap){
+  if (!snap || !snap.attach || snap.attach.type !== "trace") return false;
+  const B = snap.attach.trace;
+  if (B === trace || B.side !== trace.side) return false;
+  const aEnd = (vi === 0) ? 0 : (vi === trace.points.length - 1) ? 1 : -1;
+  if (aEnd === -1) return false;                  // not an endpoint anchor
+  const em = traceEndpointSnap(snap, trace.side);
+  if (!em || em.trace !== B) return false;        // must land on B's end, not its interior
+  // B's points ordered from the shared endpoint outward; the shared point is dropped
+  const bSeq = (em.end === 0 ? B.points : B.points.slice().reverse()).map(p => ({ x:p.x, y:p.y }));
+  appendToTraceEnd(trace, aEnd, bSeq);
+  State.traces = State.traces.filter(t => t !== B);
+  return true;
 }
 
 function cancelTrace(){

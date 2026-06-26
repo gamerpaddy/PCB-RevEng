@@ -225,6 +225,9 @@ UI.refreshNets = () => {
     item.querySelector(".net-color").addEventListener("input", e => {
       pushUndo("net colour"); n.color = e.target.value; requestRender();
     });
+    // hovering a net row previews it on the board (and isolates its ratsnest)
+    item.addEventListener("mouseenter", ()=>{ View.hoverNetId = n.id; requestRender(); });
+    item.addEventListener("mouseleave", ()=>{ if (View.hoverNetId === n.id){ View.hoverNetId = null; requestRender(); } });
     item.addEventListener("click", ()=>{
       const turnOn = UI.activeNetId !== n.id;
       UI.activeNetId = turnOn ? n.id : null;

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PCB RevEng — Reverse Engineering Workbench</title>
-<link rel="stylesheet" href="css/style.css?v=28">
+<link rel="stylesheet" href="css/style.css?v=38">
 </head>
 <body>
 <div id="loading-overlay">
@@ -45,6 +45,8 @@
       <button id="btn-flip" title="Flip board view (look from the back)  [F]">Flip view</button>
       <button id="btn-mask" title="Coverage mask — tints board areas without components  [H]">Mask</button>
       <button id="btn-xray" title="X-ray overlay — show components &amp; traces from BOTH sides at once. Inactive-side copper is dimmed; if an X-ray image layer exists it is shown too. Drawing stays on the selected side.">X-ray</button>
+      <button id="btn-ratsnest" title="Ratsnest — draw straight airwires between every pad/via on the same net (across all layers). Hover or select a net to isolate it.">Ratsnest</button>
+      <button id="btn-stack3d" title="3D layer stack — exploded pseudo-3D view of all copper layers and their through-hole connections">3D</button>
     </div>
 
     <div class="tb-group">
@@ -94,6 +96,9 @@
       </div>
       <div id="drop-hint">Drop front / back / inner layer photos here<br><small>…or use “+ Add” in the Layers panel</small></div>
     </div>
+
+    <!-- drag handle to resize the inspector -->
+    <div id="right-resizer" title="Drag to resize the inspector"></div>
 
     <!-- right: inspector -->
     <aside id="right-panel">
@@ -305,6 +310,17 @@
     </div>
   </dialog>
 
+  <!-- ======= 3D LAYER STACK ======= -->
+  <dialog id="stack3d-dialog">
+    <div class="dlg-title">3D layer stack</div>
+    <div class="panel-hint" style="margin-bottom:8px">Exploded view of every copper side and the through-hole conductors linking them. Drag to orbit · scroll to zoom.</div>
+    <canvas id="stack3d-canvas"></canvas>
+    <div class="dlg-buttons">
+      <button id="stack3d-reset">Reset view</button>
+      <button id="stack3d-close" class="primary">Close</button>
+    </div>
+  </dialog>
+
   <!-- ======= HELP OVERLAY ======= -->
   <dialog id="help-dialog">
     <div class="dlg-title">Hotkeys &amp; workflow</div>
@@ -329,23 +345,24 @@
   <input type="file" id="file-project" accept=".json,.pcbrev" hidden>
 </div>
 
-<script src="js/state.js?v=28"></script>
-<script src="js/footprints/core.js?v=28"></script>
-<script src="js/footprints/passives.js?v=28"></script>
-<script src="js/footprints/discrete.js?v=28"></script>
-<script src="js/footprints/connectors.js?v=28"></script>
-<script src="js/footprints/ics.js?v=28"></script>
-<script src="js/footprints/misc.js?v=28"></script>
-<script src="js/view.js?v=28"></script>
-<script src="js/tools.js?v=28"></script>
-<script src="js/align.js?v=28"></script>
-<script src="js/keymap.js?v=28"></script>
-<script src="js/resolver.js?v=28"></script>
-<script src="js/netlist.js?v=28"></script>
-<script src="js/ui.js?v=28"></script>
-<script src="js/kicadsearch.js?v=28"></script>
-<script src="js/fpdialog.js?v=28"></script>
-<script src="js/autosave.js?v=28"></script>
-<script src="js/main.js?v=28"></script>
+<script src="js/state.js?v=38"></script>
+<script src="js/footprints/core.js?v=38"></script>
+<script src="js/footprints/passives.js?v=38"></script>
+<script src="js/footprints/discrete.js?v=38"></script>
+<script src="js/footprints/connectors.js?v=38"></script>
+<script src="js/footprints/ics.js?v=38"></script>
+<script src="js/footprints/misc.js?v=38"></script>
+<script src="js/view.js?v=38"></script>
+<script src="js/layerstack.js?v=38"></script>
+<script src="js/tools.js?v=38"></script>
+<script src="js/align.js?v=38"></script>
+<script src="js/keymap.js?v=38"></script>
+<script src="js/resolver.js?v=38"></script>
+<script src="js/netlist.js?v=38"></script>
+<script src="js/ui.js?v=38"></script>
+<script src="js/kicadsearch.js?v=38"></script>
+<script src="js/fpdialog.js?v=38"></script>
+<script src="js/autosave.js?v=38"></script>
+<script src="js/main.js?v=38"></script>
 </body>
 </html>

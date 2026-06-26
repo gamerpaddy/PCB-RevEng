@@ -7,6 +7,7 @@ const Keys = { space:false };
    markImagesDirty, loadDefaultProject, updateSaveStatus, etc. are defined there */
 
 window.addEventListener("DOMContentLoaded", () => {
+  restoreInspectorWidth();              // apply the saved inspector width BEFORE the canvas is sized
   viewInit(document.getElementById("canvas"));
   Keymap.load();
   UI.updateHotkeyHints();
@@ -24,6 +25,7 @@ window.addEventListener("DOMContentLoaded", () => {
   wireKeyboard();
   wireFiles();
   wireSettings();
+  wireRightResizer();
   Resolver.wire();
   UI.wireFpSearch();
   UI.wireNetSearch();
@@ -61,6 +63,8 @@ function wireToolbar(){
     requestRender(); // visibility follows active side
   });
   $("#btn-xray").addEventListener("click", toggleXray);
+  $("#btn-ratsnest").addEventListener("click", toggleRatsnest);
+  $("#btn-stack3d").addEventListener("click", ()=> Stack3D.open());
   $("#btn-measure").addEventListener("click", ()=> setTool("measure"));
   $("#btn-calibrate").addEventListener("click", ()=> setTool("calibrate"));
   $("#btn-deskew").addEventListener("click", ()=> startLineDeskew());
@@ -84,6 +88,15 @@ function toggleMask(){
   View.mask = !View.mask;
   $("#btn-mask").classList.toggle("active", View.mask);
   UI.toast(View.mask ? "Coverage mask ON — red tint = no components placed there yet" : "Coverage mask off");
+  requestRender();
+}
+
+function toggleRatsnest(){
+  View.ratsnest = !View.ratsnest;
+  $("#btn-ratsnest").classList.toggle("active", View.ratsnest);
+  UI.toast(View.ratsnest
+    ? "Ratsnest ON — airwires link same-net pads/vias; hover or select a net to isolate it"
+    : "Ratsnest off");
   requestRender();
 }
 
@@ -212,6 +225,43 @@ function setLayerCount(n){
   UI.refreshLayerList(); UI.refreshNets(); UI.refreshInspector();
   UI.toast("Board set to " + n + " copper layer" + (n>1?"s":""));
   requestRender();
+}
+
+/* ---------------- resizable inspector ---------------- */
+const inspClampW = (w) => Math.max(200, Math.min(window.innerWidth - 360, w));
+
+/* apply the saved inspector width up front, before viewInit sizes the canvas, so the
+   canvas is never left squished on reload (only a viewResize fixes the backing store,
+   and zoom/pan don't trigger one) */
+function restoreInspectorWidth(){
+  const panel = $("#right-panel");
+  if (!panel) return;
+  try { const wv = parseInt(localStorage.getItem("pcbreveng.inspW"),10); if (wv) panel.style.width = inspClampW(wv) + "px"; } catch(e){}
+}
+
+function wireRightResizer(){
+  const rz = $("#right-resizer"), panel = $("#right-panel");
+  if (!rz || !panel) return;
+  const clampW = inspClampW;
+  let drag = null;
+  rz.addEventListener("pointerdown", e => {
+    rz.setPointerCapture(e.pointerId);
+    drag = { x:e.clientX, w:panel.getBoundingClientRect().width };
+    rz.classList.add("dragging");
+    e.preventDefault();
+  });
+  rz.addEventListener("pointermove", e => {
+    if (!drag) return;
+    panel.style.width = clampW(drag.w + (drag.x - e.clientX)) + "px"; // drag left = wider
+    viewResize(); // canvas fills the remaining space
+  });
+  const end = () => {
+    if (!drag) return;
+    drag = null; rz.classList.remove("dragging"); viewResize();
+    try { localStorage.setItem("pcbreveng.inspW", String(parseInt(panel.style.width,10) || 265)); } catch(ex){}
+  };
+  rz.addEventListener("pointerup", end);
+  rz.addEventListener("pointercancel", end);
 }
 
 /* ---------------- canvas events ---------------- */
