@@ -181,6 +181,12 @@ dialog{
 }
 #options-dialog #settings-panel{width:300px;}
 dialog::backdrop{background:rgba(0,0,0,.55);}
+#export-warn{
+  background:#3a2a16; border:1px solid #7a5a24; color:#ffce8a;
+  border-radius:6px; padding:8px 10px; margin-bottom:8px; font-size:12px;
+  max-height:160px; overflow-y:auto; line-height:1.5;
+}
+#export-warn .export-warn-hint{color:#c9a76a; font-size:11px;}
 .dlg-title{font-weight:700; font-size:15px; margin-bottom:12px;}
 .dlg-buttons{display:flex; gap:8px; justify-content:flex-end; margin-top:12px;}
 .dlg-row{display:flex; align-items:center; gap:8px; margin-bottom:8px;}

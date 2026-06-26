@@ -203,6 +203,38 @@ function exportKiCadSch(){
   return L.join("\n");
 }
 
+/* the footprint string that the export writes for a component
+   (same precedence as exportKiCad: the user's field, then the generated default) */
+function exportFootprintRef(c){
+  const fp = compFootprint(c);
+  return c.kicad || fp.kicad || fp.label || "";
+}
+
+/* is a footprint reference present in the bundled KiCad footprint list?
+   The list holds footprint NAMES (no library prefix), so a "Library:Name" value
+   is matched on its Name part. */
+let _kfSet = null;
+function kicadFootprintKnown(ref){
+  if (typeof KicadFootprints === "undefined" || !KicadFootprints.length) return true; // list not loaded - cannot judge
+  if (!ref) return false;
+  if (!_kfSet || _kfSet.size !== KicadFootprints.length) _kfSet = new Set(KicadFootprints);
+  const name = ref.includes(":") ? ref.slice(ref.indexOf(":") + 1) : ref;
+  return _kfSet.has(name) || _kfSet.has(ref);
+}
+
+/* components whose export footprint is not in the KiCad list.
+   Returns null when the list has not loaded yet (so the check is simply skipped),
+   otherwise an array of { ref, footprint }. */
+function missingKicadFootprints(){
+  if (typeof KicadFootprints === "undefined" || !KicadFootprints.length) return null;
+  const out = [];
+  for (const c of State.components){
+    const ref = exportFootprintRef(c);
+    if (!kicadFootprintKnown(ref)) out.push({ ref: c.ref, footprint: ref || "(none)" });
+  }
+  return out;
+}
+
 function netlistFor(format){
   switch (format){
     case "csv":  return { text: exportCSV(),      ext: "csv",       mime: "text/csv" };
