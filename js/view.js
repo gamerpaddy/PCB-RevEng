@@ -10,6 +10,7 @@ const View = {
   hoverNetId: null,       // net under cursor → highlighted
   blinkNet: null,         // net flashing after a net-list click
   blinkOn: false,
+  ratsnest: false,        // draw straight "airwire" connections between same-net pads/vias
 };
 
 /* flash a net 3× in the view */
@@ -214,37 +215,53 @@ function distToSeg(px,py,a,b){
    they're reachable from that side — through-hole pads (circles) reach every layer,
    SMD pads only their own side. "any" (via tool) snaps to everything;
    omitted/null disables trace snapping. */
-function snapToConductor(wx, wy, traceSide){
-  const tol = 12 / View.zoom;
-  let best = null, bestD = tol;
+function snapToConductor(wx, wy, traceSide, tightTrace, traceWidth){
+  const tol = 8 / View.zoom;         // vias
+  const traceTol = 28 / View.zoom;   // generous reach for dragging an anchor onto a trace
+  // when a trace width is supplied (drawing / moving an anchor) pads only snap when the
+  // cursor is right at the pad CENTRE — no edge grabbing. The reach scales with the pad's
+  // own size, clamped to 0.5×…2× the trace width, so tiny pads snap tight while big pads
+  // (where the centre is far from where you click) still grab from up to 2× the width.
+  const padCenter = !!traceWidth;
+  let best = null, bestD = Infinity;
   const filterPads = traceSide && traceSide !== "any";
   for (const c of State.components){
     const fp = compFootprint(c);
+    const s = State.pxPerMm * (c.scale || 1);
     for (let pi=0; pi<c.pins.length; pi++){
       const fpin = fp.pins[pi];
       // skip pads not reachable from this copper side (SMD pad on a different side)
       if (filterPads && fpin.shape !== "circle" && c.side !== traceSide) continue;
-      // measure to the pad's real edge so a long rectangular pad only snaps near
-      // the actual metal, but snap the trace point to the pad centre
-      const d = pinEdgeDist(c, fpin, wx, wy);
-      if (d < bestD){ const wp = pinWorldPos(c, fpin); bestD=d; best={x:wp.x,y:wp.y,attach:{type:"pin",comp:c,pinIdx:pi},netId:c.pins[pi].netId}; }
+      let wp = null, d, ptol;
+      if (padCenter){
+        wp = pinWorldPos(c, fpin); d = Math.hypot(wx-wp.x, wy-wp.y);     // to pad centre
+        const padR = Math.min(fpin.w, fpin.h) * s / 2;                   // pad's narrow half-extent
+        ptol = Math.max(traceWidth * 0.5, Math.min(padR, traceWidth * 2));
+      } else { d = pinEdgeDist(c, fpin, wx, wy); ptol = tol; }            // to pad edge (via tool)
+      if (d <= ptol && d < bestD){ if (!wp) wp = pinWorldPos(c, fpin); bestD=d; best={x:wp.x,y:wp.y,attach:{type:"pin",comp:c,pinIdx:pi},netId:c.pins[pi].netId}; }
     }
   }
   for (const v of State.vias){
     const d = Math.hypot(wx-v.x, wy-v.y);
-    if (d < bestD){ bestD=d; best={x:v.x,y:v.y,attach:{type:"via",via:v},netId:v.netId}; }
+    if (d <= tol && d < bestD){ bestD=d; best={x:v.x,y:v.y,attach:{type:"via",via:v},netId:v.netId}; }
   }
   if (traceSide){
+    // when drawing (tightTrace) only snap within the nearby trace's own width, so a far
+    // trace doesn't grab the cursor; dragging an anchor keeps the generous reach. A
+    // pad/via still wins only when it is actually closer than the chosen trace.
+    let tBest = null, tBestD = Infinity;
     for (const t of State.traces){
       if (traceSide !== "any" && t.side !== traceSide) continue;
+      const ttol = tightTrace ? ((t.width||3)/2 + 2/View.zoom) : traceTol;
       for (let k=0; k<t.points.length-1; k++){
         const pr = projectOnSeg(wx, wy, t.points[k], t.points[k+1]);
-        if (pr.d < bestD){
-          bestD = pr.d;
-          best = { x:pr.x, y:pr.y, attach:{type:"trace", trace:t}, netId:t.netId };
+        if (pr.d <= ttol && pr.d < tBestD){
+          tBestD = pr.d;
+          tBest = { x:pr.x, y:pr.y, attach:{type:"trace", trace:t}, netId:t.netId };
         }
       }
     }
+    if (tBest && (!best || tBestD < bestD)) best = tBest;
   }
   return best;
 }
@@ -374,7 +391,10 @@ function render(){
 
   // --- traces ---
   for (const t of State.traces){
-    if (!traceVisible(t)) continue;
+    // a focused net stays visible on every layer, even ones the active-side
+    // filter would normally hide — that is the "show the net across all layers" cue
+    const focused = selNet && selNet !== -1 && t.netId === selNet;
+    if (!traceVisible(t) && !focused) continue;
     drawTrace(ctx, t, selNet);
   }
   // --- in-progress trace preview ---
@@ -396,6 +416,9 @@ function render(){
 
   // --- vias (drawn AFTER components so a via inside a pad stays visible) ---
   for (const v of State.vias) drawVia(ctx, v, selNet);
+
+  // --- ratsnest airwires (logical same-net connections) ---
+  if (View.ratsnest) renderRatsnest(ctx, selNet);
 
   // --- trace vertex handles (selected trace, select tool) ---
   if (Tools.name === "select" && UI.sel && UI.sel.type === "trace" && traceVisible(UI.sel.trace)){
@@ -439,10 +462,15 @@ function render(){
   if (Tools.snap){
     ctx.save();
     ctx.strokeStyle = "#ffffff";
-    ctx.lineWidth = 1.5/View.zoom;
+    ctx.lineWidth = 2.5/View.zoom;
     ctx.beginPath();
-    ctx.arc(Tools.snap.x, Tools.snap.y, 8/View.zoom, 0, Math.PI*2);
+    ctx.arc(Tools.snap.x, Tools.snap.y, 11/View.zoom, 0, Math.PI*2);
     ctx.stroke();
+    // solid centre dot marks the exact point the anchor will land on
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath();
+    ctx.arc(Tools.snap.x, Tools.snap.y, 2.5/View.zoom, 0, Math.PI*2);
+    ctx.fill();
     ctx.restore();
   }
 
@@ -546,9 +574,9 @@ function drawTrace(ctx, t, selNet){
   ctx.lineWidth = t.width || 3;
   ctx.globalAlpha = 0.85 * fa;
   pathTrace(ctx, t); ctx.stroke();
-  // thin side-colored core so layer is identifiable
+  // side-colored core so the layer is identifiable (and easy to aim an anchor at)
   ctx.strokeStyle = SIDE_COLORS[t.side] || "#fff";
-  ctx.lineWidth = Math.max((t.width||3)*0.3, 1/View.zoom);
+  ctx.lineWidth = Math.max((t.width||3)*0.55, 2/View.zoom);
   pathTrace(ctx, t); ctx.stroke();
   ctx.restore();
 }
@@ -759,6 +787,80 @@ function drawAlignOverlay(ctx){
       ctx.fillStyle = "#10141a"; ctx.font = "bold 11px Segoe UI";
       ctx.fillText(i+1, x0+8, yy+7);
       if (active){ ctx.fillStyle="#ffffff"; ctx.font="11px Segoe UI"; ctx.textAlign="left"; ctx.fillText("◄ place now", x0+sz+6, yy+sz/2); ctx.textAlign="center"; }
+    }
+  }
+  ctx.restore();
+}
+
+/* ---------- ratsnest: straight "airwire" links between same-net conductors ----------
+   Shows a net's logical connectivity as a minimum spanning tree over its pads and
+   vias. When a net is focused (hovered/selected) only that net's airwires are drawn
+   bright; otherwise every net is drawn faintly so the whole board's connectivity
+   reads at a glance. This is a reverse-engineering aid, not a router — it links the
+   things that SHOULD be on one net, regardless of which copper layer they sit on. */
+function netNodes(netId){
+  const pts = [];
+  for (const c of State.components){
+    const fp = compFootprint(c);
+    for (let pi=0; pi<c.pins.length; pi++){
+      if (c.pins[pi].netId !== netId) continue;
+      const fpin = fp.pins[pi]; if (!fpin) continue;
+      pts.push(pinWorldPos(c, fpin));
+    }
+  }
+  for (const v of State.vias) if (v.netId === netId) pts.push({ x:v.x, y:v.y });
+  return pts;
+}
+
+/* Prim's minimum spanning tree over a small point set → list of [i,j] edges */
+function mstEdges(pts){
+  const n = pts.length, edges = [];
+  if (n < 2) return edges;
+  const inTree = new Array(n).fill(false);
+  const best = new Array(n).fill(Infinity);
+  const from = new Array(n).fill(-1);
+  best[0] = 0;
+  for (let k=0; k<n; k++){
+    let u = -1, bd = Infinity;
+    for (let i=0; i<n; i++) if (!inTree[i] && best[i] < bd){ bd = best[i]; u = i; }
+    if (u < 0) break;
+    inTree[u] = true;
+    if (from[u] >= 0) edges.push([from[u], u]);
+    for (let v=0; v<n; v++){
+      if (inTree[v]) continue;
+      const d = Math.hypot(pts[u].x - pts[v].x, pts[u].y - pts[v].y);
+      if (d < best[v]){ best[v] = d; from[v] = u; }
+    }
+  }
+  return edges;
+}
+
+function renderRatsnest(ctx, selNet){
+  const focused = selNet && selNet !== -1;
+  ctx.save();
+  ctx.lineCap = "round";
+  ctx.setLineDash([5/View.zoom, 4/View.zoom]);
+  for (const net of State.nets){
+    if (focused && net.id !== selNet) continue;
+    const pts = netNodes(net.id);
+    if (pts.length < 2) continue;
+    const edges = mstEdges(pts);
+    const col = net.color || "#9aa3ad";
+    // airwires
+    ctx.strokeStyle = col;
+    ctx.globalAlpha = focused ? 0.95 : 0.38;
+    ctx.lineWidth = (focused ? 1.7 : 1.1)/View.zoom;
+    ctx.beginPath();
+    for (const [i,j] of edges){
+      ctx.moveTo(pts[i].x, pts[i].y);
+      ctx.lineTo(pts[j].x, pts[j].y);
+    }
+    ctx.stroke();
+    // node dots at each endpoint
+    ctx.globalAlpha = focused ? 0.9 : 0.32;
+    ctx.fillStyle = col;
+    for (const p of pts){
+      ctx.beginPath(); ctx.arc(p.x, p.y, 2.4/View.zoom, 0, Math.PI*2); ctx.fill();
     }
   }
   ctx.restore();
