@@ -215,26 +215,35 @@ function distToSeg(px,py,a,b){
    they're reachable from that side — through-hole pads (circles) reach every layer,
    SMD pads only their own side. "any" (via tool) snaps to everything;
    omitted/null disables trace snapping. */
-function snapToConductor(wx, wy, traceSide, tightTrace){
-  const tol = 16 / View.zoom;        // pads & vias
+function snapToConductor(wx, wy, traceSide, tightTrace, traceWidth){
+  const tol = 8 / View.zoom;         // vias
   const traceTol = 28 / View.zoom;   // generous reach for dragging an anchor onto a trace
-  let best = null, bestD = tol;
+  // when a trace width is supplied (drawing / moving an anchor) pads only snap when the
+  // cursor is right at the pad CENTRE — no edge grabbing. The reach scales with the pad's
+  // own size, clamped to 0.5×…2× the trace width, so tiny pads snap tight while big pads
+  // (where the centre is far from where you click) still grab from up to 2× the width.
+  const padCenter = !!traceWidth;
+  let best = null, bestD = Infinity;
   const filterPads = traceSide && traceSide !== "any";
   for (const c of State.components){
     const fp = compFootprint(c);
+    const s = State.pxPerMm * (c.scale || 1);
     for (let pi=0; pi<c.pins.length; pi++){
       const fpin = fp.pins[pi];
       // skip pads not reachable from this copper side (SMD pad on a different side)
       if (filterPads && fpin.shape !== "circle" && c.side !== traceSide) continue;
-      // measure to the pad's real edge so a long rectangular pad only snaps near
-      // the actual metal, but snap the trace point to the pad centre
-      const d = pinEdgeDist(c, fpin, wx, wy);
-      if (d < bestD){ const wp = pinWorldPos(c, fpin); bestD=d; best={x:wp.x,y:wp.y,attach:{type:"pin",comp:c,pinIdx:pi},netId:c.pins[pi].netId}; }
+      let wp = null, d, ptol;
+      if (padCenter){
+        wp = pinWorldPos(c, fpin); d = Math.hypot(wx-wp.x, wy-wp.y);     // to pad centre
+        const padR = Math.min(fpin.w, fpin.h) * s / 2;                   // pad's narrow half-extent
+        ptol = Math.max(traceWidth * 0.5, Math.min(padR, traceWidth * 2));
+      } else { d = pinEdgeDist(c, fpin, wx, wy); ptol = tol; }            // to pad edge (via tool)
+      if (d <= ptol && d < bestD){ if (!wp) wp = pinWorldPos(c, fpin); bestD=d; best={x:wp.x,y:wp.y,attach:{type:"pin",comp:c,pinIdx:pi},netId:c.pins[pi].netId}; }
     }
   }
   for (const v of State.vias){
     const d = Math.hypot(wx-v.x, wy-v.y);
-    if (d < bestD){ bestD=d; best={x:v.x,y:v.y,attach:{type:"via",via:v},netId:v.netId}; }
+    if (d <= tol && d < bestD){ bestD=d; best={x:v.x,y:v.y,attach:{type:"via",via:v},netId:v.netId}; }
   }
   if (traceSide){
     // when drawing (tightTrace) only snap within the nearby trace's own width, so a far

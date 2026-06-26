@@ -29,6 +29,7 @@ window.addEventListener("DOMContentLoaded", () => {
   Resolver.wire();
   UI.wireFpSearch();
   UI.wireNetSearch();
+  UI.wirePartSearch();
   autosaveInit();
   window.addEventListener("resize", viewResize);
   requestRender();
@@ -390,6 +391,7 @@ function wireKeyboard(){
         case "z": e.preventDefault(); if (e.shiftKey ? redo() : undo()) afterHistory(); return;
         case "y": e.preventDefault(); if (redo()) afterHistory(); return;
         case "d": e.preventDefault(); duplicateSelection(); return;
+        case "f": e.preventDefault(); UI.openPartsDialog(); return;
       }
       return;
     }

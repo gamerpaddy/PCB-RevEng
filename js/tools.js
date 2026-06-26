@@ -117,7 +117,7 @@ function onPointerMove(e){
 
   // snap preview for relevant tools
   if (Tools.name === "trace"){
-    Tools.snap = snapToConductor(w.x, w.y, Tools.tracePts ? Tools.traceSide : UI.copperSide(), true);
+    Tools.snap = snapToConductor(w.x, w.y, Tools.tracePts ? Tools.traceSide : UI.copperSide(), true, State.traceW);
   } else if (Tools.name === "via"){
     Tools.snap = snapToConductor(w.x, w.y, "any");
   } else Tools.snap = null;
@@ -182,6 +182,8 @@ function handleDrag(pt, w, e){
     case "move-comp":
       d.moved = true;
       d.comp.x = w.x - d.offX; d.comp.y = w.y - d.offY;
+      // drag connected trace anchors with the component, preserving relative position
+      if (d.anchors) for (const a of d.anchors){ a.pts[a.i].x = d.comp.x + a.dx; a.pts[a.i].y = d.comp.y + a.dy; }
       break;
     case "move-via":
       d.moved = true;
@@ -192,7 +194,7 @@ function handleDrag(pt, w, e){
     case "move-vert": {
       d.moved = true;
       // snap the anchor onto a nearby pad/via/other-trace so it can connect
-      let snap = snapToConductor(w.x, w.y, d.trace.side);
+      let snap = snapToConductor(w.x, w.y, d.trace.side, false, d.trace.width || 3);
       // don't let an anchor snap onto its own trace
       if (snap && snap.attach && snap.attach.type === "trace" && snap.attach.trace === d.trace) snap = null;
       d.snap = snap;
@@ -268,7 +270,17 @@ function selectDown(w, pt, e){
     const c = h.comp;
     if (compMoveLocked(c)){ UI.setHint(c.ref + " is move-locked — press " + Keymap.keyFor("edit.lock") + " to unlock"); requestRender(); return; }
     pushUndo();
-    Tools.drag = { kind:"move-comp", comp:c, offX:w.x-c.x, offY:w.y-c.y, moved:false };
+    // grab every trace vertex sitting on one of this component's pads so connected
+    // anchors translate along with the component, preserving their relative position
+    const anchors = [];
+    const fp = compFootprint(c);
+    const ctol = 6 / View.zoom;
+    for (const fpin of fp.pins)
+      for (const t of State.traces)
+        for (let i=0;i<t.points.length;i++)
+          if (pinEdgeDist(c, fpin, t.points[i].x, t.points[i].y) <= ctol)
+            anchors.push({ pts:t.points, i, dx:t.points[i].x-c.x, dy:t.points[i].y-c.y });
+    Tools.drag = { kind:"move-comp", comp:c, offX:w.x-c.x, offY:w.y-c.y, moved:false, anchors };
   } else if (h.type === "via"){
     pushUndo();
     // grab every trace vertex sitting on the via so connected anchors move along with it
@@ -514,8 +526,10 @@ function runChecker(){
       const wp = pinWorldPos(c, fpin);
       if (!p.netId){ unnetted.push({ comp:c, pinIdx:pi, wp }); continue; }
       // does a trace physically touch this pad but carry a different net?
+      const tht = fpin.shape === "circle"; // only through-hole pads reach other sides
       for (const t of State.traces){
         if (t.netId === p.netId || !t.netId) continue;
+        if (!(tht || t.side === c.side)) continue; // SMD pad ignores traces on other sides (e.g. copper below it)
         let touch = false;
         for (let k=0;k<t.points.length-1;k++){
           const pr = projectOnSeg(wp.x, wp.y, t.points[k], t.points[k+1]);
@@ -574,7 +588,7 @@ function componentDown(w, e){
 
 /* ---------------- trace tool ---------------- */
 function traceDown(w, e){
-  const snap = snapToConductor(w.x, w.y, Tools.tracePts ? Tools.traceSide : UI.copperSide(), true);
+  const snap = snapToConductor(w.x, w.y, Tools.tracePts ? Tools.traceSide : UI.copperSide(), true, State.traceW);
   const p = snap ? {x:snap.x, y:snap.y} : {x:w.x, y:w.y};
   if (!Tools.tracePts){
     Tools.tracePts = [p];
@@ -596,7 +610,7 @@ function finishTrace(endSnap){
     Tools.tracePts = pts;
   }
   if (!pts || pts.length < 2){ cancelTrace(); return; }
-  endSnap = endSnap || snapToConductor(pts[pts.length-1].x, pts[pts.length-1].y, Tools.traceSide, true);
+  endSnap = endSnap || snapToConductor(pts[pts.length-1].x, pts[pts.length-1].y, Tools.traceSide, true, State.traceW);
 
   // determine / create net
   let netId = null;

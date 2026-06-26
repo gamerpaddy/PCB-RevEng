@@ -111,6 +111,21 @@ select:focus,input:focus,textarea:focus{outline:1px solid var(--accent);}
 /* ---------- net list ---------- */
 #layer-list{flex:0 0 auto; max-height:42%; overflow-y:auto;}
 #left-panel{overflow:hidden;}
+#parts-dialog{min-width:340px;}
+#part-list{
+  max-height:50vh; min-height:120px; overflow-y:auto;
+  border:1px solid var(--line); border-radius:6px; padding:3px; background:rgba(0,0,0,.15);
+}
+.part-item{display:flex; align-items:center; gap:6px; padding:3px 5px; border-radius:4px; cursor:pointer;}
+.part-item:hover{background:var(--bg3);}
+.part-item.active{background:#1c3a5e;}
+.part-item.dup{background:rgba(196,84,72,.14);}
+.part-item.dup:hover{background:rgba(196,84,72,.24);}
+.part-item .pref{font-weight:600; flex:0 0 auto; display:flex; align-items:center; gap:5px;}
+.part-item .pval{flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--fg-dim); font-size:11px;}
+.part-item .pside{color:var(--fg-dim); font-size:10px; flex:0 0 auto;}
+.dup-badge{display:inline-block; background:#c45448; color:#fff; font-size:9px; font-weight:700;
+  line-height:1; padding:2px 4px; border-radius:3px; text-transform:uppercase; letter-spacing:.3px;}
 #net-list{
   flex:1 1 auto; min-height:80px; overflow-y:auto;
   border:1px solid var(--line); border-radius:6px; padding:3px; background:rgba(0,0,0,.15);

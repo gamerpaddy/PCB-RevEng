@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PCB RevEng — Reverse Engineering Workbench</title>
-<link rel="stylesheet" href="css/style.css?v=39">
+<link rel="stylesheet" href="css/style.css?v=46">
 </head>
 <body>
 <div id="loading-overlay">
@@ -227,7 +227,7 @@
   <!-- ======= CHECKER ======= -->
   <dialog id="checker-dialog">
     <div class="dlg-title">Design check</div>
-    <div id="checker-list" style="min-width:380px"></div>
+    <div id="checker-list" style="min-width:380px;max-height:55vh;overflow-y:auto"></div>
     <div class="dlg-buttons"><button id="checker-close" class="primary">Close</button></div>
   </dialog>
 
@@ -259,6 +259,25 @@
     <div class="dlg-buttons">
       <button id="quick-cancel">Cancel</button>
       <button id="quick-ok" class="primary">OK</button>
+    </div>
+  </dialog>
+
+  <!-- ======= PARTS SEARCH POPUP ======= -->
+  <dialog id="parts-dialog">
+    <div class="dlg-title">Parts <span id="part-count"></span></div>
+    <input id="part-search" placeholder="Search parts (ref / value)…" autocomplete="off"
+           style="width:100%;box-sizing:border-box;margin:0 0 8px;padding:5px 8px;background:#1c222b;border:1px solid #2e3742;border-radius:5px;color:#d7dde5;font-size:13px">
+    <div id="part-list"></div>
+    <div class="dlg-buttons"><button id="parts-close" class="primary">Close</button></div>
+  </dialog>
+
+  <!-- ======= DUPLICATE REFERENCE WARNING ======= -->
+  <dialog id="dupname-dialog">
+    <div class="dlg-title">&#9888; Reference already in use</div>
+    <div id="dupname-msg" style="margin-bottom:10px;max-width:340px"></div>
+    <div class="dlg-buttons">
+      <button id="dupname-abort">Abort</button>
+      <button id="dupname-swap" class="primary">Swap names</button>
     </div>
   </dialog>
 
@@ -345,24 +364,24 @@
   <input type="file" id="file-project" accept=".json,.pcbrev" hidden>
 </div>
 
-<script src="js/state.js?v=39"></script>
-<script src="js/footprints/core.js?v=39"></script>
-<script src="js/footprints/passives.js?v=39"></script>
-<script src="js/footprints/discrete.js?v=39"></script>
-<script src="js/footprints/connectors.js?v=39"></script>
-<script src="js/footprints/ics.js?v=39"></script>
-<script src="js/footprints/misc.js?v=39"></script>
-<script src="js/view.js?v=39"></script>
-<script src="js/layerstack.js?v=39"></script>
-<script src="js/tools.js?v=39"></script>
-<script src="js/align.js?v=39"></script>
-<script src="js/keymap.js?v=39"></script>
-<script src="js/resolver.js?v=39"></script>
-<script src="js/netlist.js?v=39"></script>
-<script src="js/ui.js?v=39"></script>
-<script src="js/kicadsearch.js?v=39"></script>
-<script src="js/fpdialog.js?v=39"></script>
-<script src="js/autosave.js?v=39"></script>
-<script src="js/main.js?v=39"></script>
+<script src="js/state.js?v=46"></script>
+<script src="js/footprints/core.js?v=46"></script>
+<script src="js/footprints/passives.js?v=46"></script>
+<script src="js/footprints/discrete.js?v=46"></script>
+<script src="js/footprints/connectors.js?v=46"></script>
+<script src="js/footprints/ics.js?v=46"></script>
+<script src="js/footprints/misc.js?v=46"></script>
+<script src="js/view.js?v=46"></script>
+<script src="js/layerstack.js?v=46"></script>
+<script src="js/tools.js?v=46"></script>
+<script src="js/align.js?v=46"></script>
+<script src="js/keymap.js?v=46"></script>
+<script src="js/resolver.js?v=46"></script>
+<script src="js/netlist.js?v=46"></script>
+<script src="js/ui.js?v=46"></script>
+<script src="js/kicadsearch.js?v=46"></script>
+<script src="js/fpdialog.js?v=46"></script>
+<script src="js/autosave.js?v=46"></script>
+<script src="js/main.js?v=46"></script>
 </body>
 </html>
