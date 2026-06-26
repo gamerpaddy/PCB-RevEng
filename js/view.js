@@ -215,9 +215,9 @@ function distToSeg(px,py,a,b){
    they're reachable from that side — through-hole pads (circles) reach every layer,
    SMD pads only their own side. "any" (via tool) snaps to everything;
    omitted/null disables trace snapping. */
-function snapToConductor(wx, wy, traceSide){
+function snapToConductor(wx, wy, traceSide, tightTrace){
   const tol = 16 / View.zoom;        // pads & vias
-  const traceTol = 28 / View.zoom;   // traces are thin and easy to miss → a more generous reach
+  const traceTol = 28 / View.zoom;   // generous reach for dragging an anchor onto a trace
   let best = null, bestD = tol;
   const filterPads = traceSide && traceSide !== "any";
   for (const c of State.components){
@@ -237,13 +237,16 @@ function snapToConductor(wx, wy, traceSide){
     if (d < bestD){ bestD=d; best={x:v.x,y:v.y,attach:{type:"via",via:v},netId:v.netId}; }
   }
   if (traceSide){
-    // traces get their own, larger tolerance; a pad/via only wins if it's actually closer
-    let tBest = null, tBestD = traceTol;
+    // when drawing (tightTrace) only snap within the nearby trace's own width, so a far
+    // trace doesn't grab the cursor; dragging an anchor keeps the generous reach. A
+    // pad/via still wins only when it is actually closer than the chosen trace.
+    let tBest = null, tBestD = Infinity;
     for (const t of State.traces){
       if (traceSide !== "any" && t.side !== traceSide) continue;
+      const ttol = tightTrace ? ((t.width||3)/2 + 2/View.zoom) : traceTol;
       for (let k=0; k<t.points.length-1; k++){
         const pr = projectOnSeg(wx, wy, t.points[k], t.points[k+1]);
-        if (pr.d < tBestD){
+        if (pr.d <= ttol && pr.d < tBestD){
           tBestD = pr.d;
           tBest = { x:pr.x, y:pr.y, attach:{type:"trace", trace:t}, netId:t.netId };
         }

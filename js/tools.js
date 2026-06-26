@@ -117,7 +117,7 @@ function onPointerMove(e){
 
   // snap preview for relevant tools
   if (Tools.name === "trace"){
-    Tools.snap = snapToConductor(w.x, w.y, Tools.tracePts ? Tools.traceSide : UI.copperSide());
+    Tools.snap = snapToConductor(w.x, w.y, Tools.tracePts ? Tools.traceSide : UI.copperSide(), true);
   } else if (Tools.name === "via"){
     Tools.snap = snapToConductor(w.x, w.y, "any");
   } else Tools.snap = null;
@@ -574,7 +574,7 @@ function componentDown(w, e){
 
 /* ---------------- trace tool ---------------- */
 function traceDown(w, e){
-  const snap = snapToConductor(w.x, w.y, Tools.tracePts ? Tools.traceSide : UI.copperSide());
+  const snap = snapToConductor(w.x, w.y, Tools.tracePts ? Tools.traceSide : UI.copperSide(), true);
   const p = snap ? {x:snap.x, y:snap.y} : {x:w.x, y:w.y};
   if (!Tools.tracePts){
     Tools.tracePts = [p];
@@ -596,7 +596,7 @@ function finishTrace(endSnap){
     Tools.tracePts = pts;
   }
   if (!pts || pts.length < 2){ cancelTrace(); return; }
-  endSnap = endSnap || snapToConductor(pts[pts.length-1].x, pts[pts.length-1].y, Tools.traceSide);
+  endSnap = endSnap || snapToConductor(pts[pts.length-1].x, pts[pts.length-1].y, Tools.traceSide, true);
 
   // determine / create net
   let netId = null;
