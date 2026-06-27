@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PCB RevEng — Reverse Engineering Workbench</title>
 
-<link rel="stylesheet" href="css/style.css?v=49">
+<link rel="stylesheet" href="css/style.css?v=54">
 
 </head>
 <body>
@@ -299,6 +299,19 @@
     </div>
   </dialog>
 
+  <!-- ======= VIA LAYER SPAN (blind / buried vias) ======= -->
+  <dialog id="viaspan-dialog">
+    <div class="dlg-title">Via layer span</div>
+    <div class="dlg-row"><label style="width:80px">Top layer</label><select id="viaspan-from" style="width:140px"></select></div>
+    <div class="dlg-row"><label style="width:80px">Bottom layer</label><select id="viaspan-to" style="width:140px"></select></div>
+    <div class="panel-hint" id="viaspan-hint" style="margin:6px 0 3px"></div>
+    <div class="dlg-buttons">
+      <button id="viaspan-through">Through (all)</button>
+      <button id="viaspan-cancel">Cancel</button>
+      <button id="viaspan-ok" class="primary">OK</button>
+    </div>
+  </dialog>
+
   <!-- ======= VALUE RESOLVER ======= -->
   <dialog id="res-dialog">
     <div class="dlg-title">Value resolver</div>
@@ -337,6 +350,12 @@
     <div class="dlg-title">3D layer stack</div>
     <div class="panel-hint" style="margin-bottom:8px">Exploded view of every copper side and the through-hole conductors linking them. Drag to orbit · scroll to zoom.</div>
     <canvas id="stack3d-canvas"></canvas>
+    <div id="stack3d-controls">
+      <label class="s3d-chk" title="Slice the board with section planes — drag the sliders to cut into it or peel layers off the stack"><input type="checkbox" id="s3d-clip"> Clip</label>
+      <div class="s3d-rng"><span>X</span><input type="range" id="s3d-x0"><input type="range" id="s3d-x1"></div>
+      <div class="s3d-rng"><span>Y</span><input type="range" id="s3d-y0"><input type="range" id="s3d-y1"></div>
+      <div class="s3d-rng"><span>Layers</span><input type="range" id="s3d-z0"><input type="range" id="s3d-z1"></div>
+    </div>
     <div class="dlg-buttons">
       <button id="stack3d-reset">Reset view</button>
       <button id="stack3d-close" class="primary">Close</button>
@@ -368,21 +387,21 @@
 </div>
 
 
-<script src="js/state.js?v=49"></script>
+<script src="js/state.js?v=54"></script>
 <script src="js/footprints/core.js?v=49"></script>
 <script src="js/footprints/passives.js?v=49"></script>
 <script src="js/footprints/discrete.js?v=49"></script>
 <script src="js/footprints/connectors.js?v=49"></script>
 <script src="js/footprints/ics.js?v=49"></script>
 <script src="js/footprints/misc.js?v=49"></script>
-<script src="js/view.js?v=49"></script>
-<script src="js/layerstack.js?v=49"></script>
-<script src="js/tools.js?v=49"></script>
+<script src="js/view.js?v=51"></script>
+<script src="js/layerstack.js?v=53"></script>
+<script src="js/tools.js?v=51"></script>
 <script src="js/align.js?v=49"></script>
 <script src="js/keymap.js?v=49"></script>
 <script src="js/resolver.js?v=49"></script>
 <script src="js/netlist.js?v=49"></script>
-<script src="js/ui.js?v=49"></script>
+<script src="js/ui.js?v=54"></script>
 <script src="js/kicadsearch.js?v=49"></script>
 <script src="js/fpdialog.js?v=49"></script>
 <script src="js/autosave.js?v=49"></script>

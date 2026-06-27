@@ -35,7 +35,7 @@ const TOOL_HINTS = {
   select:    "Click to select · drag to move · R rotate · B flip side · Del delete · double-click pin to name net",
   component: "Click to place · R rotate · B side · Esc cancel · C reopens footprint dialog",
   trace:     "Click pins/points to route · Enter/double-click finish · Esc cancel · starts & ends snap to pads/vias",
-  via:       "Click = via (reuses last net) · Shift-click = fresh via · Alt-click = PTH (plated hole) · double-click to name",
+  via:       "Click = via (reuses last net) · Shift-click = fresh via · Alt-click = PTH · double-click = layer span (blind/buried)",
   cut:       "Click on a trace to cut it in two — disconnected halves get separate nets",
   align:     "Drag active layer to move · Alt+wheel scale · Shift+drag rotate · “Align” button = 4-point skew-correcting fit",
   measure:   "Drag to measure a distance (px and mm)",
@@ -307,7 +307,8 @@ function onDoubleClick(e){
     // a pad / via / component under the cursor wins over trace editing, so double-clicking
     // a pad opens its settings even when a trace runs beneath it
     const h = hitTest(w.x, w.y);
-    if (h && (h.type==="pin" || h.type==="via")){ promptNetName(h); return; }
+    if (h && h.type==="via"){ UI.select(h); UI.openViaSpanEditor(h.via); return; } // set blind/buried layer span
+    if (h && h.type==="pin"){ promptNetName(h); return; }
     if (h && h.type==="comp"){ UI.select(h); UI.openQuickEdit(h.comp); return; } // quick ref + value editor
     // otherwise edit the trace under the cursor: on a vertex → remove it, on a segment → add a corner
     editTraceVertex(w);

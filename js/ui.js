@@ -219,9 +219,16 @@ UI.refreshNets = () => {
     item.className = "net-item" + (UI.activeNetId === n.id ? " active" : "");
     const pinCount = (map.get(n.id) || []).length;
     item.innerHTML = `<input type="color" class="net-color" value="${/^#[0-9a-fA-F]{6}$/.test(n.color)?n.color:"#888888"}" title="Net colour">
-      <span class="nname" title="${n.name}${n.protected?" (protected prefab)":""}">${n.protected?"🛡 ":""}${n.name}</span>
+      <button class="nprot${n.protected?" on":""}" title="${n.protected?"Protected — locked name, shielded from accidental merges. Click to unprotect.":"Click to protect — lock the name and shield from accidental merges."}">🛡</button>
+      <span class="nname" title="${escAttr(n.name)}${n.protected?" (protected)":""}">${escAttr(n.name)}</span>
       <span class="ncount">${pinCount}p</span>`;
     item.querySelector(".net-color").addEventListener("click", e => e.stopPropagation());
+    item.querySelector(".nprot").addEventListener("click", e => {
+      e.stopPropagation();
+      pushUndo((n.protected?"unprotect ":"protect ") + n.name);
+      setNetProtected(n.id, !n.protected);
+      UI.refreshNets(); UI.refreshInspector(); requestRender();
+    });
     item.querySelector(".net-color").addEventListener("input", e => {
       pushUndo("net colour"); n.color = e.target.value; requestRender();
     });
@@ -660,9 +667,11 @@ UI.inspectNetObj = (title, obj, setNet) => {
     ${inspRow("Net", `<span style="display:flex;gap:4px;flex:1;min-width:0"><input id="i-net" value="${escAttr(netName)}" placeholder="net name" style="flex:1;min-width:0"><button id="i-netgen" title="Generate a new unique net name">⊕</button></span>`)}
     ${isViaObj ? inspRow("Type", `<select id="i-kind"><option value="via">Via</option><option value="pth">PTH (plated hole)</option></select>`) : ""}
     ${isViaObj ? inspRow("Size", `<input id="i-vr" type="number" min="2" step="1" value="${obj.r||State.viaR}"> px`) : ""}
+    ${isViaObj ? inspRow("Span", `<span style="display:flex;gap:4px;flex:1;min-width:0;align-items:center"><span id="i-vspan" style="flex:1;min-width:0;font-size:11px;color:#aab4c2">${escAttr(viaSpanLabel(obj))}</span><button id="i-vspanedit" title="Set layer span (blind / buried via)">Edit…</button></span>`) : ""}
     <div class="insp-actions"><button id="i-del" class="danger">Delete</button></div>`;
   box.appendChild(sec);
   if (isViaObj){
+    sec.querySelector("#i-vspanedit").addEventListener("click", ()=> UI.openViaSpanEditor(obj));
     sec.querySelector("#i-kind").value = obj.kind || "via";
     sec.querySelector("#i-kind").addEventListener("change", e => {
       pushUndo("via type"); obj.kind = e.target.value;
@@ -681,6 +690,46 @@ UI.inspectNetObj = (title, obj, setNet) => {
     UI.refreshNets(); UI.refreshInspector(); requestRender();
   });
   sec.querySelector("#i-del").addEventListener("click", deleteSelection);
+};
+
+/* blind / buried via editor: pick the top + bottom copper side the via connects.
+   Setting the full outer span (front…back) stores nothing, keeping it a through via. */
+UI.openViaSpanEditor = (via) => {
+  const dlg = $("#viaspan-dialog");
+  const sides = availableSides();
+  if (sides.length < 3){
+    // 2-layer board: a via can only be front↔back, so there's no blind/buried option
+    UI.toast("Blind/buried vias need ≥3 copper layers (set a higher layer count).");
+    return;
+  }
+  const optHtml = sides.map(s => `<option value="${s}">${SIDE_LABELS[s] || s}</option>`).join("");
+  const fromSel = $("#viaspan-from"), toSel = $("#viaspan-to"), hint = $("#viaspan-hint");
+  fromSel.innerHTML = optHtml; toSel.innerHTML = optHtml;
+  const sp = viaSpanIdx(via);
+  fromSel.value = sides[sp.lo]; toSel.value = sides[sp.hi];
+  const order = () => { let lo = sides.indexOf(fromSel.value), hi = sides.indexOf(toSel.value); if (lo > hi){ const t=lo; lo=hi; hi=t; } return [lo, hi]; };
+  const updateHint = () => {
+    const [lo, hi] = order();
+    const through = lo === 0 && hi === sides.length - 1;
+    const n = hi - lo + 1;
+    hint.textContent = through ? "Through via — connects all copper layers."
+      : ((lo > 0 && hi < sides.length - 1) ? "Buried via" : "Blind via") + ` — spans ${n} layer${n>1?"s":""}.`;
+  };
+  fromSel.onchange = toSel.onchange = updateHint;
+  updateHint();
+  const apply = (through) => {
+    dlg.close();
+    pushUndo("via layer span");
+    let lo = 0, hi = sides.length - 1;
+    if (!through) [lo, hi] = order();
+    if (lo === 0 && hi === sides.length - 1){ delete via.from; delete via.to; } // through → store nothing
+    else { via.from = sides[lo]; via.to = sides[hi]; }
+    UI.refreshInspector(); requestRender();
+  };
+  $("#viaspan-ok").onclick = () => apply(false);
+  $("#viaspan-through").onclick = () => apply(true);
+  $("#viaspan-cancel").onclick = () => dlg.close();
+  dlg.showModal();
 };
 
 UI.inspectTrace = (t) => {
@@ -980,7 +1029,7 @@ UI.buildHelp = () => {
       [k("edit.side"),"Flip component side front/back"],
       [k("edit.lock"),"Lock / unlock component (blocks move, edit, delete)"],
       [k("edit.delete") + " / Backspace","Delete selection"],["Esc","Cancel current action / deselect"],
-      ["Enter","Finish trace"],["Double-click pad/via/trace","Name its net"],
+      ["Enter","Finish trace"],["Double-click pad/trace","Name its net"],["Double-click via","Set layer span (blind / buried)"],
       [k("edit.drawside"),"Cycle active draw side (F.Cu/B.Cu/inner)"],[k("edit.net"),"Rename net of selection"],
       ["Ctrl+Z / Ctrl+Y","Undo / redo"],["Ctrl+D","Duplicate component"],
     ]],

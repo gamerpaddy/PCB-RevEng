@@ -169,6 +169,7 @@ function hitTest(wx, wy){
   // vias first — they get priority over pads (vias often sit inside pads)
   for (let i=State.vias.length-1; i>=0; i--){
     const v = State.vias[i];
+    if (!viaVisible(v)) continue;   // a buried via you can't see here can't be grabbed here
     if (Math.hypot(wx-v.x, wy-v.y) <= (v.r||5) + tol*0.5)
       return { type:"via", via:v };
   }
@@ -242,6 +243,7 @@ function snapToConductor(wx, wy, traceSide, tightTrace, traceWidth){
     }
   }
   for (const v of State.vias){
+    if (filterPads && !viaOnSide(v, traceSide)) continue;  // blind via doesn't reach this copper side
     const d = Math.hypot(wx-v.x, wy-v.y);
     if (d <= tol && d < bestD){ bestD=d; best={x:v.x,y:v.y,attach:{type:"via",via:v},netId:v.netId}; }
   }
@@ -350,6 +352,13 @@ function traceVisible(t){
   return State.traceView !== "active" || View.xray || t.side === UI.drawSide();
 }
 
+/* a through via shows on every layer; a blind/buried via only shows on the copper
+   sides it actually reaches — same idea as compBodyVisible, so it disappears on
+   layers it isn't on (X-ray shows all) */
+function viaVisible(v){
+  return View.xray || viaOnSide(v, UI.drawSide());
+}
+
 /* in X-ray mode, fade objects that aren't on the side currently being drawn on
    (so the active side stands out over the see-through other side) */
 function xrayDim(side){
@@ -415,7 +424,13 @@ function render(){
   for (const c of State.components) drawComponent(ctx, c, selNet, !compBodyVisible(c));
 
   // --- vias (drawn AFTER components so a via inside a pad stays visible) ---
-  for (const v of State.vias) drawVia(ctx, v, selNet);
+  for (const v of State.vias){
+    // a focused net keeps its vias visible across every layer (matches traces above);
+    // otherwise a blind/buried via is hidden on layers it doesn't reach
+    const focused = selNet && selNet !== -1 && v.netId === selNet;
+    if (!viaVisible(v) && !focused) continue;
+    drawVia(ctx, v, selNet);
+  }
 
   // --- ratsnest airwires (logical same-net connections) ---
   if (View.ratsnest) renderRatsnest(ctx, selNet);
@@ -607,6 +622,14 @@ function drawVia(ctx, v, selNet){
   // drilled hole — larger relative bore for PTH
   ctx.fillStyle = "#0d0f12";
   ctx.beginPath(); ctx.arc(v.x,v.y,r*(pth?0.55:0.45),0,Math.PI*2); ctx.fill();
+  // blind / buried via: dashed outer ring so it reads as "not a full through via"
+  if (viaIsBlind(v)){
+    ctx.setLineDash([3/View.zoom, 2.5/View.zoom]);
+    ctx.lineWidth = 1.4/View.zoom;
+    ctx.strokeStyle = isDarkHex(viaCol) ? "#9aa3ad" : viaCol;
+    ctx.beginPath(); ctx.arc(v.x, v.y, r + 2.6/View.zoom, 0, Math.PI*2); ctx.stroke();
+    ctx.setLineDash([]);
+  }
   ctx.restore();
 }
 

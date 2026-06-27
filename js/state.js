@@ -8,7 +8,7 @@ const NET_COLORS = [
 ];
 
 const SIDE_COLORS = { front:"#ff4d4d", back:"#4d7dff", xray:"#9aa3ad" };
-const SIDE_LABELS = { front:"Front", back:"Back", xray:"X-ray (both sides)" };
+const SIDE_LABELS = { front:"Front", back:"Back", xray:"X-ray" };
 const INNER_COLORS = ["#37c871","#c87de0","#d8c44a","#4ac8c8","#e08a4a","#8a9ae0","#9ad84a","#e04a8a","#4a8ae0","#c8a37d"];
 for (let i = 1; i <= 10; i++){
   SIDE_COLORS["inner"+i] = INNER_COLORS[i-1];
@@ -46,6 +46,39 @@ function availableSides(){
   return out;
 }
 
+/* ---------- via layer span (blind / buried vias) ----------
+   A via with no from/to spans the whole stack (a normal through via). from/to are
+   copper side names ("front","inner1",…,"back"); resolved here to indices into the
+   current stackup so the span survives layer-count changes. */
+function viaSpanIdx(v){
+  const sides = availableSides();
+  const last = sides.length - 1;
+  let lo = v.from ? sides.indexOf(v.from) : 0;
+  let hi = v.to   ? sides.indexOf(v.to)   : last;
+  if (lo < 0) lo = 0;
+  if (hi < 0) hi = last;
+  if (lo > hi){ const t = lo; lo = hi; hi = t; }
+  return { lo, hi, sides };
+}
+/* does the via reach a given copper side? */
+function viaOnSide(v, side){
+  const { lo, hi, sides } = viaSpanIdx(v);
+  const i = sides.indexOf(side);
+  return i >= 0 && i >= lo && i <= hi;
+}
+/* true when the via does NOT reach both outer layers (i.e. it is blind or buried) */
+function viaIsBlind(v){
+  const { lo, hi, sides } = viaSpanIdx(v);
+  return lo > 0 || hi < sides.length - 1;
+}
+/* short human label for the span, e.g. "Through (all layers)" or "Front → Inner 1" */
+function viaSpanLabel(v){
+  const { lo, hi, sides } = viaSpanIdx(v);
+  if (lo === 0 && hi === sides.length - 1) return "Through (all layers)";
+  const nm = (s) => SIDE_LABELS[s] || s;
+  return nm(sides[lo]) + " → " + nm(sides[hi]);
+}
+
 /* ---------- nets ---------- */
 /* prefab power nets — protected: cannot be renamed, and never lose a merge */
 const PROTECTED_NET_NAMES = ["GND","AGND","DGND","VCC","VDD","VSS","VEE","+3V3","+5V","+12V","-12V","VBAT"];
@@ -68,6 +101,22 @@ function createNet(name){
 }
 function getNet(id){ return State.nets.find(n => n.id === id) || null; }
 function findNetByName(name){ return State.nets.find(n => n.name === name) || null; }
+
+/* protect / unprotect a net. Protecting locks the name and shields it from accidental
+   merges (and applies the standard power/ground colour when one is known); unprotecting
+   — allowed even for prefab nets like GND / VCC — just clears the flag so the net can be
+   renamed and merged like any ordinary net. Returns the resulting protected state. */
+function setNetProtected(id, prot){
+  const net = getNet(id);
+  if (!net) return false;
+  net.protected = !!prot;
+  if (prot){
+    net.auto = false;
+    const std = PROTECTED_COLORS[net.name.toUpperCase()];
+    if (std) net.color = std;
+  }
+  return net.protected;
+}
 
 /* number of component pads on a net */
 function netPinCount(netId){
