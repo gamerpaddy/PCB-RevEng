@@ -32,6 +32,7 @@ const State = {
   vias: [],             // {id,x,y,netId,r}
   traces: [],           // {id,side,netId,points:[{x,y}],width}
   nets: [],             // {id,name,color,auto}
+  bomColumns: [],       // custom BOM column names (MPN, Supplier, …); per-part values live in component.bom
   _id: 1,
   refCounters: {},      // prefix -> last number
 };
@@ -256,6 +257,7 @@ function snapshot(){
     vias: State.vias,
     traces: State.traces,
     nets: State.nets,
+    bomColumns: State.bomColumns,
     _id: State._id,
     refCounters: State.refCounters,
     layersMeta: State.layers.map(l => ({
@@ -287,6 +289,7 @@ function applySnapshot(json){
   State.vias = s.vias;
   State.traces = s.traces;
   State.nets = s.nets;
+  State.bomColumns = s.bomColumns || [];
   State._id = s._id;
   State.refCounters = s.refCounters;
   for (const m of s.layersMeta){
@@ -371,6 +374,7 @@ function serializeProject(){
     _id: State._id,
     refCounters: State.refCounters,
     nets: State.nets,
+    bomColumns: State.bomColumns,
     components: State.components,
     vias: State.vias,
     traces: State.traces,
@@ -397,6 +401,7 @@ function loadProject(json, done){
   State._id = s._id || 1;
   State.refCounters = s.refCounters || {};
   State.nets = s.nets || [];
+  State.bomColumns = s.bomColumns || [];
   State.components = s.components || [];
   State.vias = s.vias || [];
   State.traces = s.traces || [];
@@ -429,6 +434,7 @@ function resetProject(){
   State.vias = [];
   State.traces = [];
   State.nets = [];
+  State.bomColumns = [];
   State._id = 1;
   State.refCounters = {};
   Undo.stack.length = 0; Undo.redo.length = 0;

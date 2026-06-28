@@ -640,12 +640,8 @@ UI.inspectComponent = (c, selPin) => {
     bindLive(inp, "edit pin name", v => { c.pins[+inp.dataset.i].name = v; }));
   pinSec.querySelectorAll(".pnet").forEach(inp => inp.addEventListener("change", e => {
     const i = +e.target.dataset.i;
-    pushUndo("pin net " + c.ref + "." + c.pins[i].num);
-    // island-aware: renames/moves only the copper actually wired to this pin
-    if (!assignNetToObject({type:"pin", comp:c, pinIdx:i}, e.target.value)){
-      Undo.stack.pop(); // blocked by protection — nothing changed
-    }
-    UI.refreshNets(); UI.refreshInspector(); requestRender();
+    // asks whether to rename the whole net or peel just this pad off, when it shares a net
+    applyNetRename({type:"pin", comp:c, pinIdx:i}, e.target.value);
   }));
   pinSec.querySelectorAll("tr[data-i]").forEach(tr => tr.addEventListener("click", e => {
     // ignore clicks on any form control (rebuilding the table would close a <select>)
@@ -684,10 +680,7 @@ UI.inspectNetObj = (title, obj, setNet) => {
   }
   sec.querySelector("#i-netgen").addEventListener("click", ()=>{ sec.querySelector("#i-net").value = uniqueNetName(); sec.querySelector("#i-net").dispatchEvent(new Event("change")); });
   sec.querySelector("#i-net").addEventListener("change", e => {
-    pushUndo("via net");
-    if (!assignNetToObject({type:"via", via:UI.sel.via}, e.target.value)) Undo.stack.pop();
-    if (e.target.value.trim()) Tools.lastViaNet = e.target.value.trim(); // remember for next via
-    UI.refreshNets(); UI.refreshInspector(); requestRender();
+    applyNetRename({type:"via", via:UI.sel.via}, e.target.value);
   });
   sec.querySelector("#i-del").addEventListener("click", deleteSelection);
 };
@@ -748,9 +741,7 @@ UI.inspectTrace = (t) => {
   sec.querySelector("#i-netgen").addEventListener("click", ()=>{ sec.querySelector("#i-net").value = uniqueNetName(); sec.querySelector("#i-net").dispatchEvent(new Event("change")); });
   sec.querySelector("#i-selnet").addEventListener("click", ()=>{ if (t.netId) UI.selectNetTraces(t.netId); requestRender(); });
   sec.querySelector("#i-net").addEventListener("change", e => {
-    pushUndo("trace net");
-    if (!assignNetToObject({type:"trace", trace:t}, e.target.value)) Undo.stack.pop();
-    UI.refreshNets(); UI.refreshInspector(); requestRender();
+    applyNetRename({type:"trace", trace:t}, e.target.value);
   });
   sec.querySelector("#i-tside").addEventListener("change", e => { pushUndo(); t.side = e.target.value; requestRender(); });
   sec.querySelector("#i-w").addEventListener("change", e => { pushUndo(); t.width = Math.max(0.5, parseFloat(e.target.value)||3); requestRender(); });
@@ -769,6 +760,7 @@ UI.openExport = () => {
   const update = () => {
     const fmt = $("#export-format").value;
     $("#export-preview").value = netlistFor(fmt).text;
+    $("#export-editbom").style.display = (fmt === "bom") ? "" : "none";
     // only KiCad exports carry footprints, so only warn for those formats
     const missing = (fmt === "kicad" || fmt === "sch") ? missingKicadFootprints() : null;
     if (missing && missing.length){
@@ -786,6 +778,84 @@ UI.openExport = () => {
   $("#export-format").onchange = update;
   update();
   dlg.showModal();
+};
+
+/* ---------------- BOM editor ----------------
+   Spreadsheet over the grouped BOM. Editing Value/Part/Footprint rewrites every part
+   on that row (and may regroup); custom columns store per-part values in component.bom
+   and aggregate to a row value (blank when the parts disagree). */
+UI.openBomEditor = () => {
+  const dlg = $("#bom-dialog");
+  UI._renderBomTable();
+  if (!dlg.open) dlg.showModal();
+};
+
+UI._renderBomTable = () => {
+  const table = $("#bom-table");
+  if (!table) return;
+  const wrap = $("#bom-table-wrap");
+  const sc = wrap ? wrap.scrollTop : 0;
+  const cols = State.bomColumns || [];
+  const groups = bomGroups();
+  UI._bomGroups = groups;                                 // referenced by the change handlers
+  $("#bom-count").textContent = "(" + groups.length + " lines · " + State.components.length + " parts)";
+
+  let h = "<thead><tr><th class='bom-idx'>#</th><th class='bom-qty'>Qty</th><th>Value</th><th>Part</th><th>Footprint</th><th>References</th>";
+  cols.forEach((c, ci) => { h += `<th>${escAttr(c)} <button class="bom-delcol" data-ci="${ci}" title="Remove column">×</button></th>`; });
+  h += "</tr></thead><tbody>";
+  groups.forEach((g, gi) => {
+    const refs = g.refs.join(", ");
+    h += `<tr data-gi="${gi}">`
+      + `<td class="bom-idx">${gi+1}</td>`
+      + `<td class="bom-qty">${g.refs.length}</td>`
+      + `<td><input class="bom-cell" data-f="value" value="${escAttr(g.value)}"></td>`
+      + `<td><input class="bom-cell" data-f="part" value="${escAttr(g.part)}"></td>`
+      + `<td><input class="bom-cell" data-f="footprint" value="${escAttr(g.footprint)}"></td>`
+      + `<td class="bom-refs" title="${escAttr(refs)}">${escAttr(refs)}</td>`;
+    cols.forEach(col => { h += `<td><input class="bom-cell" data-f="col" data-col="${escAttr(col)}" value="${escAttr(bomFieldCommon(g, col))}"></td>`; });
+    h += "</tr>";
+  });
+  h += "</tbody>";
+  table.innerHTML = h;
+  if (wrap) wrap.scrollTop = sc;
+
+  table.querySelectorAll(".bom-cell").forEach(inp => {
+    inp.addEventListener("change", e => {
+      const g = UI._bomGroups[+e.target.closest("tr").dataset.gi];
+      if (!g) return;
+      const f = e.target.dataset.f, val = e.target.value;
+      pushUndo("BOM edit");
+      if (f === "value")      g.comps.forEach(c => c.value = val.trim());
+      else if (f === "part")  g.comps.forEach(c => c.part  = val.trim());
+      else if (f === "footprint") g.comps.forEach(c => { c.kicad = val.trim(); c._fp = null; });
+      else if (f === "col"){
+        const col = e.target.dataset.col;
+        g.comps.forEach(c => { (c.bom || (c.bom = {}))[col] = val; });
+        UI.refreshInspector();
+        return;                                            // custom cols don't change grouping → no rebuild
+      }
+      UI._renderBomTable();                                // value/part/footprint may merge rows
+      UI.refreshInspector(); UI.refreshNets(); requestRender();
+    });
+  });
+  table.querySelectorAll(".bom-delcol").forEach(btn => {
+    btn.addEventListener("click", e => {
+      const ci = +e.target.dataset.ci, col = State.bomColumns[ci];
+      if (!confirm("Remove column “" + col + "”?\n(The values stay on the parts but are no longer shown or exported.)")) return;
+      pushUndo("remove BOM column");
+      State.bomColumns.splice(ci, 1);
+      UI._renderBomTable();
+    });
+  });
+};
+
+UI.addBomColumn = () => {
+  const name = (prompt("New column name (e.g. MPN, Supplier, Price, Notes):", "") || "").trim();
+  if (!name) return;
+  if ((State.bomColumns || []).includes(name)){ UI.toast("Column “" + name + "” already exists"); return; }
+  pushUndo("add BOM column");
+  (State.bomColumns || (State.bomColumns = [])).push(name);
+  UI._renderBomTable();
 };
 
 /* ---------------- right-click context menu ---------------- */
@@ -856,6 +926,20 @@ UI.openNetPopup = (title, current, onPick) => {
   dlg.addEventListener("close", () => document.removeEventListener("keydown", keyPick, true), { once:true });
   dlg.showModal();
   inp.focus(); inp.select();
+};
+
+/* ask whether a rename should touch the whole net or just the one pad/via.
+   cb is called with "all", "one", or null (cancelled). */
+UI.openNetScopeDialog = (oldName, newName, count, cb) => {
+  const dlg = $("#netscope-dialog");
+  $("#netscope-msg").innerHTML = `<b>“${escAttr(oldName)}”</b> has ${count} pads/vias/traces on it. What should renaming to <b>“${escAttr(newName)}”</b> affect?`;
+  $("#netscope-all").textContent = "Rename all on “" + oldName + "” → “" + newName + "”";
+  $("#netscope-one").textContent = "Rename just this one → “" + newName + "” (disconnect from “" + oldName + "”)";
+  const pick = (scope) => { dlg.close(); cb(scope); };
+  $("#netscope-all").onclick    = () => pick("all");
+  $("#netscope-one").onclick    = () => pick("one");
+  $("#netscope-cancel").onclick = () => pick(null);
+  dlg.showModal();
 };
 
 /* ---------------- checker ---------------- */
@@ -1034,7 +1118,7 @@ UI.buildHelp = () => {
       ["Ctrl+Z / Ctrl+Y","Undo / redo"],["Ctrl+D","Duplicate component"],
     ]],
     ["Project", [
-      ["Ctrl+S","Save project (.json incl. images)"],["Ctrl+O","Open project"],["Ctrl+E","Export netlist (KiCad/CSV/JSON)"],
+      ["Ctrl+S","Save project (.json incl. images)"],["Ctrl+O","Open project"],["Ctrl+E","Export (netlist / BOM / schematic / CSV / JSON)"],
     ]],
     ["Workflow", [
       ["1.","Drop front & back photos · set the back photo's side to Back + Mirror ⇋"],

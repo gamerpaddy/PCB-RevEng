@@ -374,19 +374,28 @@ function removeTraceVertex(t, i){
   requestRender();
 }
 
-/* assign `name` to the geometrically-connected island around obj.
-   Disconnected members of the old net keep their name; the island's traces
-   follow the rename. Returns false when blocked by net protection. */
-function assignNetToObject(obj, name){
+/* the netId currently on a pad/via/trace hit-object */
+function objNetId(obj){
+  return obj.type==="pin" ? obj.comp.pins[obj.pinIdx].netId :
+         obj.type==="via" ? obj.via.netId : obj.trace.netId;
+}
+
+/* Assign `name` to a pad/via/trace.
+   · name === ""  → detach just this object from its net.
+   · scope "one"  → move ONLY this object onto `name`; the rest of the old net stays put.
+   · scope "all"  → rename the whole current net (every pad/via/trace on it). Also the
+                    natural path when the net has a single member.
+   Returns false when blocked by net protection. */
+function assignNetToObject(obj, name, scope){
   name = (name || "").trim();
-  const getId = () => obj.type==="pin" ? obj.comp.pins[obj.pinIdx].netId :
-                      obj.type==="via" ? obj.via.netId : obj.trace.netId;
+  scope = scope || "all";
   const setId = (id) => {
     if (obj.type==="pin") obj.comp.pins[obj.pinIdx].netId = id;
     else if (obj.type==="via") obj.via.netId = id;
     else obj.trace.netId = id;
   };
-  const oldId = getId();
+  const oldId = objNetId(obj);
+
   if (!name){ // clearing: detach just this object
     if (oldId){
       const old = getNet(oldId);
@@ -394,52 +403,67 @@ function assignNetToObject(obj, name){
         UI.toast(old.name + " is protected"); return false;
       }
       setId(null);
+      pruneNets();
     }
     return true;
   }
+
+  const target = () => findNetByName(name) || findNetByName(name.toUpperCase()) || createNet(name);
+
   if (oldId){
-    // isolate the connected island first, so the rename never leaks to
-    // same-named objects that aren't actually wired to this one
-    splitNetByConnectivity(oldId);
-    const islandId = getId();
-    const islandNet = getNet(islandId);
-    const islandSize = netMembers(islandId).length;
-    if (islandNet && islandNet.name === name) return true; // no-op
-    if (islandNet && islandNet.protected && islandSize > 1){
-      UI.toast(islandNet.name + " is protected — disconnect first (cut tool) to rename this copper");
-      return false;
+    const old = getNet(oldId);
+    if (old && old.name === name) return true;             // no-op
+    if (scope === "one" && netMembers(oldId).length > 1){
+      setId(target().id);                                  // peel just this object off
+      pruneNets();
+      return true;
     }
-    if (islandSize === 1){
-      // lone object: simply reassign it
-      const target = findNetByName(name) ||
-                     findNetByName(name.toUpperCase()) || createNet(name);
-      setId(target.id);
-    } else {
-      if (!renameNet(islandId, name)){
-        UI.toast("Could not rename — protected net");
-        return false;
-      }
+    if (!renameNet(oldId, name)){                          // rename (and possibly merge) the whole net
+      UI.toast("Could not rename — protected net"); return false;
     }
-  } else {
-    const target = findNetByName(name) || findNetByName(name.toUpperCase()) || createNet(name);
-    setId(target.id);
+    return true;
   }
+
+  setId(target().id);                                      // had no net
   pruneNets();
   return true;
 }
 
+/* Apply a typed net name to a pad/via/trace, asking how far the rename should reach
+   when the current net has several members (rename the whole net vs. peel this one
+   off). Handles undo + refresh itself; runs `done` afterwards. */
+function applyNetRename(obj, name, done){
+  name = (name || "").trim();
+  const oldId = objNetId(obj);
+  const old = oldId ? getNet(oldId) : null;
+  const members = oldId ? netMembers(oldId).length : 0;
+  const finish = () => {
+    if (obj.type === "via" && name) Tools.lastViaNet = name;  // remember for the next via
+    UI.refreshNets(); UI.refreshInspector(); requestRender();
+    done && done();
+  };
+  // unambiguous: clearing, no current net, unchanged name, or a lone member → no prompt
+  if (!name || !old || old.name === name || members <= 1){
+    pushUndo("name net");
+    if (!assignNetToObject(obj, name, "all")) Undo.stack.pop();
+    finish();
+    return;
+  }
+  // the net has other members — ask what the rename should affect
+  UI.openNetScopeDialog(old.name, name, members, (scope) => {
+    if (!scope){ done && done(); return; }                 // cancelled — nothing changes
+    pushUndo(scope === "all" ? "rename net " + old.name : "split net " + old.name);
+    if (!assignNetToObject(obj, name, scope)) Undo.stack.pop();
+    finish();
+  });
+}
+
 function promptNetName(h){
-  const netId = h.type==="pin" ? h.comp.pins[h.pinIdx].netId :
-                h.type==="via" ? h.via.netId : h.trace.netId;
+  const netId = objNetId(h);
   const cur = netId ? (getNet(netId)?.name || "") : "";
   const label = h.type==="via" ? "Via net" : h.type==="trace" ? "Trace net" :
                 (h.comp.ref + "." + h.comp.pins[h.pinIdx].num + " net");
-  UI.openNetPopup(label, cur, (name) => {
-    pushUndo("name net");
-    assignNetToObject(h, name);
-    if (h.type === "via" && name.trim()) Tools.lastViaNet = name.trim(); // remember for next via
-    UI.refreshNets(); UI.refreshInspector(); requestRender();
-  });
+  UI.openNetPopup(label, cur, (name) => applyNetRename(h, name));
 }
 
 /* duplicate the selected component with the next free reference */

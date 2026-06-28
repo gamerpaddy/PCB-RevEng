@@ -55,6 +55,14 @@ function exportKiCad(){
   return lines.join("\n");
 }
 
+/* serialise a row array to RFC-4180 CSV (quote fields with comma/quote/newline) */
+function _toCSV(rows){
+  return rows.map(r => r.map(v => {
+    v = String(v == null ? "" : v);
+    return /[",\n]/.test(v) ? '"' + v.replace(/"/g,'""') + '"' : v;
+  }).join(",")).join("\n");
+}
+
 function exportCSV(){
   const rows = [["ref","value","part","footprint","pin","pin_name","net"]];
   for (const c of State.components){
@@ -64,10 +72,58 @@ function exportCSV(){
       rows.push([c.ref, c.value, c.part, c.kicad || fp.label, p.num, p.name, net]);
     }
   }
-  return rows.map(r => r.map(v => {
-    v = String(v == null ? "" : v);
-    return /[",\n]/.test(v) ? '"' + v.replace(/"/g,'""') + '"' : v;
-  }).join(",")).join("\n");
+  return _toCSV(rows);
+}
+
+/* ---------- Bill of Materials ----------
+   Collapses components that share the same value + part + footprint into a single
+   BOM line, with the quantity and a naturally-sorted list of reference designators. */
+function _refSortKey(ref){
+  const m = /^([^0-9]*)(\d+)?(.*)$/.exec(ref || "");
+  return [ (m && m[1]) || "", (m && m[2] != null) ? parseInt(m[2],10) : -1, (m && m[3]) || "" ];
+}
+function _refCmp(a, b){
+  const ka = _refSortKey(a), kb = _refSortKey(b);
+  if (ka[0] !== kb[0]) return ka[0] < kb[0] ? -1 : 1;   // prefix (R, C, U…)
+  if (ka[1] !== kb[1]) return ka[1] - kb[1];            // number, naturally (R9 < R10)
+  return ka[2] < kb[2] ? -1 : (ka[2] > kb[2] ? 1 : 0);  // suffix (IC1A < IC1B)
+}
+
+function bomGroups(){
+  const groups = new Map(); // key -> {value, part, footprint, comps:[], refs:[]}
+  for (const c of State.components){
+    const fp = compFootprint(c);
+    const footprint = c.kicad || fp.kicad || fp.label || "";
+    const value = (c.value || "").trim();
+    const part  = (c.part  || "").trim();
+    const key = [value, part, footprint].join("");   // unambiguous group key
+    if (!groups.has(key)) groups.set(key, { value, part, footprint, comps: [] });
+    groups.get(key).comps.push(c);
+  }
+  const out = [...groups.values()];
+  out.forEach(g => { g.comps.sort((a,b) => _refCmp(a.ref, b.ref)); g.refs = g.comps.map(c => c.ref); });
+  out.sort((a, b) => _refCmp(a.refs[0], b.refs[0]));     // cluster lines by designator
+  return out;
+}
+
+/* common value of a custom BOM column across a group, or "" when its parts disagree */
+function bomFieldCommon(g, col){
+  let v = null;
+  for (const c of g.comps){
+    const cv = (c.bom && c.bom[col]) || "";
+    if (v === null) v = cv; else if (v !== cv) return "";
+  }
+  return v || "";
+}
+
+function exportBOM(){
+  const cols = State.bomColumns || [];
+  const rows = [["Item","Qty","Value","Part","Footprint","References", ...cols]];
+  bomGroups().forEach((g, i) => rows.push([
+    i+1, g.refs.length, g.value, g.part, g.footprint, g.refs.join(", "),
+    ...cols.map(col => bomFieldCommon(g, col)),
+  ]));
+  return _toCSV(rows);
 }
 
 function exportJSON(){
@@ -237,10 +293,11 @@ function missingKicadFootprints(){
 
 function netlistFor(format){
   switch (format){
-    case "csv":  return { text: exportCSV(),      ext: "csv",       mime: "text/csv" };
-    case "json": return { text: exportJSON(),     ext: "json",      mime: "application/json" };
-    case "sch":  return { text: exportKiCadSch(), ext: "kicad_sch", mime: "text/plain" };
-    default:     return { text: exportKiCad(),    ext: "net",       mime: "text/plain" };
+    case "bom":  return { text: exportBOM(),      ext: "csv",       mime: "text/csv",        base: "bom" };
+    case "csv":  return { text: exportCSV(),      ext: "csv",       mime: "text/csv",        base: "netlist" };
+    case "json": return { text: exportJSON(),     ext: "json",      mime: "application/json", base: "netlist" };
+    case "sch":  return { text: exportKiCadSch(), ext: "kicad_sch", mime: "text/plain",      base: "schematic" };
+    default:     return { text: exportKiCad(),    ext: "net",       mime: "text/plain",      base: "netlist" };
   }
 }
 

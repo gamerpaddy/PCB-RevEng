@@ -197,6 +197,23 @@ select:focus,input:focus,textarea:focus{outline:1px solid var(--accent);}
 .pin-table input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none; margin:0;}
 .pin-table tr.sel{background:#1c3a5e;}
 .insp-actions{display:flex; gap:6px; flex-wrap:wrap;}
+
+/* BOM editor */
+.dlg-sub{color:var(--fg-dim); font-size:11px; font-weight:400;}
+#bom-table-wrap{max-height:62vh; min-width:680px; overflow:auto; border:1px solid var(--line); border-radius:6px;}
+.bom-table{width:100%; border-collapse:collapse; font-size:12px; white-space:nowrap;}
+.bom-table th{position:sticky; top:0; z-index:1; background:var(--bg2); color:var(--fg-dim);
+  text-align:left; padding:4px 6px; border-bottom:1px solid var(--line); font-weight:600;}
+.bom-table td{padding:1px 3px; border-bottom:1px solid #1d242d;}
+.bom-table tbody tr:hover{background:var(--bg3);}
+.bom-table .bom-idx,.bom-table .bom-qty{color:var(--fg-dim); text-align:right; padding-right:8px;}
+.bom-table .bom-refs{max-width:240px; overflow:hidden; text-overflow:ellipsis; color:var(--fg-dim);}
+.bom-table input{width:100%; min-width:90px; font-size:12px; padding:2px 5px; border:1px solid transparent;
+  border-radius:4px; background:transparent; color:var(--fg);}
+.bom-table input:hover{border-color:var(--line);}
+.bom-table input:focus{border-color:var(--accent); background:var(--bg); outline:none;}
+.bom-delcol{background:none; border:none; color:var(--fg-dim); cursor:pointer; padding:0 2px; font-size:12px;}
+.bom-delcol:hover{color:#ff6b6b;}
 .insp-actions button{font-size:11px; padding:3px 8px;}
 button.danger{color:var(--danger); border-color:#5a2828;}
 

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PCB RevEng — Reverse Engineering Workbench</title>
 
-<link rel="stylesheet" href="css/style.css?v=54">
+<link rel="stylesheet" href="css/style.css?v=56">
 
 </head>
 <body>
@@ -25,7 +25,7 @@
       <button id="btn-new"        title="New project">New</button>
       <button id="btn-open"       title="Open project (.pcbrev.json)  [Ctrl+O]">Open</button>
       <button id="btn-save"       title="Save project  [Ctrl+S]">Save</button>
-      <button id="btn-export"     title="Export netlist  [Ctrl+E]">Export Netlist</button>
+      <button id="btn-export"     title="Export netlist / BOM / schematic  [Ctrl+E]">Export</button>
     </div>
 
     <div class="tb-group" id="toolbar">
@@ -139,11 +139,12 @@
 
   <!-- ======= EXPORT DIALOG ======= -->
   <dialog id="export-dialog">
-    <div class="dlg-title">Export netlist</div>
+    <div class="dlg-title">Export</div>
     <label class="dlg-row">Format
       <select id="export-format">
         <option value="kicad">KiCad netlist (.net) — import in Pcbnew</option>
         <option value="sch">KiCad schematic (.kicad_sch) — open in Eeschema</option>
+        <option value="bom">Bill of Materials (BOM) — CSV grouped by value</option>
         <option value="csv">CSV (ref, pin, net)</option>
         <option value="json">JSON</option>
       </select>
@@ -152,8 +153,21 @@
     <textarea id="export-preview" spellcheck="false"></textarea>
     <div class="dlg-buttons">
       <button id="export-close">Close</button>
+      <button id="export-editbom" style="display:none" title="Open the editable BOM table">Edit BOM…</button>
       <button id="export-copy">Copy</button>
       <button id="export-download" class="primary">Download</button>
+    </div>
+  </dialog>
+
+  <!-- ======= BOM EDITOR ======= -->
+  <dialog id="bom-dialog">
+    <div class="dlg-title">BOM editor <span id="bom-count" class="dlg-sub"></span></div>
+    <div class="panel-hint" style="margin-bottom:6px">Parts are grouped by value · part · footprint. Editing a cell updates every part on that row. Add columns for MPN, supplier, price, notes…</div>
+    <div id="bom-table-wrap"><table id="bom-table" class="bom-table"></table></div>
+    <div class="dlg-buttons">
+      <button id="bom-addcol">+ Add column</button>
+      <button id="bom-export">Download CSV</button>
+      <button id="bom-close" class="primary">Close</button>
     </div>
   </dialog>
 
@@ -299,6 +313,17 @@
     </div>
   </dialog>
 
+  <!-- ======= NET RENAME SCOPE ======= -->
+  <dialog id="netscope-dialog">
+    <div class="dlg-title">Rename net</div>
+    <div class="panel-hint" id="netscope-msg" style="max-width:360px;margin-bottom:10px"></div>
+    <div class="dlg-buttons" style="flex-direction:column;align-items:stretch;gap:6px">
+      <button id="netscope-all" class="primary"></button>
+      <button id="netscope-one"></button>
+      <button id="netscope-cancel">Cancel</button>
+    </div>
+  </dialog>
+
   <!-- ======= VIA LAYER SPAN (blind / buried vias) ======= -->
   <dialog id="viaspan-dialog">
     <div class="dlg-title">Via layer span</div>
@@ -387,7 +412,7 @@
 </div>
 
 
-<script src="js/state.js?v=54"></script>
+<script src="js/state.js?v=56"></script>
 <script src="js/footprints/core.js?v=49"></script>
 <script src="js/footprints/passives.js?v=49"></script>
 <script src="js/footprints/discrete.js?v=49"></script>
@@ -396,16 +421,16 @@
 <script src="js/footprints/misc.js?v=49"></script>
 <script src="js/view.js?v=51"></script>
 <script src="js/layerstack.js?v=53"></script>
-<script src="js/tools.js?v=51"></script>
+<script src="js/tools.js?v=57"></script>
 <script src="js/align.js?v=49"></script>
 <script src="js/keymap.js?v=49"></script>
 <script src="js/resolver.js?v=49"></script>
-<script src="js/netlist.js?v=49"></script>
-<script src="js/ui.js?v=54"></script>
+<script src="js/netlist.js?v=56"></script>
+<script src="js/ui.js?v=57"></script>
 <script src="js/kicadsearch.js?v=49"></script>
 <script src="js/fpdialog.js?v=49"></script>
 <script src="js/autosave.js?v=49"></script>
-<script src="js/main.js?v=49"></script>
+<script src="js/main.js?v=56"></script>
 
 </body>
 </html>

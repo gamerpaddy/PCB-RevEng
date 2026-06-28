@@ -486,7 +486,14 @@ function wireDialogs(){
   });
   $("#export-download").addEventListener("click", ()=>{
     const f = netlistFor($("#export-format").value);
-    downloadFile("netlist." + f.ext, f.text, f.mime);
+    downloadFile((f.base || "netlist") + "." + f.ext, f.text, f.mime);
+  });
+  $("#export-editbom").addEventListener("click", ()=> UI.openBomEditor());
+  $("#bom-close").addEventListener("click", ()=> $("#bom-dialog").close());
+  $("#bom-addcol").addEventListener("click", ()=> UI.addBomColumn());
+  $("#bom-export").addEventListener("click", ()=>{
+    const f = netlistFor("bom");
+    downloadFile("bom.csv", f.text, f.mime);
   });
   $("#help-close").addEventListener("click", ()=> $("#help-dialog").close());
   $("#help-sample").addEventListener("click", ()=>{
