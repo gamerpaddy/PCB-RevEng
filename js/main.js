@@ -365,6 +365,7 @@ function showCanvasContextMenu(cx, cy, w){
   } else if (h && h.type === "via"){
     UI.select(h);
     items.push({ label:"Set net…", action:()=>promptNetName(h) });
+    items.push({ label:"Set blind/buried span…", action:()=>UI.openViaSpanEditor(h.via) });
     items.push({ label: h.via.kind==="pth" ? "Change to via" : "Change to PTH", action:()=>{ pushUndo("via type"); h.via.kind = h.via.kind==="pth"?"via":"pth"; UI.refreshInspector(); requestRender(); } });
     items.push({ sep:true });
     items.push({ label: h.via.kind==="pth"?"Delete PTH":"Delete via", danger:true, action:()=>deleteSelection() });

@@ -358,6 +358,99 @@ function selectiveUndo(i){
   return true;
 }
 
+/* ---------- timeline detail: human summary of what an action changed ----------
+   Diffs the entry's "before" snapshot against the next one (or the live state for
+   the most recent entry) and returns a short description, e.g.
+   "J1: footprint" or "added 2 parts (R5, R6) · net GND renamed →VCC". */
+function undoDetail(i){
+  if (i < 0 || i >= Undo.stack.length) return "";
+  const beforeJson = Undo.stack[i].json;
+  const afterJson  = (i + 1 < Undo.stack.length) ? Undo.stack[i+1].json : snapshot();
+  return diffSnapshots(beforeJson, afterJson);
+}
+
+/* aspects of a single component that differ between two snapshots */
+function _compAspects(b, a){
+  const out = [];
+  if (b.ref !== a.ref)                          out.push("renamed →" + (a.ref || "?"));
+  if ((b.value||"") !== (a.value||""))          out.push("value");
+  if ((b.part ||"") !== (a.part ||""))          out.push("part");
+  if ((b.kicad||"") !== (a.kicad||"") || b.fpId !== a.fpId) out.push("footprint");
+  if (b.x !== a.x || b.y !== a.y || b.rot !== a.rot)        out.push("moved");
+  if (b.side !== a.side)                         out.push("flipped");
+  const pinNets = c => (c.pins||[]).map(p => p.netId || 0).join(",");
+  if (pinNets(b) !== pinNets(a))                 out.push("net");
+  const pinNC = c => (c.pins||[]).map(p => p.nc ? 1 : 0).join(",");
+  if (pinNC(b) !== pinNC(a))                     out.push("no-connect");
+  return out.length ? out.join(", ") : "edited";
+}
+
+function diffSnapshots(beforeJson, afterJson){
+  let b, a;
+  try { b = JSON.parse(beforeJson); a = JSON.parse(afterJson); } catch(e){ return ""; }
+  const parts = [];
+  const list = (names, max = 4) => {
+    const f = names.filter(Boolean);
+    if (!f.length) return "";
+    return " (" + f.slice(0, max).join(", ") + (f.length > max ? ", +" + (f.length - max) : "") + ")";
+  };
+  const diffColl = (col) => {
+    const bm = new Map((b[col]||[]).map(o => [o.id, o]));
+    const am = new Map((a[col]||[]).map(o => [o.id, o]));
+    const added = [], removed = [], changed = [];
+    for (const [id, o] of am) if (!bm.has(id)) added.push(o);
+    for (const [id, o] of bm){
+      if (!am.has(id)){ removed.push(o); continue; }
+      const ao = am.get(id);
+      if (JSON.stringify(ao) !== JSON.stringify(o)) changed.push([o, ao]);
+    }
+    return { added, removed, changed };
+  };
+
+  // components — name + per-object aspect detail
+  const c = diffColl("components");
+  if (c.added.length)   parts.push("added "   + c.added.length   + " part" + (c.added.length>1?"s":"")   + list(c.added.map(o=>o.ref)));
+  if (c.removed.length) parts.push("removed " + c.removed.length + " part" + (c.removed.length>1?"s":"") + list(c.removed.map(o=>o.ref)));
+  c.changed.forEach(([bo, ao]) => parts.push((bo.ref || "part") + ": " + _compAspects(bo, ao)));
+
+  // nets — name + rename / protect / colour detail
+  const n = diffColl("nets");
+  if (n.added.length)   parts.push("added "   + n.added.length   + " net" + (n.added.length>1?"s":"")   + list(n.added.map(o=>o.name)));
+  if (n.removed.length) parts.push("removed " + n.removed.length + " net" + (n.removed.length>1?"s":"") + list(n.removed.map(o=>o.name)));
+  n.changed.forEach(([bo, ao]) => {
+    const a2 = [];
+    if (bo.name !== ao.name)               a2.push("net " + bo.name + " renamed →" + ao.name);
+    if (!!bo.protected !== !!ao.protected) a2.push("net " + ao.name + (ao.protected ? " protected" : " unprotected"));
+    if (bo.color !== ao.color)             a2.push("net " + ao.name + " colour");
+    if (a2.length) parts.push(a2.join(", "));
+  });
+
+  // vias & traces — counts only (no useful per-object name)
+  for (const [col, noun] of [["vias","via"], ["traces","trace"]]){
+    const d = diffColl(col);
+    if (d.added.length)   parts.push("added "   + d.added.length   + " " + noun + (d.added.length>1?"s":""));
+    if (d.removed.length) parts.push("removed " + d.removed.length + " " + noun + (d.removed.length>1?"s":""));
+    if (d.changed.length) parts.push("changed " + d.changed.length + " " + noun + (d.changed.length>1?"s":""));
+  }
+
+  // image-layer transforms
+  const bl = new Map((b.layersMeta||[]).map(m => [m.id, m]));
+  const al = new Map((a.layersMeta||[]).map(m => [m.id, m]));
+  const layerNames = [];
+  for (const [id, bo] of bl){
+    const ao = al.get(id);
+    if (ao && JSON.stringify(ao) !== JSON.stringify(bo)) layerNames.push(bo.name);
+  }
+  if (layerNames.length) parts.push("adjusted " + layerNames.length + " layer" + (layerNames.length>1?"s":"") + list(layerNames));
+
+  // board-wide scalar settings
+  [ ["pxPerMm","scale"], ["layerCount","layer count"], ["viaR","via size"], ["traceW","trace width"],
+    ["refTextSize","label size"], ["compView","component view"], ["traceView","trace view"],
+  ].forEach(([k, lbl]) => { if (b[k] !== a[k]) parts.push(lbl + " changed"); });
+
+  return parts.join(" · ");
+}
+
 /* ---------- project save / load ---------- */
 function serializeProject(){
   return JSON.stringify({

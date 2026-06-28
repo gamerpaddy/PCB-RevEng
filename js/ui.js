@@ -1041,8 +1041,12 @@ UI.buildHistory = () => {
     const row = document.createElement("div");
     row.className = "hist-row";
     const t = new Date(e.time||Date.now());
+    const detail = (typeof undoDetail === "function") ? undoDetail(i) : "";
     row.innerHTML = `<span class="hist-time">${String(t.getHours()).padStart(2,"0")}:${String(t.getMinutes()).padStart(2,"0")}:${String(t.getSeconds()).padStart(2,"0")}</span>
-      <span class="hist-label">${e.label}</span>
+      <span class="hist-main">
+        <span class="hist-label">${escAttr(e.label)}</span>
+        ${detail ? `<span class="hist-detail">${escAttr(detail)}</span>` : ""}
+      </span>
       <button class="hist-undo" data-i="${i}">Undo this</button>`;
     box.appendChild(row);
   }
@@ -1144,7 +1148,8 @@ UI.buildHelp = () => {
       [k("edit.side"),"Flip component side front/back"],
       [k("edit.lock"),"Lock / unlock component (blocks move, edit, delete)"],
       [k("edit.delete") + " / Backspace","Delete selection"],["Esc","Cancel current action / deselect"],
-      ["Enter","Finish trace"],["Double-click pad/trace","Name its net"],["Double-click via","Set layer span (blind / buried)"],
+      ["Enter","Finish trace"],["Double-click pad/trace/via","Name its net"],["Shift+double-click via","Set layer span (blind / buried)"],
+      ["Shift+drag trace anchor","Detach it (no snapping)"],
       [k("edit.drawside"),"Cycle active draw side (F.Cu/B.Cu/inner)"],[k("edit.net"),"Rename net of selection"],
       ["Ctrl+Z / Ctrl+Y","Undo / redo"],["Ctrl+D","Duplicate component"],
     ]],

@@ -193,14 +193,25 @@ function handleDrag(pt, w, e){
       break;
     case "move-vert": {
       d.moved = true;
-      // snap the anchor onto a nearby pad/via/other-trace so it can connect
-      let snap = snapToConductor(w.x, w.y, d.trace.side, false, d.trace.width || 3);
-      // don't let an anchor snap onto its own trace
-      if (snap && snap.attach && snap.attach.type === "trace" && snap.attach.trace === d.trace) snap = null;
+      // Shift (checked LIVE, mid-drag) = DETACH: split the trace at this anchor so it
+      // pulls free, drop any junction it shared, and stop snapping
+      if (e && e.shiftKey){
+        if (!d.detached){ detachAnchor(d); d.detached = true; }
+        d.snap = null; Tools.snap = null;
+        d.trace.points[d.i].x = w.x;
+        d.trace.points[d.i].y = w.y;
+        break;
+      }
+      // snap onto a nearby pad/via/other-trace — excluding our own trace AND any trace
+      // we're already carrying, so the reach lands on a NEW conductor, not ourselves
+      const snap = snapToConductor(w.x, w.y, d.trace.side, false, d.trace.width || 3, d.excl);
       d.snap = snap;
       Tools.snap = snap; // white ring indicator
-      d.trace.points[d.i].x = snap ? snap.x : w.x;
-      d.trace.points[d.i].y = snap ? snap.y : w.y;
+      const nx = snap ? snap.x : w.x, ny = snap ? snap.y : w.y;
+      d.trace.points[d.i].x = nx;
+      d.trace.points[d.i].y = ny;
+      // adhere: carry coincident junction vertices of other traces along
+      if (d.linked) for (const L of d.linked){ L.pts[L.i].x = nx; L.pts[L.i].y = ny; }
       break;
     }
     case "move-layer":
@@ -238,7 +249,17 @@ function selectDown(w, pt, e){
     for (let i=0;i<t.points.length;i++){
       if (Math.hypot(w.x-t.points[i].x, w.y-t.points[i].y) <= hr){
         pushUndo("move trace point");
-        Tools.drag = { kind:"move-vert", trace:t, i, moved:false, sx:t.points[i].x, sy:t.points[i].y };
+        // grab coincident junction vertices on OTHER traces so the connection holds
+        // (adheres) when this anchor is moved again
+        const px = t.points[i].x, py = t.points[i].y, jtol = Math.max((t.width||3)*0.6, 2/View.zoom);
+        const linked = [];
+        for (const ot of State.traces){
+          if (ot === t) continue;
+          for (let j=0;j<ot.points.length;j++)
+            if (Math.hypot(ot.points[j].x-px, ot.points[j].y-py) <= jtol) linked.push({ pts:ot.points, i:j, trace:ot });
+        }
+        const excl = new Set([t]); linked.forEach(L => excl.add(L.trace));
+        Tools.drag = { kind:"move-vert", trace:t, i, moved:false, sx:px, sy:py, linked, excl };
         Tools.dragVert = { trace:t, i };
         requestRender();
         return;
@@ -307,7 +328,12 @@ function onDoubleClick(e){
     // a pad / via / component under the cursor wins over trace editing, so double-clicking
     // a pad opens its settings even when a trace runs beneath it
     const h = hitTest(w.x, w.y);
-    if (h && h.type==="via"){ UI.select(h); UI.openViaSpanEditor(h.via); return; } // set blind/buried layer span
+    if (h && h.type==="via"){
+      UI.select(h);
+      if (e.shiftKey) UI.openViaSpanEditor(h.via);   // Shift+double-click → blind/buried layer span
+      else            promptNetName(h);              // double-click → set net
+      return;
+    }
     if (h && h.type==="pin"){ promptNetName(h); return; }
     if (h && h.type==="comp"){ UI.select(h); UI.openQuickEdit(h.comp); return; } // quick ref + value editor
     // otherwise edit the trace under the cursor: on a vertex → remove it, on a segment → add a corner
@@ -779,6 +805,23 @@ function applyAttach(snap, netId){
   else if (a.type === "trace") a.trace.netId = netId;
 }
 
+/* Shift-detach: break a dragged anchor free. Any junction it shared is dropped
+   (the linked vertices stay put). If the anchor is an INTERIOR vertex, its trace is
+   split there into two and the drag continues on the tail piece so it pulls away. */
+function detachAnchor(d){
+  d.linked = null;                       // stop carrying coincident junctions
+  const t = d.trace, i = d.i, n = t.points.length;
+  if (i > 0 && i < n - 1){
+    const tail = t.points.slice(i).map(p => ({ x:p.x, y:p.y }));
+    const nt = { id:nextId(), side:t.side, netId:t.netId, width:t.width || State.traceW, points:tail };
+    t.points = t.points.slice(0, i + 1);  // head keeps its copy of vertex i in place
+    State.traces.push(nt);
+    d.trace = nt; d.i = 0;                 // continue the drag on the tail's free end
+    Tools.dragVert = { trace:nt, i:0 };
+    UI.select({ type:"trace", trace:nt });
+  }
+}
+
 /* connect a dragged trace anchor that was dropped on a pad/via/trace.
    Joins nets (with the usual protected-net checks) so the anchor really wires up. */
 function connectVertToSnap(trace, snap, vi){
@@ -801,6 +844,14 @@ function connectVertToSnap(trace, snap, vi){
     UI.toast("Traces merged → " + (getNet(net)?.name || "net"));
     requestRender();
     return;
+  }
+  // landed mid-trace (not an endpoint weld) → drop a coincident vertex on the target
+  // so it becomes a real T-junction that holds, and moves with the target if dragged
+  if (snap.attach.type === "trace" && snap.attach.seg != null){
+    const B = snap.attach.trace, k = snap.attach.seg;
+    const a = B.points[k], b = B.points[k+1], near = 1.5 / View.zoom;
+    if (a && b && Math.hypot(snap.x-a.x, snap.y-a.y) > near && Math.hypot(snap.x-b.x, snap.y-b.y) > near)
+      B.points.splice(k+1, 0, { x:snap.x, y:snap.y });
   }
   pruneNets(); UI.refreshNets();
   const where = snap.attach.type === "pin"
