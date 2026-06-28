@@ -214,6 +214,8 @@ select:focus,input:focus,textarea:focus{outline:1px solid var(--accent);}
 .bom-table input:focus{border-color:var(--accent); background:var(--bg); outline:none;}
 .bom-delcol{background:none; border:none; color:var(--fg-dim); cursor:pointer; padding:0 2px; font-size:12px;}
 .bom-delcol:hover{color:#ff6b6b;}
+.bom-table input.bom-badfp{color:#ff8a6a; border-color:#7a3a2a; background:rgba(255,90,60,0.08);}
+.bom-table input.bom-badfp:focus{border-color:#ff8a6a;}
 .insp-actions button{font-size:11px; padding:3px 8px;}
 button.danger{color:var(--danger); border-color:#5a2828;}
 

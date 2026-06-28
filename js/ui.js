@@ -786,6 +786,7 @@ UI.openExport = () => {
    and aggregate to a row value (blank when the parts disagree). */
 UI.openBomEditor = () => {
   const dlg = $("#bom-dialog");
+  if (typeof loadKicadFootprints === "function") loadKicadFootprints(); // for the footprint check
   UI._renderBomTable();
   if (!dlg.open) dlg.showModal();
 };
@@ -798,19 +799,25 @@ UI._renderBomTable = () => {
   const cols = State.bomColumns || [];
   const groups = bomGroups();
   UI._bomGroups = groups;                                 // referenced by the change handlers
-  $("#bom-count").textContent = "(" + groups.length + " lines · " + State.components.length + " parts)";
+  // flag footprints not present in the KiCad library list (same check as the export warning)
+  let badFp = 0;
+  groups.forEach(g => { g._badFp = !!g.footprint && !kicadFootprintKnown(g.footprint); if (g._badFp) badFp++; });
+  $("#bom-count").textContent = "(" + groups.length + " lines · " + State.components.length + " parts" +
+    (badFp ? " · ⚠ " + badFp + " footprint" + (badFp>1?"s":"") + " not in KiCad list" : "") + ")";
 
   let h = "<thead><tr><th class='bom-idx'>#</th><th class='bom-qty'>Qty</th><th>Value</th><th>Part</th><th>Footprint</th><th>References</th>";
   cols.forEach((c, ci) => { h += `<th>${escAttr(c)} <button class="bom-delcol" data-ci="${ci}" title="Remove column">×</button></th>`; });
   h += "</tr></thead><tbody>";
   groups.forEach((g, gi) => {
     const refs = g.refs.join(", ");
+    const fpCls = "bom-cell" + (g._badFp ? " bom-badfp" : "");
+    const fpTitle = g._badFp ? ' title="Not found in the KiCad footprint library list — fix it or it will not load in Pcbnew"' : "";
     h += `<tr data-gi="${gi}">`
       + `<td class="bom-idx">${gi+1}</td>`
       + `<td class="bom-qty">${g.refs.length}</td>`
       + `<td><input class="bom-cell" data-f="value" value="${escAttr(g.value)}"></td>`
       + `<td><input class="bom-cell" data-f="part" value="${escAttr(g.part)}"></td>`
-      + `<td><input class="bom-cell" data-f="footprint" value="${escAttr(g.footprint)}"></td>`
+      + `<td><input class="${fpCls}" data-f="footprint" value="${escAttr(g.footprint)}"${fpTitle}></td>`
       + `<td class="bom-refs" title="${escAttr(refs)}">${escAttr(refs)}</td>`;
     cols.forEach(col => { h += `<td><input class="bom-cell" data-f="col" data-col="${escAttr(col)}" value="${escAttr(bomFieldCommon(g, col))}"></td>`; });
     h += "</tr>";
@@ -913,12 +920,14 @@ UI.openNetPopup = (title, current, onPick) => {
   $("#netname-clear").onclick = () => finish("");
   $("#netname-cancel").onclick = () => { dlg.close(); document.removeEventListener("keydown", keyPick, true); };
   inp.onkeydown = (e) => { if (e.key === "Enter"){ e.preventDefault(); finish(inp.value.trim()); } };
-  // number keys 1-9 pick a quick net even while the input is focused
+  // number keys 1-9 pick a quick net. They fire when the field is empty OR its whole
+  // value is still selected — which is the just-opened state (we focus+select on open),
+  // so the hotkeys work immediately even though the current net name is pre-filled.
+  // Once the user starts typing (selection gone) digits type normally into the name.
+  const allSelected = () => inp.selectionStart === 0 && inp.selectionEnd === inp.value.length;
   const keyPick = (e) => {
-    if (e.target === inp && inp.value !== "" && !/^[1-9]$/.test(inp.value)) {
-      // allow typing digits into a name only if the field already has non-digit content
-    }
-    if (/^[1-9]$/.test(e.key) && quickNames[+e.key - 1] && (e.target !== inp || inp.value === "")){
+    if (!/^[1-9]$/.test(e.key) || !quickNames[+e.key - 1]) return;
+    if (e.target !== inp || inp.value === "" || allSelected()){
       e.preventDefault(); finish(quickNames[+e.key - 1]);
     }
   };
