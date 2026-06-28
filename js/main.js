@@ -7,7 +7,7 @@ const Keys = { space:false };
    markImagesDirty, loadDefaultProject, updateSaveStatus, etc. are defined there */
 
 window.addEventListener("DOMContentLoaded", () => {
-  restoreInspectorWidth();              // apply the saved inspector width BEFORE the canvas is sized
+  restorePanelWidths();                 // apply the saved panel widths BEFORE the canvas is sized
   viewInit(document.getElementById("canvas"));
   Keymap.load();
   UI.updateHotkeyHints();
@@ -25,7 +25,8 @@ window.addEventListener("DOMContentLoaded", () => {
   wireKeyboard();
   wireFiles();
   wireSettings();
-  wireRightResizer();
+  wirePanelResizer("#right-resizer", "#right-panel", "pcbreveng.inspW", "right");
+  wirePanelResizer("#left-resizer",  "#left-panel",  "pcbreveng.leftW",  "left");
   Resolver.wire();
   UI.wireFpSearch();
   UI.wireNetSearch();
@@ -58,6 +59,7 @@ function wireToolbar(){
   $("#btn-save").addEventListener("click", saveProject);
   $("#btn-open").addEventListener("click", ()=> $("#file-project").click());
   $("#btn-export").addEventListener("click", ()=> UI.openExport());
+  $("#btn-bom").addEventListener("click", ()=> UI.openBomEditor());
   $("#btn-add-layer").addEventListener("click", ()=> $("#file-images").click());
   $("#draw-side").addEventListener("change", e => {
     Tools.lastCopperSide = e.target.value;
@@ -228,22 +230,27 @@ function setLayerCount(n){
   requestRender();
 }
 
-/* ---------------- resizable inspector ---------------- */
-const inspClampW = (w) => Math.max(200, Math.min(window.innerWidth - 360, w));
+/* ---------------- resizable side panels ---------------- */
+const panelClampW = (w) => Math.max(200, Math.min(window.innerWidth - 360, w));
 
-/* apply the saved inspector width up front, before viewInit sizes the canvas, so the
+/* apply the saved panel widths up front, before viewInit sizes the canvas, so the
    canvas is never left squished on reload (only a viewResize fixes the backing store,
    and zoom/pan don't trigger one) */
-function restoreInspectorWidth(){
-  const panel = $("#right-panel");
-  if (!panel) return;
-  try { const wv = parseInt(localStorage.getItem("pcbreveng.inspW"),10); if (wv) panel.style.width = inspClampW(wv) + "px"; } catch(e){}
+function restorePanelWidths(){
+  const apply = (sel, key) => {
+    const panel = $(sel);
+    if (!panel) return;
+    try { const wv = parseInt(localStorage.getItem(key),10); if (wv) panel.style.width = panelClampW(wv) + "px"; } catch(e){}
+  };
+  apply("#right-panel", "pcbreveng.inspW");
+  apply("#left-panel",  "pcbreveng.leftW");
 }
 
-function wireRightResizer(){
-  const rz = $("#right-resizer"), panel = $("#right-panel");
+/* side "right": handle sits on the panel's LEFT edge → drag left = wider.
+   side "left":  handle sits on the panel's RIGHT edge → drag right = wider. */
+function wirePanelResizer(rzSel, panelSel, key, side){
+  const rz = $(rzSel), panel = $(panelSel);
   if (!rz || !panel) return;
-  const clampW = inspClampW;
   let drag = null;
   rz.addEventListener("pointerdown", e => {
     rz.setPointerCapture(e.pointerId);
@@ -253,13 +260,14 @@ function wireRightResizer(){
   });
   rz.addEventListener("pointermove", e => {
     if (!drag) return;
-    panel.style.width = clampW(drag.w + (drag.x - e.clientX)) + "px"; // drag left = wider
+    const dx = side === "left" ? (e.clientX - drag.x) : (drag.x - e.clientX);
+    panel.style.width = panelClampW(drag.w + dx) + "px";
     viewResize(); // canvas fills the remaining space
   });
   const end = () => {
     if (!drag) return;
     drag = null; rz.classList.remove("dragging"); viewResize();
-    try { localStorage.setItem("pcbreveng.inspW", String(parseInt(panel.style.width,10) || 265)); } catch(ex){}
+    try { localStorage.setItem(key, String(parseInt(panel.style.width,10) || Math.round(panel.getBoundingClientRect().width))); } catch(ex){}
   };
   rz.addEventListener("pointerup", end);
   rz.addEventListener("pointercancel", end);
@@ -488,7 +496,6 @@ function wireDialogs(){
     const f = netlistFor($("#export-format").value);
     downloadFile((f.base || "netlist") + "." + f.ext, f.text, f.mime);
   });
-  $("#export-editbom").addEventListener("click", ()=> UI.openBomEditor());
   $("#bom-close").addEventListener("click", ()=> $("#bom-dialog").close());
   $("#bom-addcol").addEventListener("click", ()=> UI.addBomColumn());
   $("#bom-export").addEventListener("click", ()=>{

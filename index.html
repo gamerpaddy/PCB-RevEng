@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PCB RevEng — Reverse Engineering Workbench</title>
 
-<link rel="stylesheet" href="css/style.css?v=58">
+<link rel="stylesheet" href="css/style.css?v=60">
 
 </head>
 <body>
@@ -26,6 +26,7 @@
       <button id="btn-open"       title="Open project (.pcbrev.json)  [Ctrl+O]">Open</button>
       <button id="btn-save"       title="Save project  [Ctrl+S]">Save</button>
       <button id="btn-export"     title="Export netlist / BOM / schematic  [Ctrl+E]">Export</button>
+      <button id="btn-bom"        title="BOM editor — edit values, designators, footprints &amp; custom columns; changes apply to the parts on the board">BOM</button>
     </div>
 
     <div class="tb-group" id="toolbar">
@@ -86,6 +87,9 @@
              style="width:100%;box-sizing:border-box;margin:0 0 6px;padding:4px 7px;background:#1c222b;border:1px solid #2e3742;border-radius:5px;color:#d7dde5;font-size:12px">
       <div id="net-list"></div>
     </aside>
+
+    <!-- drag handle to resize the layers/nets panel -->
+    <div id="left-resizer" title="Drag to resize the layers panel"></div>
 
     <!-- center: canvas -->
     <div id="canvas-wrap">
@@ -153,7 +157,6 @@
     <textarea id="export-preview" spellcheck="false"></textarea>
     <div class="dlg-buttons">
       <button id="export-close">Close</button>
-      <button id="export-editbom" style="display:none" title="Open the editable BOM table">Edit BOM…</button>
       <button id="export-copy">Copy</button>
       <button id="export-download" class="primary">Download</button>
     </div>
@@ -162,7 +165,7 @@
   <!-- ======= BOM EDITOR ======= -->
   <dialog id="bom-dialog">
     <div class="dlg-title">BOM editor <span id="bom-count" class="dlg-sub"></span></div>
-    <div class="panel-hint" style="margin-bottom:6px">Parts are grouped by value · part · footprint. Editing a cell updates every part on that row. Add columns for MPN, supplier, price, notes…</div>
+    <div class="panel-hint" style="margin-bottom:6px">Parts are grouped by value · part · footprint. Editing Value/Part/Footprint updates every part on that row; edit the References cell to rename the actual designators on the board (comma-separated, one per part). Add columns for MPN, supplier, price, notes…</div>
     <div id="bom-table-wrap"><table id="bom-table" class="bom-table"></table></div>
     <div class="dlg-buttons">
       <button id="bom-addcol">+ Add column</button>
@@ -426,11 +429,11 @@
 <script src="js/keymap.js?v=49"></script>
 <script src="js/resolver.js?v=49"></script>
 <script src="js/netlist.js?v=56"></script>
-<script src="js/ui.js?v=58"></script>
-<script src="js/kicadsearch.js?v=49"></script>
+<script src="js/ui.js?v=59"></script>
+<script src="js/kicadsearch.js?v=51"></script>
 <script src="js/fpdialog.js?v=49"></script>
 <script src="js/autosave.js?v=49"></script>
-<script src="js/main.js?v=56"></script>
+<script src="js/main.js?v=58"></script>
 
 </body>
 </html>

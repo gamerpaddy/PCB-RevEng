@@ -32,8 +32,12 @@ function loadKicadFootprints(){
     });
 }
 
-/* the inputs that get autocomplete: the dialog field + the inspector field */
-function _kfIsTarget(t){ return !!t && (t.id === "fp-kicad" || t.id === "i-kicad"); }
+/* the inputs that get autocomplete: the footprint dialog field, the inspector
+   field, and the Footprint column cells in the BOM editor */
+function _kfIsTarget(t){
+  return !!t && (t.id === "fp-kicad" || t.id === "i-kicad" ||
+    (t.dataset && t.dataset.f === "footprint" && t.classList && t.classList.contains("bom-cell")));
+}
 
 let _kfBox = null, _kfInput = null, _kfDlg = null;
 
@@ -62,7 +66,15 @@ function _kfOutside(e){
 
 function _kfShow(input){
   if (!KicadFootprints.length){ loadKicadFootprints(); return; }
-  const q = input.value.trim().toLowerCase();
+  // the bundled list stores BARE footprint names (no "Library:" prefix), but the
+  // user may type/paste a fully-qualified "Library:Footprint" name (which the
+  // validity check accepts by stripping the prefix). Match on the part after the
+  // last colon so qualified names are still found, and re-attach the typed library
+  // prefix when a suggestion is picked.
+  const raw = input.value.trim();
+  const colon = raw.lastIndexOf(":");
+  const lib = colon >= 0 ? raw.slice(0, colon + 1) : "";
+  const q = (colon >= 0 ? raw.slice(colon + 1) : raw).toLowerCase();
   if (!q){ _kfHide(); return; }
   const matches = [];
   for (const f of KicadFootprints){
@@ -96,7 +108,7 @@ function _kfShow(input){
     d.textContent = m;
     d.addEventListener("mousedown", e => {
       e.preventDefault();
-      input.value = m;
+      input.value = lib + m;
       input.dispatchEvent(new Event("input", { bubbles:true }));
       input.dispatchEvent(new Event("change", { bubbles:true }));
       _kfHide();

@@ -760,7 +760,6 @@ UI.openExport = () => {
   const update = () => {
     const fmt = $("#export-format").value;
     $("#export-preview").value = netlistFor(fmt).text;
-    $("#export-editbom").style.display = (fmt === "bom") ? "" : "none";
     // only KiCad exports carry footprints, so only warn for those formats
     const missing = (fmt === "kicad" || fmt === "sch") ? missingKicadFootprints() : null;
     if (missing && missing.length){
@@ -818,7 +817,7 @@ UI._renderBomTable = () => {
       + `<td><input class="bom-cell" data-f="value" value="${escAttr(g.value)}"></td>`
       + `<td><input class="bom-cell" data-f="part" value="${escAttr(g.part)}"></td>`
       + `<td><input class="${fpCls}" data-f="footprint" value="${escAttr(g.footprint)}"${fpTitle}></td>`
-      + `<td class="bom-refs" title="${escAttr(refs)}">${escAttr(refs)}</td>`;
+      + `<td><input class="bom-cell bom-refs" data-f="refs" value="${escAttr(refs)}" title="Rename the actual designators on the board — comma-separated, one per part (${g.refs.length})"></td>`;
     cols.forEach(col => { h += `<td><input class="bom-cell" data-f="col" data-col="${escAttr(col)}" value="${escAttr(bomFieldCommon(g, col))}"></td>`; });
     h += "</tr>";
   });
@@ -831,6 +830,7 @@ UI._renderBomTable = () => {
       const g = UI._bomGroups[+e.target.closest("tr").dataset.gi];
       if (!g) return;
       const f = e.target.dataset.f, val = e.target.value;
+      if (f === "refs"){ UI._applyBomRefs(g, val); return; }  // designators: validate before snapshotting
       pushUndo("BOM edit");
       if (f === "value")      g.comps.forEach(c => c.value = val.trim());
       else if (f === "part")  g.comps.forEach(c => c.part  = val.trim());
@@ -854,6 +854,28 @@ UI._renderBomTable = () => {
       UI._renderBomTable();
     });
   });
+};
+
+/* References cell → rename the real part designators on the board. Tokens map
+   positionally to the row's parts (which are shown in the same sorted order).
+   Validates the count and rejects internal dups / collisions with other rows
+   before snapshotting, so a bad edit just reverts without polluting undo. */
+UI._applyBomRefs = (g, raw) => {
+  const tokens = (raw || "").split(",").map(s => s.trim()).filter(Boolean);
+  const revert = msg => { UI.toast(msg); UI._renderBomTable(); };
+  if (tokens.length !== g.comps.length)
+    return revert("Keep " + g.comps.length + " reference" + (g.comps.length > 1 ? "s" : "") + ", comma-separated");
+  const lower = tokens.map(t => t.toLowerCase());
+  if (new Set(lower).size !== lower.length) return revert("Duplicate references in the list");
+  const inGroup = new Set(g.comps);
+  for (const t of tokens){
+    const clash = State.components.find(x => !inGroup.has(x) && (x.ref || "").trim().toLowerCase() === t.toLowerCase());
+    if (clash) return revert("Reference “" + t + "” is already used by another part");
+  }
+  if (tokens.every((t, i) => t === g.comps[i].ref)){ UI._renderBomTable(); return; }   // nothing changed
+  pushUndo("rename designators");
+  tokens.forEach((t, i) => { if (g.comps[i].ref !== t){ g.comps[i].ref = t; registerRef(g.comps[i].ref); } });
+  UI._renderBomTable(); UI.refreshInspector(); UI.refreshNets(); requestRender();
 };
 
 UI.addBomColumn = () => {
