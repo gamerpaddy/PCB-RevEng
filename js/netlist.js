@@ -187,6 +187,30 @@ function schPlacement(c){
   return { place, leftN: left, rightN: n-left };
 }
 
+/* KiCad's own body geometry for common 2-pin parts, taken from Device.kicad_sym.
+   R/C/L are rotated +90deg so pin 1 sits on the LEFT and pin 2 on the RIGHT, matching
+   the IC-box layout's left/right pin convention (D is already horizontal). `len` is the
+   pin length that puts each pin's outer connection point at x = +/-3.81. */
+const SCH_PRIMS = {
+  R: { len: 1.27, g: [
+    '(rectangle (start -2.54 -1.016) (end 2.54 1.016) (stroke (width 0) (type default)) (fill (type none)))'
+  ]},
+  C: { len: 2.794, g: [
+    '(polyline (pts (xy -0.762 -2.032) (xy -0.762 2.032)) (stroke (width 0) (type default)) (fill (type none)))',
+    '(polyline (pts (xy 0.762 -2.032) (xy 0.762 2.032)) (stroke (width 0) (type default)) (fill (type none)))'
+  ]},
+  L: { len: 1.27, g: [
+    '(arc (start -2.54 0) (mid -1.905 0.6323) (end -1.27 0) (stroke (width 0) (type default)) (fill (type none)))',
+    '(arc (start -1.27 0) (mid -0.635 0.6323) (end 0 0) (stroke (width 0) (type default)) (fill (type none)))',
+    '(arc (start 0 0) (mid 0.635 0.6323) (end 1.27 0) (stroke (width 0) (type default)) (fill (type none)))',
+    '(arc (start 1.27 0) (mid 1.905 0.6323) (end 2.54 0) (stroke (width 0) (type default)) (fill (type none)))'
+  ]},
+  D: { len: 2.54, g: [
+    '(polyline (pts (xy -1.27 1.27) (xy -1.27 -1.27)) (stroke (width 0) (type default)) (fill (type none)))',
+    '(polyline (pts (xy 1.27 1.27) (xy 1.27 -1.27) (xy -1.27 0) (xy 1.27 1.27)) (stroke (width 0) (type default)) (fill (type none)))'
+  ]}
+};
+
 function exportKiCadSch(){
   const L = [];
   const F = (n)=>n.toFixed(2);
@@ -195,29 +219,55 @@ function exportKiCadSch(){
   L.push('  (paper "A2")');
   // one symbol definition per component (pin names/numbers are per-part)
   L.push('  (lib_symbols');
-  const geo = new Map(); // comp.id -> {w,h,place,leftN,rightN}
+  const geo = new Map(); // comp.id -> {w, h, pins:[{x,y,angle,len}]}
   for (const c of State.components){
-    const n = c.pins.length || 1;
     const pl = schPlacement(c);
-    const h = Math.max(pl.leftN, pl.rightN, 1) * 2.54 + 2.54;
-    const w = 15.24;
-    geo.set(c.id, {w, h, place: pl.place});
+    const refLetter = (/^[A-Za-z]+/.exec(c.ref)||["U"])[0];
+    // 2-pin R/C/L/D render as KiCad's real primitive shape; everything else is a
+    // sized box (KiCad draws ICs as background-filled boxes, so that stays consistent).
+    const prim = c.pins.length === 2 ? SCH_PRIMS[refLetter.toUpperCase()] : null;
     const sym = "REV_" + c.ref;
-    L.push('    (symbol "reveng:' + sym + '" (in_bom yes) (on_board yes)');
-    L.push('      (property "Reference" "' + _schEsc((/^[A-Za-z]+/.exec(c.ref)||["U"])[0]) + '" (at 0 ' + F(h/2+1.27) + ' 0) (effects (font (size 1.27 1.27))))');
+    let w, h, pins, body, hide;
+    if (prim){
+      hide = true;
+      w = 7.62; h = 5.08;
+      // place this part's two pins on the fixed left/right primitive pads
+      let ri = c.pins.findIndex((_,i)=> pl.place[i] && pl.place[i].side === 1);
+      if (ri < 0) ri = 1;
+      const li = ri === 0 ? 1 : 0;
+      pins = new Array(c.pins.length);
+      pins[li] = { x: -3.81, y: 0, angle: 0,   len: prim.len };
+      pins[ri] = { x:  3.81, y: 0, angle: 180, len: prim.len };
+      body = prim.g;
+    } else {
+      hide = false;
+      h = Math.max(pl.leftN, pl.rightN, 1) * 2.54 + 2.54;
+      let lmax = 0, rmax = 0;
+      for (let i=0;i<c.pins.length;i++){
+        const nl = (c.pins[i].name || "").length;
+        if (pl.place[i] && pl.place[i].side === 1) rmax = Math.max(rmax, nl); else lmax = Math.max(lmax, nl);
+      }
+      w = Math.max(7.62, Math.min(25.4, (lmax + rmax) * 1.1 + 5.08));
+      pins = new Array(c.pins.length);
+      for (let i=0;i<c.pins.length;i++){
+        const pp = pl.place[i] || { side:0, slot:i };
+        const onLeft = pp.side === 0;
+        pins[i] = { x: onLeft ? -w/2-2.54 : w/2+2.54, y: h/2 - 2.54 - pp.slot*2.54, angle: onLeft ? 0 : 180, len: 2.54 };
+      }
+      body = ['(rectangle (start ' + F(-w/2) + ' ' + F(h/2) + ') (end ' + F(w/2) + ' ' + F(-h/2) + ') (stroke (width 0.254) (type default)) (fill (type background)))'];
+    }
+    geo.set(c.id, { w, h, pins });
+    L.push('    (symbol "reveng:' + sym + '"' + (hide ? ' (pin_numbers (hide yes)) (pin_names (hide yes))' : '') + ' (in_bom yes) (on_board yes)');
+    L.push('      (property "Reference" "' + _schEsc(refLetter) + '" (at 0 ' + F(h/2+1.27) + ' 0) (effects (font (size 1.27 1.27))))');
     L.push('      (property "Value" "' + _schEsc(c.value || c.part || "~") + '" (at 0 ' + F(-h/2-1.27) + ' 0) (effects (font (size 1.27 1.27))))');
     L.push('      (symbol "' + sym + '_0_1"');
-    L.push('        (rectangle (start ' + F(-w/2) + ' ' + F(h/2) + ') (end ' + F(w/2) + ' ' + F(-h/2) + ') (stroke (width 0.254) (type default)) (fill (type background)))');
+    for (const g of body) L.push('        ' + g);
     L.push('      )');
     L.push('      (symbol "' + sym + '_1_1"');
     for (let i=0;i<c.pins.length;i++){
-      const pp = geo.get(c.id).place[i] || {side:0, slot:i};
-      const onLeft = pp.side === 0;
-      const y = h/2 - 2.54 - pp.slot*2.54;
-      const x = onLeft ? -w/2-2.54 : w/2+2.54;
-      const ang = onLeft ? 0 : 180;
+      const pg = pins[i];
       const p = c.pins[i];
-      L.push('        (pin passive line (at ' + F(x) + ' ' + F(y) + ' ' + ang + ') (length 2.54)');
+      L.push('        (pin passive line (at ' + F(pg.x) + ' ' + F(pg.y) + ' ' + pg.angle + ') (length ' + F(pg.len) + ')');
       L.push('          (name "' + _schEsc(p.name || "~") + '" (effects (font (size 1.27 1.27))))');
       L.push('          (number "' + _schEsc(p.num) + '" (effects (font (size 1.27 1.27)))))');
     }
@@ -244,11 +294,10 @@ function exportKiCadSch(){
       if (!p.netId) continue;
       const net = getNet(p.netId);
       if (!net) continue;
-      const pp = g.place[i] || {side:0, slot:i};
-      const onLeft = pp.side === 0;
-      const yLocal = g.h/2 - 2.54 - pp.slot*2.54;
-      const px = X + (onLeft ? -g.w/2-2.54 : g.w/2+2.54);
-      const py = Y - yLocal; // schematic y axis points down
+      const pg = g.pins[i] || { x: -g.w/2-2.54, y: 0, angle: 0 };
+      const onLeft = pg.angle === 0;
+      const px = X + pg.x;
+      const py = Y - pg.y; // schematic y axis points down
       L.push('  (global_label "' + _schEsc(net.name) + '" (shape passive) (at ' + F(px) + ' ' + F(py) + ' ' + (onLeft?180:0) + ') (fields_autoplaced)');
     L.push('    (effects (font (size 1.27 1.27)) (justify ' + (onLeft?"right":"left") + '))');
       L.push('    (uuid ' + _uuid() + '))');
