@@ -120,13 +120,22 @@ UI.refreshXrayBtn = () => {
 };
 
 /* viewing the X-ray IMAGE layer turns X-ray mode on by default (so its copper from
-   both sides is shown over the see-through image). Single-view only — in split view a
-   pane showing the X-ray layer is handled per-pane by View._paneXray. Never forces it off. */
+   both sides is shown over the see-through image); switching back to a normal layer
+   turns it off again — but only if X-ray was auto-enabled here, never overriding a
+   manual toggle. Single-view only — split panes handle X-ray per-pane (View._paneXray). */
 UI.autoXrayForLayer = (l) => {
-  if (l && l.side === "xray" && !View.split && !View.xray){
-    View.xray = true;
+  if (View.split) return;
+  if (l && l.side === "xray"){
+    if (!View.xray){
+      View.xray = true; View.xrayAuto = true;
+      UI.refreshXrayBtn();
+      UI.toast("X-ray view ON (showing the X-ray layer)");
+      requestRender();
+    }
+  } else if (View.xrayAuto && View.xray){   // left the X-ray layer → undo the auto-enable
+    View.xray = false; View.xrayAuto = false;
     UI.refreshXrayBtn();
-    UI.toast("X-ray view ON (showing the X-ray layer)");
+    UI.toast("X-ray view off");
     requestRender();
   }
 };

@@ -12,6 +12,7 @@ const View = {
   blinkNet: null,         // net flashing after a net-list click
   blinkOn: false,
   ratsnest: false,        // draw straight "airwire" connections between same-net pads/vias
+  xrayAuto: false,        // true when X-ray was auto-enabled by viewing the X-ray layer (so leaving it turns X-ray back off)
   split: false,           // synced split view — left & right panes share one camera
   paneLayer: { left:null, right:null }, // image-layer id shown in each split pane
   paneSide: { left:"front", right:"back" }, // copper side whose traces/vias/parts show in each pane

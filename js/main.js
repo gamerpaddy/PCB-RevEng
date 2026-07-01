@@ -113,6 +113,7 @@ function toggleRatsnest(){
 
 function toggleXray(){
   View.xray = !View.xray;
+  View.xrayAuto = false;   // a manual toggle takes over — don't auto-disable later
   $("#btn-xray").classList.toggle("active", View.xray);
   const hasXrayImg = State.layers.some(l => l.side === "xray");
   UI.toast(View.xray
