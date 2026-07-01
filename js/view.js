@@ -199,13 +199,17 @@ function hitTest(wx, wy){
     if (Math.hypot(wx-v.x, wy-v.y) <= (v.r||5) + tol*0.5)
       return { type:"via", via:v };
   }
-  // pins next
+  // pins next — only pads that are actually drawn on the current layer are grabbable:
+  // a THT (round) pad reaches every copper side, an SMD (rect) pad only shows on its
+  // own side (unless its body is visible here — X-ray / "both" / same side)
   for (let i=State.components.length-1; i>=0; i--){
     const c = State.components[i];
     const s = State.pxPerMm * (c.scale||1);
     const fp = compFootprint(c);
+    const smdShown = compBodyVisible(c);
     for (let pi=0; pi<c.pins.length; pi++){
       const fpin = fp.pins[pi]; if (!fpin) continue;
+      if (fpin.shape !== "circle" && !smdShown) continue;   // SMD pad not on this layer
       if (pinEdgeDist(c, fpin, wx, wy) <= tol*0.9)
         return { type:"pin", comp:c, pinIdx:pi };
     }

@@ -205,19 +205,18 @@ function handleDrag(pt, w, e){
     case "move-vert": {
       d.moved = true;
       // DETACH is decided once, at the START of the drag (Shift held when you grab the
-      // anchor): the trace splits here, drops any junction it shared, and never snaps.
-      if (d.detach){
-        if (!d.detached){ detachAnchor(d); d.detached = true; }
-        d.snap = null; Tools.snap = null;
-        d.trace.points[d.i].x = w.x;
-        d.trace.points[d.i].y = w.y;
-        break;
+      // anchor): split the trace here ONE time so the anchor pulls free of its junction.
+      if (d.detach && !d.detached){
+        detachAnchor(d); d.detached = true;
+        if (!d.excl) d.excl = new Set();
+        d.excl.add(d.trace);   // don't let the freed anchor snap back onto its own trace
       }
-      // Holding Shift MID-drag (without having started detached) just suppresses snapping
-      // so you can place the anchor freely — it does NOT detach the trace.
-      const noSnap = e && e.shiftKey;
-      // snap onto a nearby pad/via/other-trace — excluding our own trace AND any trace
-      // we're already carrying, so the reach lands on a NEW conductor, not ourselves
+      // Snapping is suppressed only WHILE Shift is currently held. So: Shift-grab detaches
+      // and pulls free without snapping; RELEASE Shift and the freed anchor snaps onto a
+      // new pad/via/trace again (no need to drop and re-grab). A plain drag snaps normally
+      // and a mid-drag Shift-hold lets you place freely.
+      const noSnap = !!(e && e.shiftKey);
+      // exclude our own trace AND any trace we're carrying, so the reach lands on a NEW conductor
       const snap = noSnap ? null : snapToConductor(w.x, w.y, d.trace.side, false, d.trace.width || 3, d.excl);
       d.snap = snap;
       Tools.snap = snap; // white ring indicator
