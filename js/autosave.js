@@ -1,7 +1,48 @@
 /* ===== autosave.js — IndexedDB autosave (survives F5), sample-project loader ===== */
 "use strict";
 
-const Autosave = { db:null, dirty:false, restoring:false };
+const Autosave = { db:null, dirty:false, restoring:false, interval:2500, _timer:null };
+
+/* autosave interval (ms) between a change and the save; 0 = off. Persisted. */
+function readAutosaveInterval(){
+  try { const v = localStorage.getItem("pcbreveng.autosaveInterval");
+        if (v != null) return Math.max(0, parseInt(v,10) || 0); } catch(e){}
+  return 2500;
+}
+function scheduleAutosave(){
+  clearTimeout(Autosave._timer);
+  if (Autosave.interval > 0) Autosave._timer = setTimeout(autosaveTick, Autosave.interval);
+}
+function setAutosaveInterval(ms){
+  Autosave.interval = Math.max(0, ms | 0);
+  try { localStorage.setItem("pcbreveng.autosaveInterval", String(Autosave.interval)); } catch(e){}
+  scheduleAutosave();
+  updateSaveStatus();
+}
+
+/* one autosave check. Re-arms itself, then saves only when there is a pending change
+   and nothing is being dragged (don't save mid-move of a part/anchor/via/note — wait
+   for the drop, so the timeline/undo isn't peppered with in-progress states). */
+function autosaveTick(){
+  scheduleAutosave(); // arm the next tick regardless of what happens below
+  if (!Autosave.dirty || Autosave.restoring || !Autosave.db || Autosave.saving) return;
+  if (typeof Tools !== "undefined" && Tools.drag) return; // interaction in progress
+  Autosave.dirty = false;
+  Autosave.saving = true;
+  updateSaveStatus(true);
+  const idle = window.requestIdleCallback || ((fn)=>setTimeout(()=>fn({timeRemaining:()=>5}),0));
+  idle(async () => {
+    try {
+      await idbPut("autosave", serializeLight());
+      await idbPut("autosave_undo", JSON.stringify({ stack: Undo.stack, redo: Undo.redo }));
+      if (Autosave.imagesDirty){ Autosave.imagesDirty = false; await idbPut("autosave_imgs", serializeImages()); }
+      Autosave.lastSaved = Date.now();
+      await idbPut("autosave_meta", JSON.stringify({ savedAt: Autosave.lastSaved }));
+    } catch (e){ /* quota — keep working without autosave */ }
+    Autosave.saving = false;
+    updateSaveStatus();
+  });
+}
 
 function idbOpen(){
   return new Promise((res, rej) => {
@@ -111,6 +152,10 @@ function updateSaveStatus(saving){
   if (!el) return;
   el.classList.toggle("saving", !!saving);
   if (saving){ el.textContent = "saving…"; return; }
+  if (Autosave.interval === 0){
+    el.textContent = Autosave.lastSaved ? ("autosave off · saved " + relTime(Autosave.lastSaved)) : "autosave off";
+    return;
+  }
   el.textContent = Autosave.lastSaved ? ("saved " + relTime(Autosave.lastSaved)) : "not saved yet";
 }
 
@@ -171,25 +216,10 @@ async function autosaveInit(){
       showWelcome(overlay, ltext);
     }
   } catch (e){ if (overlay) overlay.classList.remove("show"); updateSaveStatus(); }
-  // periodic save while dirty (uses idle time so it never blocks interaction)
-  const idle = window.requestIdleCallback || ((fn)=>setTimeout(()=>fn({timeRemaining:()=>5}),0));
-  setInterval(() => {
-    if (!Autosave.dirty || Autosave.restoring || !Autosave.db || Autosave.saving) return;
-    Autosave.dirty = false;
-    Autosave.saving = true;
-    updateSaveStatus(true);
-    idle(async () => {
-      try {
-        await idbPut("autosave", serializeLight());
-        await idbPut("autosave_undo", JSON.stringify({ stack: Undo.stack, redo: Undo.redo }));
-        if (Autosave.imagesDirty){ Autosave.imagesDirty = false; await idbPut("autosave_imgs", serializeImages()); }
-        Autosave.lastSaved = Date.now();
-        await idbPut("autosave_meta", JSON.stringify({ savedAt: Autosave.lastSaved }));
-      } catch (e){ /* quota — keep working without autosave */ }
-      Autosave.saving = false;
-      updateSaveStatus();
-    });
-  }, 2500);
+  // periodic save while dirty (self-rescheduling so the interval is user-configurable;
+  // pauses during drags and honours the "off" setting — see autosaveTick / Options)
+  Autosave.interval = readAutosaveInterval();
+  scheduleAutosave();
   // refresh the "saved Xm ago" label periodically
   setInterval(() => { if (!Autosave.saving) updateSaveStatus(); }, 15000);
   // catch mutations centrally: every undo snapshot marks the project dirty

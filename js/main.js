@@ -63,9 +63,17 @@ function wireToolbar(){
   $("#btn-add-layer").addEventListener("click", ()=> $("#file-images").click());
   $("#draw-side").addEventListener("change", e => {
     Tools.lastCopperSide = e.target.value;
+    // in split view, the draw side controls the focused pane's trace/copper side
+    if (View.split){
+      const which = View.cursorPane || "left";
+      View.paneSide[which] = e.target.value;
+      UI.toast((which==="right"?"Right":"Left") + " view showing " + (SIDE_LABELS[e.target.value]||e.target.value) + " copper");
+      UI.refreshSplitControls();
+    }
     requestRender(); // visibility follows active side
   });
   $("#btn-xray").addEventListener("click", toggleXray);
+  $("#btn-split").addEventListener("click", toggleSplit);
   $("#btn-ratsnest").addEventListener("click", toggleRatsnest);
   $("#btn-stack3d").addEventListener("click", ()=> Stack3D.open());
   $("#btn-measure").addEventListener("click", ()=> setTool("measure"));
@@ -113,6 +121,31 @@ function toggleXray(){
   requestRender();
 }
 
+/* synced split view: front on the left half, back on the right, one shared camera.
+   Recenter the pan so the current view slides into the left pane when turning it on. */
+function toggleSplit(){
+  View.split = !View.split;
+  View.panX += View.split ? -View.width/4 : View.width/4;
+  if (View.split){
+    // seed each pane's image layer: left = active/front, right = a back-side layer
+    const frontL = State.layers.find(l => l.side === "front");
+    const backL  = State.layers.find(l => l.side === "back");
+    if (View.paneLayer.left == null)
+      View.paneLayer.left = UI.activeLayer()?.id ?? frontL?.id ?? State.layers[0]?.id ?? null;
+    if (View.paneLayer.right == null)
+      View.paneLayer.right = backL?.id ?? State.layers.find(l => l.id !== View.paneLayer.left)?.id ?? State.layers[0]?.id ?? null;
+    // pane side defaults to the seeded layer's side
+    View.paneSide.left  = getLayer(View.paneLayer.left)?.side  || "front";
+    View.paneSide.right = getLayer(View.paneLayer.right)?.side || "back";
+  }
+  UI.refreshSplitControls();
+  $("#btn-split").classList.toggle("active", View.split);
+  UI.toast(View.split
+    ? "Split view ON — one camera, two panes. Keys 1-9 set the LEFT view's layer, Shift+1-9 the RIGHT. The mirror crosshair shows your cursor in the other pane."
+    : "Split view off");
+  requestRender();
+}
+
 function afterHistory(){
   State.components.forEach(c => c._fp = null);
   markDirty();
@@ -153,6 +186,19 @@ function wireSettings(){
     $("#set-reftext-val").textContent = State.refTextSize + " px";
     markDirty(); requestRender();
   });
+  $("#set-copper").addEventListener("change", e => {
+    State.copperOz = parseFloat(e.target.value) || 1;
+    markDirty(); UI.refreshInspector();
+  });
+  $("#set-copper-inner").addEventListener("change", e => {
+    State.copperOzInner = parseFloat(e.target.value) || 0.5;
+    markDirty(); UI.refreshInspector();
+  });
+  $("#set-focusdim").addEventListener("input", e => {
+    State.focusDim = (+e.target.value) / 100;
+    $("#set-focusdim-val").textContent = Math.round(State.focusDim*100) + "%";
+    markDirty(); requestRender();
+  });
   $("#set-overlap").addEventListener("change", e => {
     State.overlapCheck = e.target.value === "on";
     markDirty();
@@ -167,6 +213,15 @@ function wireSettings(){
     while (Undo.stack.length > Undo.max) Undo.stack.shift();
     try { localStorage.setItem("pcbreveng.histLen", String(Undo.max)); } catch(ex){}
   });
+  const autos = $("#set-autosave");
+  if (autos){
+    autos.value = String(readAutosaveInterval());  // autosaveInit runs later; read the stored value directly
+    autos.addEventListener("change", e => {
+      setAutosaveInterval(parseInt(e.target.value, 10) || 0);
+      UI.toast(Autosave.interval === 0 ? "Autosave off — use Ctrl+S / Save to keep your work"
+        : "Autosave " + (Autosave.interval/1000) + "s after a change");
+    });
+  }
   const units = document.getElementById("set-units");
   units.value = UI.unit();
   units.addEventListener("change", ()=>{
@@ -196,6 +251,11 @@ function syncSettings(){
   $("#set-traceview").value = State.traceView;
   $("#set-reftext").value = State.refTextSize;
   $("#set-reftext-val").textContent = State.refTextSize + " px";
+  { const cs = $("#set-copper"); if (cs) cs.value = String(State.copperOz || 1); }
+  { const ci = $("#set-copper-inner"); if (ci) ci.value = String(State.copperOzInner || 0.5); }
+  { const fd = $("#set-focusdim"), fdv = $("#set-focusdim-val");
+    if (fd){ fd.value = Math.round((State.focusDim!=null?State.focusDim:0.16)*100); }
+    if (fdv){ fdv.textContent = Math.round((State.focusDim!=null?State.focusDim:0.16)*100) + "%"; } }
   $("#set-overlap").value = State.overlapCheck ? "on" : "off";
   $("#set-bigmerge").value = State.bigMergeWarn ? "on" : "off";
   $("#set-histlen").value = Undo.max;
@@ -297,12 +357,14 @@ function wireCanvas(){
       lastPlaceRC = now;
     }
     const pt = canvasPoint(e);
+    updatePane(pt);
     const w = screenToWorld(pt.x, pt.y);
     showCanvasContextMenu(e.clientX, e.clientY, w);
   });
   cv.addEventListener("wheel", e => {
     e.preventDefault();
     const pt = canvasPoint(e);
+    updatePane(pt);
     if (e.altKey && Tools.name === "align"){
       const l = UI.activeLayer();
       if (l && !l.locked){
@@ -376,7 +438,13 @@ function showCanvasContextMenu(cx, cy, w){
     items.push({ label:"Cut here", action:()=>{ setTool("cut"); cutDown(w,{}); } });
     items.push({ sep:true });
     items.push({ label:"Delete trace", danger:true, action:()=>deleteSelection() });
+  } else if (h && h.type === "note"){
+    UI.select(h);
+    items.push({ label:"Edit note text", action:()=>{ UI.select(h); UI.focusNoteText(); } });
+    items.push({ sep:true });
+    items.push({ label:"Delete note", danger:true, action:()=>deleteSelection() });
   } else {
+    items.push({ label:"Add note here…", action:()=>{ noteDown(w, {}); } });
     items.push({ label:"Place component here…", action:()=>{ Tools.pending=null; setTool("component"); } });
     if (View.mask !== undefined) items.push({ label: View.mask?"Hide coverage mask":"Show coverage mask", action:()=>toggleMask() });
   }
@@ -407,8 +475,21 @@ function wireKeyboard(){
 
     // number keys: layer view (use e.code so Shift+digit works)
     if (/^Digit\d$/.test(e.code)){
-      let idx = e.code === "Digit0" ? 9 : parseInt(e.code.slice(5),10) - 1;
-      if (e.shiftKey) idx += 10;
+      const base = e.code === "Digit0" ? 9 : parseInt(e.code.slice(5),10) - 1; // 0..9
+      // split view: 1-9/0 pick the LEFT pane's layer, Shift+1-9/0 pick the RIGHT pane's
+      if (View.split){
+        const l = State.layers[base];
+        if (l){
+          const which = e.shiftKey ? "right" : "left";
+          View.paneLayer[which] = l.id;
+          View.paneSide[which] = l.side;   // pane's copper/trace side follows the chosen image
+          if (which === "left") UI.activeLayerId = l.id;
+          UI.toast((which==="right"?"Right":"Left") + " view → “" + l.name + "” (" + (SIDE_LABELS[l.side]||l.side) + ")");
+          UI.refreshSplitControls(); UI.refreshLayerList(); requestRender();
+        }
+        return;
+      }
+      const idx = base;   // Shift no longer adds +10 (kept simple — no 10+ layer boards)
       const l = State.layers[idx];
       if (l){
         if (UI.layerKeyMode() === "toggle"){
@@ -456,8 +537,18 @@ function wireKeyboard(){
 }
 
 function cycleDrawSide(){
-  const sel = $("#draw-side");
   const order = availableSides();
+  // in split view, cycle the focused pane's copper/trace side instead of the global one
+  if (View.split){
+    const which = View.cursorPane || "left";
+    const cur = View.paneSide[which] || (which==="left"?"front":"back");
+    const next = order[(order.indexOf(cur)+1) % order.length];
+    View.paneSide[which] = next;
+    UI.toast((which==="right"?"Right":"Left") + " view showing " + (SIDE_LABELS[next]||next) + " copper");
+    UI.refreshSplitControls(); requestRender();
+    return;
+  }
+  const sel = $("#draw-side");
   sel.value = order[(order.indexOf(sel.value)+1) % order.length];
   Tools.lastCopperSide = sel.value;
   UI.toast("Drawing on " + SIDE_LABELS[sel.value]);

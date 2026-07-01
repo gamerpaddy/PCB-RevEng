@@ -240,7 +240,27 @@ dialog::backdrop{background:rgba(0,0,0,.55);}
 .dlg-buttons{display:flex; gap:8px; justify-content:flex-end; margin-top:12px;}
 .dlg-row{display:flex; align-items:center; gap:8px; margin-bottom:8px;}
 
-/* footprint dialog */
+/* split-view per-pane layer dropdowns (overlaid on the canvas panes) */
+.split-layer-sel{
+  position:absolute; top:8px; z-index:5; max-width:44%;
+  background:rgba(16,20,26,.9); color:#d7dde5; border:1px solid #38424f;
+  border-radius:5px; padding:3px 6px; font-size:11px;
+}
+#split-layer-left{ left:8px; }
+#split-layer-right{ left:calc(50% + 8px); }
+
+/* footprint dialog — sized 1.5× wide / 2.5× tall vs. its natural content box; the
+   category list and the preview grow to fill the extra room */
+#fp-dialog[open]{
+  max-width:96vw; width:1061px; height:1044px; max-height:96vh;
+  box-sizing:border-box; display:flex; flex-direction:column;
+}
+#fp-dialog .fp-body{flex:1 1 auto; min-height:0;}
+#fp-dialog .fp-left{width:248px;}
+#fp-dialog #fp-cats{max-height:none; flex:1 1 auto; min-height:0;}
+#fp-dialog .fp-mid{width:405px;}
+#fp-dialog #fp-preview{width:100%; flex:1 1 auto; min-height:0;}
+#fp-dialog .fp-right{width:315px;}
 .fp-body{display:flex; gap:14px;}
 .fp-left{display:flex; flex-direction:column; gap:6px; width:165px;}
 #fp-search{width:100%; font-size:12px;}

@@ -37,6 +37,7 @@ const TOOL_HINTS = {
   trace:     "Click pins/points to route · Enter/double-click finish · Esc cancel · starts & ends snap to pads/vias",
   via:       "Click = via (reuses last net) · Shift-click = fresh via · Alt-click = PTH · double-click = layer span (blind/buried)",
   cut:       "Click on a trace to cut it in two — disconnected halves get separate nets",
+  note:      "Click to drop a sticky note · type its text in the inspector · in Select, drag to move / double-click to edit",
   align:     "Drag active layer to move · Alt+wheel scale · Shift+drag rotate · “Align” button = 4-point skew-correcting fit",
   measure:   "Drag to measure a distance (px and mm)",
   calibrate: "Drag along a KNOWN distance, then enter its real length in mm",
@@ -45,7 +46,7 @@ const TOOL_HINTS = {
 
 function toolCursor(name){
   return { select:"default", component:"crosshair", trace:"crosshair", via:"crosshair",
-           align:"move", measure:"crosshair", calibrate:"crosshair", cut:"crosshair", pan:"grab" }[name] || "default";
+           align:"move", measure:"crosshair", calibrate:"crosshair", cut:"crosshair", note:"crosshair", pan:"grab" }[name] || "default";
 }
 
 function setTool(name){
@@ -72,6 +73,7 @@ function setTool(name){
 /* ---------------- pointer routing ---------------- */
 function onPointerDown(e){
   const pt = canvasPoint(e);
+  updatePane(pt);
   const w = screenToWorld(pt.x, pt.y);
   Tools.cursor = w;
 
@@ -100,11 +102,13 @@ function onPointerDown(e){
     case "measure":   return measureDown(w, e);
     case "calibrate": return measureDown(w, e);
     case "cut":       return cutDown(w, e);
+    case "note":      return noteDown(w, e);
   }
 }
 
 function onPointerMove(e){
   const pt = canvasPoint(e);
+  updatePane(pt);
   const w = screenToWorld(pt.x, pt.y);
   Tools.cursor = w;
   UI.setStatusPos(w);
@@ -122,21 +126,23 @@ function onPointerMove(e){
     Tools.snap = snapToConductor(w.x, w.y, "any");
   } else Tools.snap = null;
 
-  // hover net highlight in select mode
+  // hover net / note highlight in select mode
   if (Tools.name === "select"){
     const h = hitTest(w.x, w.y);
-    let net = null;
+    let net = null, note = null;
     if (h){
       if (h.type==="pin") net = h.comp.pins[h.pinIdx].netId;
       else if (h.type==="via") net = h.via.netId;
       else if (h.type==="trace") net = h.trace.netId;
+      else if (h.type==="note") note = h.note;
     }
     if (net !== View.hoverNetId){ View.hoverNetId = net; }
+    if (note !== View.hoverNote){ View.hoverNote = note; requestRender(); }
     View.canvas.style.cursor = h ? "pointer" : "default";
   }
 
-  if (Tools.name==="trace" || Tools.name==="component" || Tools.name==="measure" || Tools.alignPts || Tools.deskewPts)
-    requestRender();
+  if (View.split || Tools.name==="trace" || Tools.name==="component" || Tools.name==="measure" || Tools.alignPts || Tools.deskewPts)
+    requestRender();   // split view redraws every move so the mirror cursor tracks
   else if (View.hoverNetId !== Tools._lastHover){ Tools._lastHover = View.hoverNetId; requestRender(); }
 }
 
@@ -146,6 +152,11 @@ function onPointerUp(e){
   Tools.drag = null;
   if (d.kind === "pan"){
     View.canvas.style.cursor = toolCursor(Tools.name); // restore the tool's cursor (e.g. crosshair for via)
+  }
+  if (d.kind === "move-note"){
+    if (!d.moved) Undo.stack.pop(); // a click (no drag) keeps undo clean; dblclick edits
+    else Tools._dragEndedAt = Date.now();
+    UI.refreshInspector();
   }
   if (d.kind === "move-comp" || d.kind === "move-via" || d.kind === "move-layer" || d.kind === "rot-layer" || d.kind === "move-vert"){
     if (!d.moved) Undo.stack.pop(); // no-op drag, drop the snapshot
@@ -214,6 +225,10 @@ function handleDrag(pt, w, e){
       if (d.linked) for (const L of d.linked){ L.pts[L.i].x = nx; L.pts[L.i].y = ny; }
       break;
     }
+    case "move-note":
+      d.moved = true;
+      d.note.x = w.x - d.offX; d.note.y = w.y - d.offY;
+      break;
     case "move-layer":
       d.moved = true;
       d.layer.tx = d.ltx + (w.x - d.wx);
@@ -312,6 +327,9 @@ function selectDown(w, pt, e){
         if (Math.hypot(t.points[i].x-h.via.x, t.points[i].y-h.via.y) <= vtol)
           anchors.push({ pts:t.points, i, dx:t.points[i].x-h.via.x, dy:t.points[i].y-h.via.y });
     Tools.drag = { kind:"move-via", via:h.via, offX:w.x-h.via.x, offY:w.y-h.via.y, moved:false, anchors };
+  } else if (h.type === "note"){
+    pushUndo("move note");
+    Tools.drag = { kind:"move-note", note:h.note, offX:w.x-h.note.x, offY:w.y-h.note.y, moved:false };
   }
   requestRender();
 }
@@ -335,6 +353,7 @@ function onDoubleClick(e){
       return;
     }
     if (h && h.type==="pin"){ promptNetName(h); return; }
+    if (h && h.type==="note"){ UI.select(h); UI.focusNoteText(); return; } // edit note text
     if (h && h.type==="comp"){ UI.select(h); UI.openQuickEdit(h.comp); return; } // quick ref + value editor
     // otherwise edit the trace under the cursor: on a vertex → remove it, on a segment → add a corner
     editTraceVertex(w);
@@ -827,11 +846,16 @@ function detachAnchor(d){
 function connectVertToSnap(trace, snap, vi){
   const tNet = trace.netId, sNet = snap.netId;
   let net = tNet;
+  let quietMerge = null;  // {a,b,keep} when two different nets were joined without a confirm
   if (tNet && sNet && tNet !== sNet){
+    const aName = getNet(tNet)?.name || "?", bName = getNet(sNet)?.name || "?";
+    // did the big-merge confirm dialog fire? if not, this merge happens silently
+    const willPrompt = State.bigMergeWarn && netPinCount(tNet) > 3 && netPinCount(sNet) > 3;
     const merged = mergeNetsChecked(tNet, sNet);
     if (merged === MERGE_DECLINED) { UI.toast("Anchor moved — nets not merged"); pruneNets(); UI.refreshNets(); requestRender(); return; }
     net = merged === null ? tNet : merged; // null = both protected, keep trace's net
     if (merged === null) UI.toast("⚠ Protected nets not merged");
+    else if (!willPrompt) quietMerge = { a:aName, b:bName, keep:getNet(net)?.name || "?" };
   } else {
     net = tNet || sNet || createNet().id;
   }
@@ -841,7 +865,8 @@ function connectVertToSnap(trace, snap, vi){
   if (vi != null && weldTraceAnchor(trace, vi, snap)){
     pruneNets(); UI.refreshNets();
     UI.select({ type:"trace", trace });
-    UI.toast("Traces merged → " + (getNet(net)?.name || "net"));
+    if (quietMerge) UI.warn("Connected nets “" + quietMerge.a + "” + “" + quietMerge.b + "” → “" + quietMerge.keep + "” (Ctrl+Z to undo)");
+    else UI.toast("Traces merged → " + (getNet(net)?.name || "net"));
     requestRender();
     return;
   }
@@ -857,7 +882,8 @@ function connectVertToSnap(trace, snap, vi){
   const where = snap.attach.type === "pin"
     ? snap.attach.comp.ref + "." + snap.attach.comp.pins[snap.attach.pinIdx].num
     : snap.attach.type === "via" ? "via" : "trace";
-  UI.toast("Anchor connected to " + where + " → " + (getNet(net)?.name || "net"));
+  if (quietMerge) UI.warn("Connected nets “" + quietMerge.a + "” + “" + quietMerge.b + "” → “" + quietMerge.keep + "” (Ctrl+Z to undo)");
+  else UI.toast("Anchor connected to " + where + " → " + (getNet(net)?.name || "net"));
   requestRender();
 }
 
@@ -952,6 +978,17 @@ function finishMeasure(){
   requestRender();
 }
 
+/* ---------------- sticky-note tool ---------------- */
+function noteDown(w, e){
+  pushUndo("add note");
+  const note = { id: nextId(), x: w.x, y: w.y, text: "", color: "#ffd24d" };
+  State.notes.push(note);
+  UI.select({ type:"note", note });   // inspector opens a text box
+  UI.focusNoteText();
+  UI.toast("Note added — type its text in the inspector");
+  requestRender();
+}
+
 /* ---------------- shared ops ---------------- */
 function deleteSelection(){
   const sel = UI.sel;
@@ -964,6 +1001,8 @@ function deleteSelection(){
     State.vias = State.vias.filter(v => v !== sel.via);
   } else if (sel.type === "trace"){
     State.traces = State.traces.filter(t => t !== sel.trace);
+  } else if (sel.type === "note"){
+    State.notes = State.notes.filter(n => n !== sel.note);
   }
   pruneNets();
   UI.select(null);
@@ -1175,4 +1214,20 @@ function toggleLockSelection(){
 function canvasPoint(e){
   const r = View.canvas.getBoundingClientRect();
   return { x: e.clientX - r.left, y: e.clientY - r.top };
+}
+
+/* set the active pane (offset + copper side + shown layer) from a screen point, so
+   coordinate transforms and side-based visibility target the half of the split under
+   the cursor. No-op offset outside split mode. */
+function updatePane(pt){
+  if (View.split){
+    const which = pt.x >= View.width/2 ? "right" : "left";
+    View.cursorPane = which;
+    View._paneDX = which === "right" ? View.width/2 : 0;
+    View._paneLayerId = View.paneLayer[which] || null;
+    View._paneSide = paneSideOf(which);
+  } else {
+    View.cursorPane = null;
+    View._paneDX = 0; View._paneSide = null; View._paneLayerId = null;
+  }
 }

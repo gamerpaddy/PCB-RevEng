@@ -43,6 +43,9 @@ UI.openFootprintDialog = (editComp) => {
   buildFpCats();
   buildFpParams();
   dlg.showModal();
+  // the preview canvas can only measure its (flex-sized) box once the dialog is
+  // actually laid out — redraw now so the first open isn't squished/low-res
+  drawFpPreview();
 };
 
 function buildFpCats(){
@@ -148,6 +151,11 @@ function buildFpParams(){
 function drawFpPreview(){
   const fp = generateFootprint(FPD.catId, FPD.params);
   const cv = $("#fp-preview"), ctx = cv.getContext("2d");
+  // match the drawing buffer to the (flex-sized) CSS box so the preview stays crisp
+  // and uses the enlarged dialog's space; fall back to the attribute size pre-layout
+  const cssW = Math.round(cv.clientWidth), cssH = Math.round(cv.clientHeight);
+  if (cssW > 0 && cv.width  !== cssW) cv.width  = cssW;
+  if (cssH > 0 && cv.height !== cssH) cv.height = cssH;
   ctx.clearRect(0,0,cv.width,cv.height);
   if (!fp) return;
   let ext = Math.max(fp.body.w, fp.body.h)/2;

@@ -60,10 +60,27 @@ UI.toast = (msg) => {
   UI._toastT = setTimeout(()=>{ el.style.opacity = "0"; }, 2600);
 };
 
+/* auto-hiding WARNING banner (amber, top-centre) — no button. For actions that go
+   through without a confirm dialog but the user should still notice, e.g. a small
+   trace-drag that quietly merged two nets. */
+UI.warn = (msg) => {
+  let el = $("#warn-toast");
+  if (!el){
+    el = document.createElement("div");
+    el.id = "warn-toast";
+    el.style.cssText = "position:fixed;left:50%;top:52px;transform:translateX(-50%);background:#3a2a16;border:1px solid #7a5a24;color:#ffce8a;padding:7px 18px;border-radius:6px;z-index:99;font-size:12px;font-weight:600;box-shadow:0 4px 16px rgba(0,0,0,.45);transition:opacity .3s;pointer-events:none;max-width:70vw;text-align:center";
+    document.body.appendChild(el);
+  }
+  el.textContent = "⚠ " + msg;
+  el.style.opacity = "1";
+  clearTimeout(UI._warnT);
+  UI._warnT = setTimeout(()=>{ el.style.opacity = "0"; }, 3600);
+};
+
 UI.drawSide = () => $("#draw-side").value;
-/* the copper side new traces/components target (X-ray is now a separate overlay,
-   so the draw side is always a real copper side) */
-UI.copperSide = () => UI.drawSide();
+/* the copper side new traces/components target. In split view this follows the pane
+   under the cursor (front/back); otherwise it's the draw-side selector. */
+UI.copperSide = () => (typeof effDrawSide === "function" ? effDrawSide() : UI.drawSide());
 UI.activeLayer = () => getLayer(UI.activeLayerId);
 UI.layerKeyMode = () => localStorage.getItem("pcbreveng.layerKeyMode") || "switch";
 
@@ -100,6 +117,36 @@ UI.refreshXrayBtn = () => {
   if (!btn) return;
   btn.style.display = "";
   btn.classList.toggle("active", !!View.xray);
+};
+
+/* per-pane layer dropdowns overlaid on the split view. Selecting a layer sets which
+   image that pane shows and points its trace/copper side at that layer's side. */
+UI.refreshSplitControls = () => {
+  const selL = $("#split-layer-left"), selR = $("#split-layer-right");
+  if (!selL || !selR) return;
+  const show = !!View.split;
+  selL.style.display = selR.style.display = show ? "" : "none";
+  if (!show) return;
+  const opts = (cur) => {
+    let h = `<option value="">— no image —</option>`;
+    for (const l of State.layers)
+      h += `<option value="${l.id}"${l.id===cur?" selected":""}>${escAttr(l.name)} · ${SIDE_LABELS[l.side]||l.side}</option>`;
+    return h;
+  };
+  selL.innerHTML = opts(View.paneLayer.left);
+  selR.innerHTML = opts(View.paneLayer.right);
+  selL.value = View.paneLayer.left != null ? String(View.paneLayer.left) : "";
+  selR.value = View.paneLayer.right != null ? String(View.paneLayer.right) : "";
+  const pick = (which, sel) => () => {
+    const id = sel.value ? +sel.value : null;
+    View.paneLayer[which] = id;
+    const l = getLayer(id);
+    if (l) View.paneSide[which] = l.side;   // trace/copper side follows the picked image
+    if (which === "left" && id) UI.activeLayerId = id;
+    UI.refreshSplitControls(); requestRender();
+  };
+  selL.onchange = pick("left", selL);
+  selR.onchange = pick("right", selR);
 };
 
 /* switch the active draw side (e.g. when activating an image layer of that side) */
@@ -199,6 +246,7 @@ UI.refreshLayerList = () => {
     list.appendChild(card);
   }
   UI.refreshXrayBtn();
+  UI.refreshSplitControls();   // keep the split-view layer dropdowns in sync with the layer list
 };
 
 /* ---------------- net list ---------------- */
@@ -394,6 +442,8 @@ UI.refreshInspector = () => {
     UI.inspectNetObj(sel.via.kind === "pth" ? "PTH" : "Via", sel.via, (netId)=>{ sel.via.netId = netId; });
   } else if (sel.type === "trace"){
     UI.inspectTrace(sel.trace);
+  } else if (sel.type === "note"){
+    UI.inspectNote(sel.note);
   }
 };
 
@@ -437,15 +487,15 @@ UI.inspectMultiTraces = () => {
   sec.className = "insp-section";
   const nets = [...new Set(UI.traceSel.map(t => t.netId))];
   const netLabel = nets.length === 1 ? (getNet(nets[0])?.name || "(none)") : nets.length + " nets";
-  // common width across the selection (blank if they differ, so ↑ starts from a sane value)
+  // common width across the selection (blank if they differ, so a value isn't implied)
   const widths = [...new Set(UI.traceSel.map(t => t.width || 3))];
-  const wVal = widths.length === 1 ? widths[0] : "";
-  const wPlace = widths.length === 1 ? "px" : "mixed";
+  const wUniform = widths.length === 1;
   sec.innerHTML = `
     <div class="insp-title">${UI.traceSel.length} trace segments</div>
     <div class="panel-hint">Net: ${netLabel}</div>
     ${inspRow("Set net", `<span style="display:flex;gap:4px;flex:1;min-width:0"><input id="i-tsnet" placeholder="net for all" style="flex:1;min-width:0"><button id="i-tsgen" title="Generate a new unique net name">⊕</button></span>`)}
-    ${inspRow("Width", `<input id="i-tsw" type="number" step="0.5" min="0.5" value="${wVal}" placeholder="${wPlace}"> px`)}
+    ${inspRow("Width", UI.traceWidthInputs(widths[0]||3, "i-tsw", wUniform))}
+    ${wUniform ? UI.traceCurrentRow(UI.traceSel[0]) : ""}
     <div class="insp-actions">
       <button id="i-tsdel" class="danger">Delete all</button>
       <button id="i-tsclear">Clear selection</button>
@@ -460,10 +510,13 @@ UI.inspectMultiTraces = () => {
     pruneNets(); UI.toast(UI.traceSel.length + " traces → " + target.name);
     UI.refreshNets(); requestRender();
   });
-  sec.querySelector("#i-tsw").addEventListener("change", e => {
-    const v = Math.max(0.5, parseFloat(e.target.value)||3);
-    pushUndo("trace width"); for (const t of UI.traceSel) t.width = v; requestRender();
-  });
+  const applyAllW = (px) => {
+    if (!(px > 0)) return;
+    pushUndo("trace width"); for (const t of UI.traceSel) t.width = Math.max(0.05, px);
+    UI.refreshInspector(); requestRender();
+  };
+  sec.querySelector("#i-tswmm").addEventListener("change",  e => applyAllW((parseFloat(e.target.value)||0) * State.pxPerMm));
+  sec.querySelector("#i-tswmil").addEventListener("change", e => applyAllW((parseFloat(e.target.value)||0) * MM_PER_MIL * State.pxPerMm));
   sec.querySelector("#i-tsdel").addEventListener("click", ()=>{
     pushUndo("delete " + UI.traceSel.length + " traces");
     State.traces = State.traces.filter(t => !UI.traceSel.includes(t));
@@ -725,6 +778,61 @@ UI.openViaSpanEditor = (via) => {
   dlg.showModal();
 };
 
+/* total polyline length of a trace, in mm (uses the board scale) */
+UI.traceLengthMm = (t) => {
+  let px = 0;
+  const p = t.points || [];
+  for (let i = 1; i < p.length; i++) px += Math.hypot(p[i].x - p[i-1].x, p[i].y - p[i-1].y);
+  return px / State.pxPerMm;
+};
+
+/* trace DC resistance in milliohms: ρ·L/(w·t), ρ_Cu ≈ 1.72e-8 Ω·m at ~25 °C */
+const RHO_CU = 1.72e-8;
+function traceResistanceMilliOhm(lenMm, widthMm, thickMm){
+  const area = (widthMm/1000) * (thickMm/1000);   // m²
+  if (!(area > 0)) return 0;
+  return RHO_CU * (lenMm/1000) / area * 1000;      // Ω → mΩ
+}
+
+/* Electrical readout for a trace. Ampacity (IPC-2221) depends on cross-section only,
+   but resistance and voltage drop scale with LENGTH and WIDTH — so both are shown and
+   both update when you edit the trace's width, its length, or the board copper weight. */
+UI.traceCurrentRow = (t, opts) => {
+  opts = opts || {};
+  const widthMm = (t.width || 3) / State.pxPerMm;
+  const internal = t.side !== "front" && t.side !== "back";
+  const oz = internal ? (State.copperOzInner || 0.5) : (State.copperOz || 1);
+  const thickMm = oz * OZ_TO_MM;
+  const amps = estimateTraceAmps(widthMm, thickMm, internal, 10);
+  const aTxt = amps >= 10 ? amps.toFixed(1) : amps.toFixed(2);
+  const layerTxt = internal ? "internal" : "external";
+  let html = inspRow("Est. current", `<span style="flex:1;min-width:0;color:#aab4c2;font-size:11px" title="IPC-2221 max current for a 10 °C rise. Depends on cross-section (width × copper thickness), not length. Physical width = display width ÷ board scale — calibrate the board for accuracy; set outer/inner copper weight in Options.">~${aTxt} A <span style="color:#6b7684">· ${fmtLen(widthMm)} · ${oz} oz · ${layerTxt} · ΔT 10°C</span></span>`);
+  if (opts.showLength){
+    const lenMm = UI.traceLengthMm(t);
+    const R = traceResistanceMilliOhm(lenMm, widthMm, thickMm);
+    const rTxt = R >= 1 ? R.toFixed(1) + " mΩ" : (R*1000).toFixed(0) + " µΩ";
+    const vDrop = amps * R / 1000; // V at the estimated max current
+    html += inspRow("Length · R", `<span style="flex:1;min-width:0;color:#aab4c2;font-size:11px" title="DC resistance R = ρ·L/(w·t) with ρ_Cu = 1.72e-8 Ω·m. Voltage drop is at the estimated max current above.">${fmtLen(lenMm)} · ${rTxt} <span style="color:#6b7684">· ${vDrop.toFixed(2)} V @ ${aTxt} A</span></span>`);
+  }
+  return html;
+};
+
+/* trace width as side-by-side mm + mil inputs (stored internally as display px).
+   ids: mm = idBase+"mm", mil = idBase+"mil" */
+UI.traceWidthInputs = (widthPx, idBase, uniform) => {
+  uniform = uniform !== false;
+  const mm = widthPx / State.pxPerMm;
+  const mil = mm / MM_PER_MIL;
+  const mmV  = uniform ? mm.toFixed(3)  : "";
+  const milV = uniform ? mil.toFixed(1) : "";
+  const ph = uniform ? "" : "mixed";
+  return `<span style="display:flex;gap:4px;flex:1;min-width:0;align-items:center">
+    <input id="${idBase}mm" type="number" step="0.05" min="0.05" value="${mmV}" placeholder="${ph}" style="flex:1;min-width:0;width:0" title="Trace width in millimetres">
+    <span style="color:#8b96a5;font-size:10px">mm</span>
+    <input id="${idBase}mil" type="number" step="1" min="0.5" value="${milV}" placeholder="${ph}" style="flex:1;min-width:0;width:0" title="Trace width in mils (thou)">
+    <span style="color:#8b96a5;font-size:10px">mil</span></span>`;
+};
+
 UI.inspectTrace = (t) => {
   const box = $("#inspector");
   const netName = t.netId ? (getNet(t.netId)?.name || "") : "";
@@ -734,7 +842,8 @@ UI.inspectTrace = (t) => {
     <div class="insp-title">Trace <span style="color:${SIDE_COLORS[t.side]};font-size:11px">● ${SIDE_LABELS[t.side]}</span></div>
     ${inspRow("Net", `<span style="display:flex;gap:4px;flex:1;min-width:0"><input id="i-net" value="${escAttr(netName)}" style="flex:1;min-width:0"><button id="i-netgen" title="Generate a new unique net name">⊕</button></span>`)}
     ${inspRow("Side", `<select id="i-tside">${sideOptionsHtml(t.side)}</select>`)}
-    ${inspRow("Width", `<input id="i-w" type="number" step="0.5" min="0.5" value="${(t.width||3).toFixed(1)}"> px`)}
+    ${inspRow("Width", UI.traceWidthInputs(t.width||3, "i-w"))}
+    ${UI.traceCurrentRow(t, {showLength:true})}
     <div class="insp-actions"><button id="i-selnet">Select whole net</button><button id="i-del" class="danger">Delete</button></div>`;
   box.appendChild(sec);
   sec.querySelector("#i-tside").value = t.side;
@@ -743,9 +852,43 @@ UI.inspectTrace = (t) => {
   sec.querySelector("#i-net").addEventListener("change", e => {
     applyNetRename({type:"trace", trace:t}, e.target.value);
   });
-  sec.querySelector("#i-tside").addEventListener("change", e => { pushUndo(); t.side = e.target.value; requestRender(); });
-  sec.querySelector("#i-w").addEventListener("change", e => { pushUndo(); t.width = Math.max(0.5, parseFloat(e.target.value)||3); requestRender(); });
+  sec.querySelector("#i-tside").addEventListener("change", e => { pushUndo(); t.side = e.target.value; UI.refreshInspector(); requestRender(); });
+  const applyW = (px) => { if (!(px > 0)) return; pushUndo("trace width"); t.width = Math.max(0.05, px); UI.refreshInspector(); requestRender(); };
+  sec.querySelector("#i-wmm").addEventListener("change",  e => applyW((parseFloat(e.target.value)||0) * State.pxPerMm));
+  sec.querySelector("#i-wmil").addEventListener("change", e => applyW((parseFloat(e.target.value)||0) * MM_PER_MIL * State.pxPerMm));
   sec.querySelector("#i-del").addEventListener("click", deleteSelection);
+};
+
+/* sticky-note editor. Text commits live (so the on-board bubble updates as you type);
+   a colour swatch row recolours the marker + bubble. */
+UI.inspectNote = (n) => {
+  const box = $("#inspector");
+  const sec = document.createElement("div");
+  sec.className = "insp-section";
+  const swatches = ["#ffd24d","#4dd2ff","#8aff80","#ff7eb6","#ffa94d","#b78aff","#ff6e6e","#ffffff"];
+  sec.innerHTML = `
+    <div class="insp-title">📝 Note</div>
+    ${inspRow("Text", `<textarea id="i-note-text" rows="4" placeholder="Type your note…" style="flex:1;min-width:0;resize:vertical;font:12px/1.4 Segoe UI,sans-serif">${escAttr(n.text)}</textarea>`)}
+    <div class="insp-row"><label>Colour</label><div id="i-note-cols" style="display:flex;gap:4px;flex-wrap:wrap;flex:1"></div></div>
+    <div class="panel-hint">Shown as a small marker; its text appears when you hover or select it. Drag in Select to move · double-click to edit.</div>
+    <div class="insp-actions"><button id="i-del" class="danger">Delete note</button></div>`;
+  box.appendChild(sec);
+  bindLive(sec.querySelector("#i-note-text"), "edit note", v => { n.text = v; });
+  const cols = sec.querySelector("#i-note-cols");
+  swatches.forEach(c => {
+    const b = document.createElement("button");
+    b.title = c;
+    b.style.cssText = `width:20px;height:20px;padding:0;border-radius:4px;cursor:pointer;background:${c};border:2px solid ${n.color===c?"#fff":"transparent"}`;
+    b.addEventListener("click", () => { pushUndo("note colour"); n.color = c; UI.refreshInspector(); requestRender(); });
+    cols.appendChild(b);
+  });
+  sec.querySelector("#i-del").addEventListener("click", deleteSelection);
+};
+
+/* focus (and select) the note text box — used right after placing / double-clicking */
+UI.focusNoteText = () => {
+  const el = $("#i-note-text");
+  if (el){ el.focus(); el.select(); }
 };
 
 function escAttr(s){ return String(s==null?"":s).replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;"); }
@@ -1141,7 +1284,7 @@ UI.buildHelp = () => {
       [k("view.flip"),"Flip view (look from back)"],["Home / " + k("view.fit"),"Zoom to fit"],
       [k("view.mask"),"Coverage mask — tint areas without components"],
       ["1 … 9, 0","Switch view to image layer 1–10 (or toggle visibility — see Board/display panel)"],
-      ["Shift + 1…0","Same, for layers 11–20"],
+      [k("view.split"),"Split view — Front/Back side by side; 1…0 set the LEFT view's layer, Shift+1…0 the RIGHT"],
     ]],
     ["Editing", [
       [k("edit.rotate") + " / Shift+" + k("edit.rotate"),"Rotate 90° / 15° (selection or ghost)"],
@@ -1155,14 +1298,6 @@ UI.buildHelp = () => {
     ]],
     ["Project", [
       ["Ctrl+S","Save project (.json incl. images)"],["Ctrl+O","Open project"],["Ctrl+E","Export (netlist / BOM / schematic / CSV / JSON)"],
-    ]],
-    ["Workflow", [
-      ["1.","Drop front & back photos · set the back photo's side to Back + Mirror ⇋"],
-      ["2.",k("tool.align")+": drag/2-point-align layers so pads coincide · Calibrate button: set scale from a known dimension · "+k("tool.measure")+": measure a distance"],
-      ["3.",k("tool.component")+": place components with footprints, refs and values"],
-      ["4.",k("tool.trace")+": click a pad or an existing trace → route along the copper → click the destination (crossing same-side traces auto-join)"],
-      ["5.",k("tool.via")+": vias where traces change sides · double-click pads to name power nets"],
-      ["6.","Ctrl+E: export the KiCad netlist and import it in Pcbnew"],
     ]],
   ];
   const box = $("#help-body");

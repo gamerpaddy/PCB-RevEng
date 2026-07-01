@@ -17,6 +17,20 @@ for (let i = 1; i <= 10; i++){
 
 const LAYER_COUNTS = [1,2,4,6,8,10,12];
 
+/* copper foil thickness in mm for a given weight in oz/ft² (1 oz ≈ 34.79 µm) */
+const OZ_TO_MM = 0.03479;
+
+/* IPC-2221 external/internal trace ampacity estimate.
+   I = k · ΔT^0.44 · A^0.725, with A the cross-section in mil² and k the layer
+   constant (0.048 external, 0.024 internal). Returns amperes. */
+function estimateTraceAmps(widthMm, thickMm, internal, dT){
+  dT = dT || 10;
+  if (!(widthMm > 0) || !(thickMm > 0)) return 0;
+  const area = (widthMm / 0.0254) * (thickMm / 0.0254); // mil²
+  const k = internal ? 0.024 : 0.048;
+  return k * Math.pow(dT, 0.44) * Math.pow(area, 0.725);
+}
+
 const State = {
   pxPerMm: 10,          // world px per millimetre (set with Measure tool)
   layerCount: 2,        // copper layers on the board (1,2,4,…,12)
@@ -27,10 +41,14 @@ const State = {
   overlapCheck: true,   // warn when a moved pad overlaps another net
   bigMergeWarn: true,   // warn when joining two nets that each have >3 pads
   refTextSize: 13,      // component reference label size in px
+  copperOz: 1,          // outer-layer copper weight (oz/ft²) — trace current estimator
+  copperOzInner: 0.5,   // inner-layer copper weight (oz/ft²) — usually lighter than outer
+  focusDim: 0.16,       // opacity of non-selected objects when a net is focused (0..1)
   layers: [],           // {id,name,side,dataURL,img,visible,opacity,tx,ty,scale,rot,mirror,locked}
   components: [],       // {id,ref,value,part,fpId,fpParams,kicad,x,y,rot,side,scale,pins:[{num,name,netId,xmm,ymm}]}
   vias: [],             // {id,x,y,netId,r}
   traces: [],           // {id,side,netId,points:[{x,y}],width}
+  notes: [],            // {id,x,y,text,color} — freeform sticky-note annotations pinned to board coords
   nets: [],             // {id,name,color,auto}
   bomColumns: [],       // custom BOM column names (MPN, Supplier, …); per-part values live in component.bom
   _id: 1,
@@ -237,6 +255,7 @@ function getComp(id){ return State.components.find(c => c.id === id) || null; }
 function getVia(id){ return State.vias.find(v => v.id === id) || null; }
 function getTrace(id){ return State.traces.find(t => t.id === id) || null; }
 function getLayer(id){ return State.layers.find(l => l.id === id) || null; }
+function getNote(id){ return State.notes.find(n => n.id === id) || null; }
 
 /* ---------- undo / redo ---------- */
 const Undo = { stack: [], redo: [], max: 25 };
@@ -253,9 +272,13 @@ function snapshot(){
     overlapCheck: State.overlapCheck,
     bigMergeWarn: State.bigMergeWarn,
     refTextSize: State.refTextSize,
+    copperOz: State.copperOz,
+    copperOzInner: State.copperOzInner,
+    focusDim: State.focusDim,
     components: State.components,
     vias: State.vias,
     traces: State.traces,
+    notes: State.notes,
     nets: State.nets,
     bomColumns: State.bomColumns,
     _id: State._id,
@@ -285,9 +308,13 @@ function applySnapshot(json){
   State.overlapCheck = s.overlapCheck !== false;
   State.bigMergeWarn = s.bigMergeWarn !== false;
   State.refTextSize = s.refTextSize || 13;
+  State.copperOz = s.copperOz || 1;
+  State.copperOzInner = s.copperOzInner || 0.5;
+  State.focusDim = (s.focusDim != null) ? s.focusDim : 0.16;
   State.components = s.components;
   State.vias = s.vias;
   State.traces = s.traces;
+  State.notes = s.notes || [];
   State.nets = s.nets;
   State.bomColumns = s.bomColumns || [];
   State._id = s._id;
@@ -322,7 +349,7 @@ function selectiveUndo(i){
   const before = JSON.parse(entry.json);
   const after  = JSON.parse(i + 1 < Undo.stack.length ? Undo.stack[i+1].json : snapshot());
   pushUndo("revert: " + entry.label); // make the selective revert itself undoable (may shift indices)
-  for (const col of ["components","vias","traces","nets"]){
+  for (const col of ["components","vias","traces","notes","nets"]){
     const bm = new Map(before[col].map(o => [o.id, o]));
     const am = new Map(after[col].map(o => [o.id, o]));
     const cur = State[col];
@@ -425,8 +452,8 @@ function diffSnapshots(beforeJson, afterJson){
     if (a2.length) parts.push(a2.join(", "));
   });
 
-  // vias & traces — counts only (no useful per-object name)
-  for (const [col, noun] of [["vias","via"], ["traces","trace"]]){
+  // vias, traces & notes — counts only (no useful per-object name)
+  for (const [col, noun] of [["vias","via"], ["traces","trace"], ["notes","note"]]){
     const d = diffColl(col);
     if (d.added.length)   parts.push("added "   + d.added.length   + " " + noun + (d.added.length>1?"s":""));
     if (d.removed.length) parts.push("removed " + d.removed.length + " " + noun + (d.removed.length>1?"s":""));
@@ -446,6 +473,7 @@ function diffSnapshots(beforeJson, afterJson){
   // board-wide scalar settings
   [ ["pxPerMm","scale"], ["layerCount","layer count"], ["viaR","via size"], ["traceW","trace width"],
     ["refTextSize","label size"], ["compView","component view"], ["traceView","trace view"],
+    ["copperOz","copper weight"], ["copperOzInner","inner copper weight"], ["focusDim","focus dim"],
   ].forEach(([k, lbl]) => { if (b[k] !== a[k]) parts.push(lbl + " changed"); });
 
   return parts.join(" · ");
@@ -464,6 +492,9 @@ function serializeProject(){
     overlapCheck: State.overlapCheck,
     bigMergeWarn: State.bigMergeWarn,
     refTextSize: State.refTextSize,
+    copperOz: State.copperOz,
+    copperOzInner: State.copperOzInner,
+    focusDim: State.focusDim,
     _id: State._id,
     refCounters: State.refCounters,
     nets: State.nets,
@@ -471,6 +502,7 @@ function serializeProject(){
     components: State.components,
     vias: State.vias,
     traces: State.traces,
+    notes: State.notes,
     layers: State.layers.map(l => ({
       id:l.id, name:l.name, side:l.side, dataURL:l.dataURL, visible:l.visible,
       opacity:l.opacity, tx:l.tx, ty:l.ty, scale:l.scale, rot:l.rot,
@@ -491,6 +523,9 @@ function loadProject(json, done){
   State.overlapCheck = s.overlapCheck !== false;
   State.bigMergeWarn = s.bigMergeWarn !== false;
   State.refTextSize = s.refTextSize || 13;
+  State.copperOz = s.copperOz || 1;
+  State.copperOzInner = s.copperOzInner || 0.5;
+  State.focusDim = (s.focusDim != null) ? s.focusDim : 0.16;
   State._id = s._id || 1;
   State.refCounters = s.refCounters || {};
   State.nets = s.nets || [];
@@ -498,6 +533,7 @@ function loadProject(json, done){
   State.components = s.components || [];
   State.vias = s.vias || [];
   State.traces = s.traces || [];
+  State.notes = s.notes || [];
   State.layers = [];
   Undo.stack.length = 0; Undo.redo.length = 0;
   const metas = s.layers || [];
@@ -522,10 +558,14 @@ function resetProject(){
   State.overlapCheck = true;
   State.bigMergeWarn = true;
   State.refTextSize = 13;
+  State.copperOz = 1;
+  State.copperOzInner = 0.5;
+  State.focusDim = 0.16;
   State.layers = [];
   State.components = [];
   State.vias = [];
   State.traces = [];
+  State.notes = [];
   State.nets = [];
   State.bomColumns = [];
   State._id = 1;

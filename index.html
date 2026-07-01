@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PCB RevEng — Reverse Engineering Workbench</title>
 
-<link rel="stylesheet" href="css/style.css?v=61">
+<link rel="stylesheet" href="css/style.css?v=64">
 
 </head>
 <body>
@@ -35,6 +35,7 @@
       <button class="tool" data-tool="trace"     title="Draw trace / connect pins  [W]">&#8767;<span>Trace</span></button>
       <button class="tool" data-tool="via"       title="Place via  [V]">&#9673;<span>Via</span></button>
       <button class="tool" data-tool="cut"       title="Cut trace into two nets  [K]">&#9986;<span>Cut</span></button>
+      <button class="tool" data-tool="note"      title="Sticky note — click the board to drop an annotation; its text shows on hover so it never obstructs the board">&#128221;<span>Note</span></button>
     </div>
 
     <div class="tb-group">
@@ -48,6 +49,7 @@
       <button id="btn-flip" title="Flip board view (look from the back)  [F]">Flip view</button>
       <button id="btn-mask" title="Coverage mask — tints board areas without components  [H]">Mask</button>
       <button id="btn-xray" title="X-ray overlay — show components &amp; traces from BOTH sides at once. Inactive-side copper is dimmed; if an X-ray image layer exists it is shown too. Drawing stays on the selected side.">X-ray</button>
+      <button id="btn-split" title="Split view  [Y]  — Front (left) and Back (right) side by side, sharing one camera. The same board area lines up in both halves so you can correlate features across sides. Draw/select in either half.">Split</button>
       <button id="btn-ratsnest" title="Ratsnest — draw straight airwires between every pad/via on the same net (across all layers). Hover or select a net to isolate it.">Ratsnest</button>
       <button id="btn-stack3d" title="3D layer stack — exploded pseudo-3D view of all copper layers and their through-hole connections">3D</button>
     </div>
@@ -78,7 +80,7 @@
         </span>
       </div>
       <div id="layer-list"></div>
-      <div class="panel-hint">Drop PCB photos onto the canvas.<br>Keys 1…0 switch the view to that layer (Shift = +10; configurable below).</div>
+      <div class="panel-hint">Drop PCB photos onto the canvas.<br>Keys 1…0 switch the view to that layer. In split view they set the LEFT view, Shift+1…0 the RIGHT.</div>
 
       <div class="panel-title">Nets <span id="net-count"></span>
         <button id="btn-check" title="Check for pads with no net assigned">Check</button>
@@ -94,6 +96,8 @@
     <!-- center: canvas -->
     <div id="canvas-wrap">
       <canvas id="canvas"></canvas>
+      <select id="split-layer-left"  class="split-layer-sel" title="Layer shown in the LEFT split view (hotkeys 1–9/0)" style="display:none"></select>
+      <select id="split-layer-right" class="split-layer-sel" title="Layer shown in the RIGHT split view (hotkeys Shift+1–9/0)" style="display:none"></select>
       <div id="status-bar">
         <span id="status-tool"></span>
         <span id="status-pos"></span>
@@ -209,6 +213,28 @@
         <input type="range" id="set-reftext" min="8" max="28" step="1">
       </div>
       <div class="set-row">
+        <label for="set-copper" title="Outer-layer (F.Cu/B.Cu) copper foil weight — feeds the trace current estimate for traces on the outer layers (IPC-2221)">Copper (outer)</label>
+        <select id="set-copper">
+          <option value="0.5">0.5 oz (17 µm)</option>
+          <option value="1">1 oz (35 µm)</option>
+          <option value="2">2 oz (70 µm)</option>
+          <option value="3">3 oz (105 µm)</option>
+        </select>
+      </div>
+      <div class="set-row">
+        <label for="set-copper-inner" title="Inner-layer copper foil weight — inner planes/traces are usually lighter (often 0.5 oz). Used for the current estimate on inner-layer traces.">Copper (inner)</label>
+        <select id="set-copper-inner">
+          <option value="0.5">0.5 oz (17 µm)</option>
+          <option value="1">1 oz (35 µm)</option>
+          <option value="2">2 oz (70 µm)</option>
+          <option value="3">3 oz (105 µm)</option>
+        </select>
+      </div>
+      <div class="set-row">
+        <label for="set-focusdim" title="Opacity of non-selected traces/pads/parts when a net is selected or hovered. Lower = the rest fades more so the focused net stands out.">Non-sel. opacity <span id="set-focusdim-val"></span></label>
+        <input type="range" id="set-focusdim" min="0" max="80" step="1">
+      </div>
+      <div class="set-row">
         <label for="set-overlap" title="Warn when a moved pad overlaps copper of another net">Overlap check</label>
         <select id="set-overlap">
           <option value="on">On</option>
@@ -225,6 +251,17 @@
       <div class="set-row">
         <label for="set-histlen" title="How many actions the undo timeline keeps">History length <span id="set-histlen-val"></span></label>
         <input type="range" id="set-histlen" min="5" max="100" step="5">
+      </div>
+      <div class="set-row">
+        <label for="set-autosave" title="How long after a change the board is autosaved to this browser. Autosave never runs while you are dragging something.">Autosave after</label>
+        <select id="set-autosave">
+          <option value="1000">1 second</option>
+          <option value="2500">2.5 seconds</option>
+          <option value="5000">5 seconds</option>
+          <option value="10000">10 seconds</option>
+          <option value="30000">30 seconds</option>
+          <option value="0">Off</option>
+        </select>
       </div>
       <div class="set-row">
         <label for="set-units" title="Units for the position readout, measure tool and footprint grid">Units</label>
@@ -415,25 +452,25 @@
 </div>
 
 
-<script src="js/state.js?v=57"></script>
+<script src="js/state.js?v=59"></script>
 <script src="js/footprints/core.js?v=49"></script>
 <script src="js/footprints/passives.js?v=49"></script>
 <script src="js/footprints/discrete.js?v=49"></script>
 <script src="js/footprints/connectors.js?v=49"></script>
 <script src="js/footprints/ics.js?v=49"></script>
 <script src="js/footprints/misc.js?v=49"></script>
-<script src="js/view.js?v=53"></script>
+<script src="js/view.js?v=56"></script>
 <script src="js/layerstack.js?v=53"></script>
-<script src="js/tools.js?v=59"></script>
+<script src="js/tools.js?v=61"></script>
 <script src="js/align.js?v=49"></script>
-<script src="js/keymap.js?v=49"></script>
+<script src="js/keymap.js?v=50"></script>
 <script src="js/resolver.js?v=49"></script>
 <script src="js/netlist.js?v=57"></script>
-<script src="js/ui.js?v=61"></script>
+<script src="js/ui.js?v=66"></script>
 <script src="js/kicadsearch.js?v=51"></script>
-<script src="js/fpdialog.js?v=49"></script>
-<script src="js/autosave.js?v=49"></script>
-<script src="js/main.js?v=59"></script>
+<script src="js/fpdialog.js?v=51"></script>
+<script src="js/autosave.js?v=50"></script>
+<script src="js/main.js?v=63"></script>
 
 </body>
 </html>

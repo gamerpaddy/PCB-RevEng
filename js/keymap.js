@@ -19,6 +19,7 @@ const KeyActions = [
   { id:"edit.delete",    label:"Delete selection",              def:"Delete", run:()=>deleteSelection() },
   { id:"view.mask",      label:"Toggle coverage mask",          def:"H",      run:()=>toggleMask() },
   { id:"view.xray",      label:"Toggle X-ray overlay",          def:"X",      run:()=>toggleXray() },
+  { id:"view.split",     label:"Toggle split view",             def:"Y",      run:()=>toggleSplit() },
 ];
 
 const RESERVED_KEYS = ["Escape","Enter"," ","Spacebar","Tab","+","=","-","?"];

@@ -8,9 +8,17 @@ const View = {
   mask: false,            // coverage mask overlay
   width: 0, height: 0,
   hoverNetId: null,       // net under cursor → highlighted
+  hoverNote: null,        // sticky note under cursor → show its text
   blinkNet: null,         // net flashing after a net-list click
   blinkOn: false,
   ratsnest: false,        // draw straight "airwire" connections between same-net pads/vias
+  split: false,           // synced split view — left & right panes share one camera
+  paneLayer: { left:null, right:null }, // image-layer id shown in each split pane
+  paneSide: { left:"front", right:"back" }, // copper side whose traces/vias/parts show in each pane
+  cursorPane: null,       // which split pane the pointer is over ("left"/"right"/null)
+  _paneDX: 0,             // horizontal screen offset of the pane currently being drawn / hit-tested
+  _paneSide: null,        // copper side that pane represents; null = use the draw-side selector
+  _paneLayerId: null,     // image layer drawn in the pane currently being rendered
 };
 
 /* flash a net 3× in the view */
@@ -44,14 +52,30 @@ function viewResize(){
   requestRender();
 }
 
-/* world <-> screen (screen in CSS px) */
+/* world <-> screen (screen in CSS px). View._paneDX shifts the mapping into the
+   pane currently being drawn / hit-tested (0 in normal single-view mode). */
 function worldToScreen(x, y){
   const fx = View.flip ? -1 : 1;
-  return { x: x * View.zoom * fx + View.panX, y: y * View.zoom + View.panY };
+  return { x: x * View.zoom * fx + View.panX + View._paneDX, y: y * View.zoom + View.panY };
 }
 function screenToWorld(x, y){
   const fx = View.flip ? -1 : 1;
-  return { x: (x - View.panX) / (View.zoom * fx), y: (y - View.panY) / View.zoom };
+  return { x: (x - View.panX - View._paneDX) / (View.zoom * fx), y: (y - View.panY) / View.zoom };
+}
+
+/* the effective copper side for visibility filtering: the pane's side while a split
+   pane is being drawn / interacted with, otherwise the draw-side selector */
+function effDrawSide(){
+  return (View._paneSide) ? View._paneSide : UI.drawSide();
+}
+
+/* copper side a split pane's traces/vias/components follow. Independent of the image
+   layer shown (so you can e.g. view the front photo but the back copper), but picking
+   a layer sets it to that layer's side by default. */
+function paneSideOf(which){
+  const s = View.paneSide[which];
+  if (s) return s;
+  return which === "left" ? "front" : "back";
 }
 
 function zoomAt(sx, sy, factor){
@@ -192,6 +216,14 @@ function hitTest(wx, wy){
       if (distToSeg(wx,wy,t.points[k],t.points[k+1]) <= (t.width||3)/2 + tol)
         return { type:"trace", trace:t };
     }
+  }
+  // sticky notes — small markers, tested before big component bodies so they can be
+  // grabbed, but after pads/vias/traces so they never obstruct real copper
+  const noteR = 11 / View.zoom;
+  for (let i=State.notes.length-1; i>=0; i--){
+    const n = State.notes[i];
+    if (Math.hypot(wx-n.x, wy-n.y) <= noteR)
+      return { type:"note", note:n };
   }
   // component bodies (hidden-side bodies are not clickable, their pads above still are)
   for (let i=State.components.length-1; i>=0; i--){
@@ -337,7 +369,7 @@ function requestRender(){
    (front/back); when an inner layer is active, fall back to the flip orientation. */
 function activeSide(){
   if (View.xray) return "xray";              // X-ray overlay shows both sides
-  const ds = UI.drawSide();
+  const ds = effDrawSide();
   if (ds === "front" || ds === "back") return ds;
   return View.flip ? "back" : "front";
 }
@@ -350,20 +382,20 @@ function compBodyVisible(c){
 
 /* traces shown only for the active draw side (X-ray shows all; vias & pads always shown) */
 function traceVisible(t){
-  return State.traceView !== "active" || View.xray || t.side === UI.drawSide();
+  return State.traceView !== "active" || View.xray || t.side === effDrawSide();
 }
 
 /* a through via shows on every layer; a blind/buried via only shows on the copper
    sides it actually reaches — same idea as compBodyVisible, so it disappears on
    layers it isn't on (X-ray shows all) */
 function viaVisible(v){
-  return View.xray || viaOnSide(v, UI.drawSide());
+  return View.xray || viaOnSide(v, effDrawSide());
 }
 
 /* in X-ray mode, fade objects that aren't on the side currently being drawn on
    (so the active side stands out over the see-through other side) */
 function xrayDim(side){
-  return (View.xray && side !== UI.drawSide()) ? 0.4 : 1;
+  return (View.xray && side !== effDrawSide()) ? 0.4 : 1;
 }
 
 function render(){
@@ -372,16 +404,84 @@ function render(){
   ctx.setTransform(dpr,0,0,dpr,0,0);
   ctx.clearRect(0,0,View.width,View.height);
 
+  if (View.split){
+    const halfW = View.width / 2;
+    renderPane(ctx, 0,     halfW, 0,     "left");
+    renderPane(ctx, halfW, halfW, halfW, "right");
+    drawSplitChrome(ctx, halfW);
+    drawSecondCursor(ctx, halfW);
+  } else {
+    View._paneDX = 0; View._paneSide = null; View._paneLayerId = null;
+    drawWorld(ctx);
+    drawAlignOverlay(ctx);
+  }
+  // leave the pane offset cleared so pointer-side transforms are correct between frames
+  View._paneDX = 0; View._paneSide = null; View._paneLayerId = null;
+}
+
+/* draw one synced split pane (which = "left"/"right"): a clipped half-canvas showing
+   that pane's selected image layer + its side's copper, offset by paneDX so the SAME
+   world region appears in each half (features line up for cross-side correlation). */
+function renderPane(ctx, x0, w, paneDX, which){
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(x0, 0, w, View.height);   // CSS px (transform already scales by dpr)
+  ctx.clip();
+  View._paneDX = paneDX;
+  View._paneLayerId = View.paneLayer[which] || null;
+  View._paneSide = paneSideOf(which);
+  drawWorld(ctx);
+  drawAlignOverlay(ctx);
+  ctx.restore();
+}
+
+/* divider for the split view (per-pane layer/side controls are DOM dropdowns overlaid
+   on each pane — see UI.refreshSplitControls) */
+function drawSplitChrome(ctx, halfW){
+  ctx.save();
+  ctx.setTransform((View.dpr||1),0,0,(View.dpr||1),0,0);
+  ctx.strokeStyle = "#2e3742"; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(halfW, 0); ctx.lineTo(halfW, View.height); ctx.stroke();
+  ctx.restore();
+}
+
+/* mirror cursor: show where the pointer is in the OTHER pane (same world point),
+   so you can line up a feature across the two synced views */
+function drawSecondCursor(ctx, halfW){
+  if (!Tools.cursor || !View.cursorPane) return;
+  const other = View.cursorPane === "left" ? "right" : "left";
+  const paneDX = other === "left" ? 0 : halfW;
+  const fx = View.flip ? -1 : 1;
+  const sx = Tools.cursor.x * View.zoom * fx + View.panX + paneDX;
+  const sy = Tools.cursor.y * View.zoom + View.panY;
+  if (sx < (other === "left" ? 0 : halfW) || sx > (other === "left" ? halfW : View.width)) return;
+  ctx.save();
+  ctx.setTransform((View.dpr||1),0,0,(View.dpr||1),0,0);
+  ctx.strokeStyle = "rgba(255,255,255,.55)"; ctx.lineWidth = 1;
+  const r = 9;
+  ctx.beginPath();
+  ctx.moveTo(sx - r, sy); ctx.lineTo(sx + r, sy);
+  ctx.moveTo(sx, sy - r); ctx.lineTo(sx, sy + r);
+  ctx.stroke();
+  ctx.beginPath(); ctx.arc(sx, sy, 2.5, 0, Math.PI*2);
+  ctx.strokeStyle = "rgba(255,255,255,.8)"; ctx.stroke();
+  ctx.restore();
+}
+
+function drawWorld(ctx){
   const fx = View.flip ? -1 : 1;
   ctx.save();
-  ctx.translate(View.panX, View.panY);
+  ctx.translate(View.panX + View._paneDX, View.panY);
   ctx.scale(View.zoom * fx, View.zoom);
 
   // --- image layers ---
+  // split view shows only each pane's selected layer; single view shows all visible ones
   for (const l of State.layers){
-    if (!l.visible || !l.img || !l.img.width) continue;
+    if (View.split){ if (l.id !== View._paneLayerId) continue; }
+    else if (!l.visible) continue;
+    if (!l.img || !l.img.width) continue;
     ctx.save();
-    ctx.globalAlpha = l.opacity;
+    ctx.globalAlpha = View.split ? Math.max(l.opacity, 0.9) : l.opacity;
     ctx.translate(l.tx, l.ty);
     if (l.warp){
       // full affine (set by 4-point alignment — includes skew)
@@ -536,8 +636,8 @@ function render(){
 
   ctx.restore();
 
-  // numbered badges + click thumbnails (screen space, after the world transform)
-  drawAlignOverlay(ctx);
+  // sticky-note markers (screen space, constant size, drawn after the world transform)
+  drawNotes(ctx);
 }
 
 function currentHighlightNet(){
@@ -570,8 +670,9 @@ function isDarkHex(c){
    focused net pops; selNet === -1 is the blink-off frame (dim everything). */
 function focusAlpha(netId, selNet){
   if (!selNet) return 1;
-  if (selNet === -1) return 0.16;
-  return netId === selNet ? 1 : 0.16;
+  const dim = (State.focusDim != null) ? State.focusDim : 0.16;
+  if (selNet === -1) return dim;
+  return netId === selNet ? 1 : dim;
 }
 
 function drawTrace(ctx, t, selNet){
@@ -646,7 +747,9 @@ function drawComponent(ctx, c, selNet, padsOnly){
   const sideCol = c.side === "back" ? "#7da0ff" : "#ffd24d";
   // dim the whole part when a different net is focused (pads on the focused net stay bright)
   const onFocusNet = selNet && selNet !== -1 && c.pins.some(p => p.netId === selNet);
-  const compFa = ((!selNet) ? 1 : (onFocusNet ? 1 : (selNet === -1 ? 0.16 : 0.3))) * xrayDim(c.side);
+  const dim = (State.focusDim != null) ? State.focusDim : 0.16;
+  // an off-net component body stays a touch brighter than its pads so it still reads
+  const compFa = ((!selNet) ? 1 : (onFocusNet ? 1 : (selNet === -1 ? dim : Math.min(1, dim*1.9)))) * xrayDim(c.side);
   const padDim = (padsOnly ? 0.45 : 1) * compFa;
   if (!padsOnly){
     // body (dashed outline = locked)
@@ -899,7 +1002,7 @@ function renderMask(ctx){
   const m = mc.getContext("2d");
   m.setTransform(View.dpr,0,0,View.dpr,0,0);
   const fx = View.flip ? -1 : 1;
-  m.translate(View.panX, View.panY);
+  m.translate(View.panX + View._paneDX, View.panY);
   m.scale(View.zoom * fx, View.zoom);
   // strong dark-red tint over every visible photo area (covered areas get punched
   // out below, so they stay bright — high contrast against the darkened rest)
@@ -951,4 +1054,100 @@ function renderMask(ctx){
   ctx.setTransform(1,0,0,1,0,0);
   ctx.drawImage(mc, 0, 0);
   ctx.restore();
+}
+
+/* ---------- sticky-note annotations ----------
+   Non-obstructing by design: a small constant-size marker is always shown, but the
+   note's text only appears (as a bubble) when the note is hovered or selected, so
+   annotations never cover the board they point at. */
+const NOTE_MARK = 15;      // marker size in screen px
+function noteColor(n){ return (n && /^#[0-9a-fA-F]{6}$/.test(n.color)) ? n.color : "#ffd24d"; }
+
+function drawNotes(ctx){
+  if (!State.notes.length) return;
+  ctx.save();
+  ctx.setTransform((View.dpr||1),0,0,(View.dpr||1),0,0);
+  const half = NOTE_MARK/2;
+  for (const n of State.notes){
+    const sc = worldToScreen(n.x, n.y);
+    // in split mode a note only belongs to the pane whose half it falls in
+    if (View.split){
+      const inLeft = sc.x < View.width/2;
+      if ((View._paneSide === "front") !== inLeft) continue;
+    }
+    const col = noteColor(n);
+    const selected = UI.sel && UI.sel.type === "note" && UI.sel.note === n;
+    const hovered = View.hoverNote === n;
+    // sticky-note icon (rounded square + folded corner), centred on the anchor
+    ctx.save();
+    ctx.translate(sc.x, sc.y);
+    if (selected || hovered){
+      ctx.fillStyle = "rgba(255,255,255,.35)";
+      ctx.beginPath(); ctx.arc(0, 0, half + 4, 0, Math.PI*2); ctx.fill();
+    }
+    roundRect(ctx, -half, -half, NOTE_MARK, NOTE_MARK, 3);
+    ctx.fillStyle = col; ctx.fill();
+    ctx.strokeStyle = selected ? "#ffffff" : "rgba(0,0,0,.55)";
+    ctx.lineWidth = selected ? 2 : 1; ctx.stroke();
+    // folded corner (bottom-right)
+    ctx.fillStyle = "rgba(0,0,0,.22)";
+    ctx.beginPath();
+    ctx.moveTo(half-5, half); ctx.lineTo(half, half-5); ctx.lineTo(half, half); ctx.closePath(); ctx.fill();
+    // a couple of "text lines" so it reads as a note even when collapsed
+    ctx.strokeStyle = "rgba(0,0,0,.4)"; ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(-half+3, -2); ctx.lineTo(half-3, -2);
+    ctx.moveTo(-half+3,  2); ctx.lineTo(half-5,  2);
+    ctx.stroke();
+    ctx.restore();
+    // text bubble on hover / selection
+    if (selected || hovered) drawNoteBubble(ctx, sc.x + half + 6, sc.y - half, n, col);
+  }
+  ctx.restore();
+}
+
+function roundRect(ctx, x, y, w, h, r){
+  ctx.beginPath();
+  ctx.moveTo(x+r, y);
+  ctx.arcTo(x+w, y,   x+w, y+h, r);
+  ctx.arcTo(x+w, y+h, x,   y+h, r);
+  ctx.arcTo(x,   y+h, x,   y,   r);
+  ctx.arcTo(x,   y,   x+w, y,   r);
+  ctx.closePath();
+}
+
+function drawNoteBubble(ctx, x, y, n, col){
+  const text = (n.text || "").trim() || "(empty note — double-click to edit)";
+  ctx.font = "12px Segoe UI, sans-serif";
+  const maxW = 240, padX = 8, padY = 6, lh = 15;
+  const lines = wrapText(ctx, text, maxW);
+  let bw = 0;
+  for (const l of lines) bw = Math.max(bw, ctx.measureText(l).width);
+  bw = Math.min(maxW, bw) + padX*2;
+  const bh = lines.length * lh + padY*2;
+  // keep the bubble on-screen (flip to the left / clamp vertically)
+  if (x + bw > View.width - 4) x = View.width - 4 - bw;
+  if (y + bh > View.height - 4) y = View.height - 4 - bh;
+  if (y < 4) y = 4;
+  roundRect(ctx, x, y, bw, bh, 5);
+  ctx.fillStyle = "rgba(16,20,26,.95)"; ctx.fill();
+  ctx.strokeStyle = col; ctx.lineWidth = 1.5; ctx.stroke();
+  ctx.fillStyle = n.text ? "#e6ebf1" : "#8b96a5";
+  ctx.textAlign = "left"; ctx.textBaseline = "top";
+  lines.forEach((l, i) => ctx.fillText(l, x + padX, y + padY + i*lh));
+}
+
+/* greedy word-wrap; also respects explicit newlines */
+function wrapText(ctx, text, maxW){
+  const out = [];
+  for (const para of String(text).split("\n")){
+    let line = "";
+    for (const word of para.split(/\s+/)){
+      const test = line ? line + " " + word : word;
+      if (ctx.measureText(test).width > maxW && line){ out.push(line); line = word; }
+      else line = test;
+    }
+    out.push(line);
+  }
+  return out;
 }
