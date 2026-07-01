@@ -499,6 +499,7 @@ function wireKeyboard(){
           l.opacity = Math.max(l.opacity, 0.9);
           UI.activeLayerId = l.id;
           UI.setDrawSide(l.side);
+          UI.autoXrayForLayer(l);   // viewing the X-ray image turns on X-ray view
           UI.toast("Viewing layer “" + l.name + "” (" + (SIDE_LABELS[l.side]||l.side) + ")");
         }
         UI.refreshLayerList(); requestRender();

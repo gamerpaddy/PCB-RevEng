@@ -19,6 +19,7 @@ const View = {
   _paneDX: 0,             // horizontal screen offset of the pane currently being drawn / hit-tested
   _paneSide: null,        // copper side that pane represents; null = use the draw-side selector
   _paneLayerId: null,     // image layer drawn in the pane currently being rendered
+  _paneXray: null,        // per-pane X-ray state (a pane showing the X-ray layer is X-ray); null = use View.xray
 };
 
 /* flash a net 3× in the view */
@@ -368,34 +369,41 @@ function requestRender(){
 /* the side you are currently working on: driven by the active draw side
    (front/back); when an inner layer is active, fall back to the flip orientation. */
 function activeSide(){
-  if (View.xray) return "xray";              // X-ray overlay shows both sides
+  if (effXray()) return "xray";              // X-ray overlay shows both sides
   const ds = effDrawSide();
   if (ds === "front" || ds === "back") return ds;
   return View.flip ? "back" : "front";
 }
 
-/* full component (body + SMD pads + label) shown only when it's on the active
-   side; X-ray view shows everything; on the other side only its through-hole pads remain */
+/* whether X-ray is active for the current context: per-pane in split view (a pane
+   showing the X-ray image layer is X-ray by itself), otherwise the global toggle */
+function effXray(){
+  return (View._paneXray != null) ? View._paneXray : View.xray;
+}
+
+/* full component (body + SMD pads + label) shown only when it's on the CURRENT draw
+   side (inner layers included — an SMD part on front is not "active" on Inner 1);
+   X-ray view shows everything; on any other side only its through-hole pads remain */
 function compBodyVisible(c){
-  return State.compView !== "side" || View.xray || c.side === activeSide();
+  return State.compView !== "side" || effXray() || c.side === effDrawSide();
 }
 
 /* traces shown only for the active draw side (X-ray shows all; vias & pads always shown) */
 function traceVisible(t){
-  return State.traceView !== "active" || View.xray || t.side === effDrawSide();
+  return State.traceView !== "active" || effXray() || t.side === effDrawSide();
 }
 
 /* a through via shows on every layer; a blind/buried via only shows on the copper
    sides it actually reaches — same idea as compBodyVisible, so it disappears on
    layers it isn't on (X-ray shows all) */
 function viaVisible(v){
-  return View.xray || viaOnSide(v, effDrawSide());
+  return effXray() || viaOnSide(v, effDrawSide());
 }
 
 /* in X-ray mode, fade objects that aren't on the side currently being drawn on
    (so the active side stands out over the see-through other side) */
 function xrayDim(side){
-  return (View.xray && side !== effDrawSide()) ? 0.4 : 1;
+  return (effXray() && side !== effDrawSide()) ? 0.4 : 1;
 }
 
 function render(){
@@ -411,12 +419,12 @@ function render(){
     drawSplitChrome(ctx, halfW);
     drawSecondCursor(ctx, halfW);
   } else {
-    View._paneDX = 0; View._paneSide = null; View._paneLayerId = null;
+    View._paneDX = 0; View._paneSide = null; View._paneLayerId = null; View._paneXray = null;
     drawWorld(ctx);
     drawAlignOverlay(ctx);
   }
   // leave the pane offset cleared so pointer-side transforms are correct between frames
-  View._paneDX = 0; View._paneSide = null; View._paneLayerId = null;
+  View._paneDX = 0; View._paneSide = null; View._paneLayerId = null; View._paneXray = null;
 }
 
 /* draw one synced split pane (which = "left"/"right"): a clipped half-canvas showing
@@ -430,6 +438,8 @@ function renderPane(ctx, x0, w, paneDX, which){
   View._paneDX = paneDX;
   View._paneLayerId = View.paneLayer[which] || null;
   View._paneSide = paneSideOf(which);
+  // a pane showing the X-ray image layer renders in X-ray by itself
+  View._paneXray = View.xray || (getLayer(View._paneLayerId)?.side === "xray");
   drawWorld(ctx);
   drawAlignOverlay(ctx);
   ctx.restore();

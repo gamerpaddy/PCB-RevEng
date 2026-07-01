@@ -1226,8 +1226,9 @@ function updatePane(pt){
     View._paneDX = which === "right" ? View.width/2 : 0;
     View._paneLayerId = View.paneLayer[which] || null;
     View._paneSide = paneSideOf(which);
+    View._paneXray = View.xray || (getLayer(View._paneLayerId)?.side === "xray");
   } else {
     View.cursorPane = null;
-    View._paneDX = 0; View._paneSide = null; View._paneLayerId = null;
+    View._paneDX = 0; View._paneSide = null; View._paneLayerId = null; View._paneXray = null;
   }
 }

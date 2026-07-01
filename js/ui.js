@@ -119,6 +119,18 @@ UI.refreshXrayBtn = () => {
   btn.classList.toggle("active", !!View.xray);
 };
 
+/* viewing the X-ray IMAGE layer turns X-ray mode on by default (so its copper from
+   both sides is shown over the see-through image). Single-view only — in split view a
+   pane showing the X-ray layer is handled per-pane by View._paneXray. Never forces it off. */
+UI.autoXrayForLayer = (l) => {
+  if (l && l.side === "xray" && !View.split && !View.xray){
+    View.xray = true;
+    UI.refreshXrayBtn();
+    UI.toast("X-ray view ON (showing the X-ray layer)");
+    requestRender();
+  }
+};
+
 /* per-pane layer dropdowns overlaid on the split view. Selecting a layer sets which
    image that pane shows and points its trace/copper side at that layer's side. */
 UI.refreshSplitControls = () => {
@@ -207,6 +219,7 @@ UI.refreshLayerList = () => {
       if (e.target.closest("button,select,input,label")) return;
       UI.activeLayerId = l.id; UI.refreshLayerList();
       UI.setDrawSide(l.side); // selecting the back image switches drawing to Back, etc.
+      UI.autoXrayForLayer(l); // selecting the X-ray image turns on X-ray view
     });
     card.querySelector(".vis").addEventListener("click", ()=>{ l.visible = !l.visible; UI.refreshLayerList(); requestRender(); });
     card.querySelector(".del").addEventListener("click", ()=>{
