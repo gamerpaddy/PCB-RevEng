@@ -204,18 +204,21 @@ function handleDrag(pt, w, e){
       break;
     case "move-vert": {
       d.moved = true;
-      // Shift (checked LIVE, mid-drag) = DETACH: split the trace at this anchor so it
-      // pulls free, drop any junction it shared, and stop snapping
-      if (e && e.shiftKey){
+      // DETACH is decided once, at the START of the drag (Shift held when you grab the
+      // anchor): the trace splits here, drops any junction it shared, and never snaps.
+      if (d.detach){
         if (!d.detached){ detachAnchor(d); d.detached = true; }
         d.snap = null; Tools.snap = null;
         d.trace.points[d.i].x = w.x;
         d.trace.points[d.i].y = w.y;
         break;
       }
+      // Holding Shift MID-drag (without having started detached) just suppresses snapping
+      // so you can place the anchor freely — it does NOT detach the trace.
+      const noSnap = e && e.shiftKey;
       // snap onto a nearby pad/via/other-trace — excluding our own trace AND any trace
       // we're already carrying, so the reach lands on a NEW conductor, not ourselves
-      const snap = snapToConductor(w.x, w.y, d.trace.side, false, d.trace.width || 3, d.excl);
+      const snap = noSnap ? null : snapToConductor(w.x, w.y, d.trace.side, false, d.trace.width || 3, d.excl);
       d.snap = snap;
       Tools.snap = snap; // white ring indicator
       const nx = snap ? snap.x : w.x, ny = snap ? snap.y : w.y;
@@ -274,7 +277,8 @@ function selectDown(w, pt, e){
             if (Math.hypot(ot.points[j].x-px, ot.points[j].y-py) <= jtol) linked.push({ pts:ot.points, i:j, trace:ot });
         }
         const excl = new Set([t]); linked.forEach(L => excl.add(L.trace));
-        Tools.drag = { kind:"move-vert", trace:t, i, moved:false, sx:px, sy:py, linked, excl };
+        // Shift held AT THE START of the drag = detach mode for the whole drag
+        Tools.drag = { kind:"move-vert", trace:t, i, moved:false, sx:px, sy:py, linked, excl, detach: !!(e && e.shiftKey) };
         Tools.dragVert = { trace:t, i };
         requestRender();
         return;
@@ -611,7 +615,7 @@ function runChecker(){
     for (let j=i+1; j<State.traces.length; j++){
       const b = State.traces[j];
       if (!b.netId || b.netId === a.netId || a.side !== b.side) continue;
-      if (tracesTouch(a, b)) shorts.push({ a, b, pos: traceContactPoint(a, b) });
+      if (tracesOverlap(a, b)) shorts.push({ a, b, pos: traceContactPoint(a, b) });
     }
   }
   for (const c of State.components){

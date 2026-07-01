@@ -325,6 +325,27 @@ function minSegDist(a,b,c,d){
     distToSeg(a.x,a.y,c,d), distToSeg(b.x,b.y,c,d));
 }
 
+/* true when the COPPER of two traces genuinely overlaps — a physical short test used by
+   the design checker. Fires on a real crossing, or when a vertex/endpoint of one trace
+   sits on the other's copper (within its half width). This catches an anchor dropped on
+   another trace's centre-line, a T-junction at an interior vertex, and one trace lying
+   over another, WITHOUT flagging parallel traces that merely run edge-to-edge (their
+   centre-lines stay farther apart than a half width). */
+function tracesOverlap(a, b){
+  // a real geometric crossing
+  for (let i=0; i<a.points.length-1; i++)
+    for (let k=0; k<b.points.length-1; k++)
+      if (segsIntersect(a.points[i], a.points[i+1], b.points[k], b.points[k+1])) return true;
+  // a vertex of one trace lying on the other's copper (centre-line within its half width)
+  const onCopper = (pts, other, halfW) => {
+    for (const p of pts)
+      for (let k=0; k<other.points.length-1; k++)
+        if (distToSeg(p.x, p.y, other.points[k], other.points[k+1]) <= halfW) return true;
+    return false;
+  };
+  return onCopper(a.points, b, (b.width||3)/2) || onCopper(b.points, a, (a.width||3)/2);
+}
+
 /* true when two traces genuinely connect (same-side check is the caller's job):
    a real geometric crossing, coincident endpoints (a shared junction), or one
    trace's endpoint landing on the INTERIOR of the other (a T-junction).
