@@ -1133,6 +1133,7 @@ UI.openNetScopeDialog = (oldName, newName, count, cb) => {
 UI.openChecker = () => {
   const res = runChecker();
   View.checkMarks = res.unnetted.map(u => u.wp);
+  View.shortMarks = (res.shorts || []).map(s => s.pos);
   requestRender();
   const box = $("#checker-list");
   const issues = [];   // each row → { wp, comp, pinIdx } for the "Go" button to jump to
@@ -1164,14 +1165,23 @@ UI.openChecker = () => {
     }).join("");
     html += group("issues", "Net issues — pin / trace mismatches", res.mismatches.length, rows);
   }
-  if (!res.unnetted.length && !res.mismatches.length)
-    html += `<div class="panel-hint" style="color:#4fd07f">All pads have nets and no mismatches. 🎉</div>`;
+  // ---- group 3: shorts (different-net traces touching) ----
+  if (res.shorts && res.shorts.length){
+    const rows = res.shorts.map(s => {
+      const lbl = `${escAttr(getNet(s.a.netId)?.name || "?")} ⟂ ${escAttr(getNet(s.b.netId)?.name || "?")} <span style="color:#8b96a5">(${SIDE_LABELS[s.a.side]||s.a.side})</span>`;
+      return row(lbl, { wp:s.pos, trace:s.a });
+    }).join("");
+    html += group("issues", "Shorts — different-net traces touching", res.shorts.length, rows);
+  }
+  if (!res.unnetted.length && !res.mismatches.length && !(res.shorts && res.shorts.length))
+    html += `<div class="panel-hint" style="color:#4fd07f">All pads have nets, no mismatches, no trace shorts. 🎉</div>`;
   box.innerHTML = html;
-  // "Go" → close the dialog, centre the view on the issue and select that pad
+  // "Go" → close the dialog, centre on the issue and select the pad or trace
   box.querySelectorAll(".chk-go").forEach(btn => btn.addEventListener("click", ()=>{
     const it = issues[+btn.dataset.i];
     $("#checker-dialog").close();
-    UI.select({ type:"pin", comp:it.comp, pinIdx:it.pinIdx });
+    if (it.trace) UI.select({ type:"trace", trace:it.trace });
+    else UI.select({ type:"pin", comp:it.comp, pinIdx:it.pinIdx });
     View.panX = View.width/2 - it.wp.x*View.zoom*(View.flip?-1:1);
     View.panY = View.height/2 - it.wp.y*View.zoom;
     requestRender();

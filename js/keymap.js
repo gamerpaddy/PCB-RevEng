@@ -13,7 +13,7 @@ const KeyActions = [
   { id:"view.fit",       label:"Zoom to fit",                   def:"Z",      run:()=>zoomToFit() },
   { id:"edit.rotate",    label:"Rotate 90° (Shift = 15°)",      def:"R",      run:(e)=>rotateSelection(e && e.shiftKey ? 15 : 90) },
   { id:"edit.side",      label:"Flip component side",           def:"B",      run:()=>flipSelectionSide() },
-  { id:"edit.drawside",  label:"Cycle active draw side",        def:"D",      run:()=>cycleDrawSide() },
+  { id:"edit.drawside",  label:"Cycle draw side (Shift = +swap image)", def:"D", run:(e)=>cycleDrawSide(e && e.shiftKey) },
   { id:"edit.net",       label:"Name net of selection",         def:"N",      run:()=>{ if (UI.sel && UI.sel.type!=="comp") promptNetName(UI.sel); } },
   { id:"edit.lock",      label:"Move-lock / unlock component",  def:"L",      run:()=>toggleLockSelection() },
   { id:"edit.delete",    label:"Delete selection",              def:"Delete", run:()=>deleteSelection() },

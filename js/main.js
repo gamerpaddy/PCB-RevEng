@@ -507,6 +507,14 @@ function wireKeyboard(){
       return;
     }
 
+    // "^" (German-layout dedicated key = Backquote code, or a literal caret) →
+    // switch this view to NO image (black). Shift = the right split pane.
+    if (e.code === "Backquote" || e.key === "^"){
+      e.preventDefault();
+      blankView(e.shiftKey);
+      return;
+    }
+
     // rebindable actions first
     const act = Keymap.actionForKey(normKey(e));
     if (act){ act.run(e); return; }
@@ -537,7 +545,9 @@ function wireKeyboard(){
   });
 }
 
-function cycleDrawSide(){
+/* Cycle the active draw side. withImage (Shift+D) also switches the shown image to
+   that side's layer — or to a black backdrop when that side has no photo. */
+function cycleDrawSide(withImage){
   const order = availableSides();
   // in split view, cycle the focused pane's copper/trace side instead of the global one
   if (View.split){
@@ -545,15 +555,49 @@ function cycleDrawSide(){
     const cur = View.paneSide[which] || (which==="left"?"front":"back");
     const next = order[(order.indexOf(cur)+1) % order.length];
     View.paneSide[which] = next;
-    UI.toast((which==="right"?"Right":"Left") + " view showing " + (SIDE_LABELS[next]||next) + " copper");
+    if (withImage){
+      const layerForSide = State.layers.find(l => l.side === next);
+      View.paneLayer[which] = layerForSide ? layerForSide.id : null;
+    }
+    UI.toast((which==="right"?"Right":"Left") + " view showing " + (SIDE_LABELS[next]||next) + " copper" +
+             (withImage ? (State.layers.some(l=>l.side===next) ? "" : " (no image — black)") : ""));
     UI.refreshSplitControls(); requestRender();
     return;
   }
   const sel = $("#draw-side");
   sel.value = order[(order.indexOf(sel.value)+1) % order.length];
   Tools.lastCopperSide = sel.value;
-  UI.toast("Drawing on " + SIDE_LABELS[sel.value]);
+  if (withImage) viewSideImage(sel.value);   // Shift+D: also swap the displayed image
+  UI.toast("Drawing on " + SIDE_LABELS[sel.value] +
+           (withImage && !State.layers.some(l=>l.side===sel.value) ? " (no image — black)" : ""));
   requestRender(); // trace/component visibility follows the active side
+}
+
+/* show only the image layer(s) of `side` (others hidden); no matching image → black */
+function viewSideImage(side){
+  let found = null;
+  for (const l of State.layers){
+    const match = l.side === side;
+    l.visible = match;
+    if (match && !found) found = l;
+  }
+  if (found){ UI.activeLayerId = found.id; found.opacity = Math.max(found.opacity, 0.9); }
+  UI.refreshLayerList();
+}
+
+/* "no image" view (black). Split: left pane (or right with Shift); single: hide all. */
+function blankView(rightPane){
+  if (View.split){
+    const which = rightPane ? "right" : (View.cursorPane || "left");
+    View.paneLayer[which] = null;
+    UI.refreshSplitControls();
+    UI.toast((which==="right"?"Right":"Left") + " view → no image (black)");
+  } else {
+    for (const l of State.layers) l.visible = false;
+    UI.refreshLayerList();
+    UI.toast("View → no image (black)");
+  }
+  requestRender();
 }
 
 /* ---------------- dialogs ---------------- */
@@ -579,7 +623,7 @@ function wireDialogs(){
   });
   $("#options-close").addEventListener("click", ()=> $("#options-dialog").close());
   $("#history-close").addEventListener("click", ()=> $("#history-dialog").close());
-  $("#checker-close").addEventListener("click", ()=>{ $("#checker-dialog").close(); View.checkMarks = null; requestRender(); });
+  $("#checker-close").addEventListener("click", ()=>{ $("#checker-dialog").close(); View.checkMarks = null; View.shortMarks = null; requestRender(); });
   $("#export-close").addEventListener("click", ()=> $("#export-dialog").close());
   $("#export-copy").addEventListener("click", ()=>{
     navigator.clipboard?.writeText($("#export-preview").value);

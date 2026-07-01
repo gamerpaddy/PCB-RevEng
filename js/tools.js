@@ -583,10 +583,37 @@ function checkMoveOverlaps(comp){
 }
 
 /* ---------------- checker ---------------- */
-/* returns { unnetted:[{comp,pinIdx,wp}], mismatches:[{comp,pinIdx,pinNet,traceNet,trace}] } */
+/* a representative world point where two traces make contact (for the "Go" marker) */
+function traceContactPoint(a, b){
+  let best = null, bd = Infinity;
+  const scan = (pts, other) => {
+    for (const p of pts)
+      for (let k=0; k<other.length-1; k++){
+        const pr = projectOnSeg(p.x, p.y, other[k], other[k+1]);
+        if (pr.d < bd){ bd = pr.d; best = { x:(p.x+pr.x)/2, y:(p.y+pr.y)/2 }; }
+      }
+  };
+  scan(a.points, b.points);
+  scan(b.points, a.points);
+  return best || a.points[0];
+}
+
+/* returns { unnetted, mismatches, shorts } where shorts = same-side trace pairs that
+   physically touch but belong to DIFFERENT nets (a short — e.g. from a bad import) */
 function runChecker(){
   const unnetted = [];
   const mismatches = [];
+  const shorts = [];
+  // trace-to-trace shorts: two same-side traces of different nets that touch
+  for (let i=0; i<State.traces.length; i++){
+    const a = State.traces[i];
+    if (!a.netId) continue;
+    for (let j=i+1; j<State.traces.length; j++){
+      const b = State.traces[j];
+      if (!b.netId || b.netId === a.netId || a.side !== b.side) continue;
+      if (tracesTouch(a, b)) shorts.push({ a, b, pos: traceContactPoint(a, b) });
+    }
+  }
   for (const c of State.components){
     const fp = compFootprint(c);
     for (let pi=0; pi<c.pins.length; pi++){
@@ -609,7 +636,7 @@ function runChecker(){
       }
     }
   }
-  return { unnetted, mismatches };
+  return { unnetted, mismatches, shorts };
 }
 
 /* ---------------- component tool ---------------- */

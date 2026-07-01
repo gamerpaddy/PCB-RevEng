@@ -420,6 +420,8 @@ function render(){
     drawSecondCursor(ctx, halfW);
   } else {
     View._paneDX = 0; View._paneSide = null; View._paneLayerId = null; View._paneXray = null;
+    // no image layer visible → solid black backdrop so traces read on black
+    if (!State.layers.some(l => l.visible && l.img && l.img.width)) fillBlack(ctx, 0, View.width);
     drawWorld(ctx);
     drawAlignOverlay(ctx);
   }
@@ -440,8 +442,19 @@ function renderPane(ctx, x0, w, paneDX, which){
   View._paneSide = paneSideOf(which);
   // a pane showing the X-ray image layer renders in X-ray by itself
   View._paneXray = View.xray || (getLayer(View._paneLayerId)?.side === "xray");
+  // no image chosen for this pane → black backdrop
+  if (!(getLayer(View._paneLayerId)?.img?.width)) fillBlack(ctx, x0, w);
   drawWorld(ctx);
   drawAlignOverlay(ctx);
+  ctx.restore();
+}
+
+/* solid black backdrop over a screen-space rect (used when a view has no image) */
+function fillBlack(ctx, x0, w){
+  ctx.save();
+  ctx.setTransform((View.dpr||1),0,0,(View.dpr||1),0,0);
+  ctx.fillStyle = "#000";
+  ctx.fillRect(x0, 0, w, View.height);
   ctx.restore();
 }
 
@@ -566,6 +579,21 @@ function drawWorld(ctx){
     const r = 12/View.zoom;
     for (const m of View.checkMarks){
       ctx.beginPath(); ctx.arc(m.x, m.y, r, 0, Math.PI*2); ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  // --- short markers (different-net traces touching) — red ⚡ ring + cross ---
+  if (View.shortMarks && View.shortMarks.length){
+    ctx.save();
+    ctx.strokeStyle = "#ff2b2b"; ctx.lineWidth = 3/View.zoom;
+    const r = 13/View.zoom;
+    for (const m of View.shortMarks){
+      ctx.beginPath(); ctx.arc(m.x, m.y, r, 0, Math.PI*2); ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(m.x-r*0.6, m.y-r*0.6); ctx.lineTo(m.x+r*0.6, m.y+r*0.6);
+      ctx.moveTo(m.x+r*0.6, m.y-r*0.6); ctx.lineTo(m.x-r*0.6, m.y+r*0.6);
+      ctx.stroke();
     }
     ctx.restore();
   }
