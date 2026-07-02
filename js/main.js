@@ -81,6 +81,7 @@ function wireToolbar(){
   $("#btn-xray").addEventListener("click", toggleXray);
   $("#btn-split").addEventListener("click", toggleSplit);
   $("#btn-ratsnest").addEventListener("click", toggleRatsnest);
+  $("#btn-hidetraces").addEventListener("click", toggleHideTraces);
   $("#btn-stack3d").addEventListener("click", ()=> Stack3D.open());
   $("#btn-measure").addEventListener("click", ()=> setTool("measure"));
   $("#btn-calibrate").addEventListener("click", ()=> setTool("calibrate"));
@@ -105,6 +106,13 @@ function toggleMask(){
   View.mask = !View.mask;
   $("#btn-mask").classList.toggle("active", View.mask);
   UI.toast(View.mask ? "Coverage mask ON — red tint = no components placed there yet" : "Coverage mask off");
+  requestRender();
+}
+
+function toggleHideTraces(){
+  View.hideTraces = !View.hideTraces;
+  $("#btn-hidetraces").classList.toggle("active", View.hideTraces);
+  UI.toast(View.hideTraces ? "Traces hidden — pads, vias & photo only (traces are non-selectable while hidden)" : "Traces shown");
   requestRender();
 }
 

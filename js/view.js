@@ -13,6 +13,7 @@ const View = {
   blinkOn: false,
   ratsnest: false,        // draw straight "airwire" connections between same-net pads/vias
   ratsnestMode: "mst",    // "mst" = minimum-spanning tree over the whole net · "star" = spokes from the selected pad to every same-net pad/via
+  hideTraces: false,      // hide all drawn traces (also makes them non-interactive) to read the bare photo/pads
   xrayAuto: false,        // true when X-ray was auto-enabled by viewing the X-ray layer (so leaving it turns X-ray back off)
   split: false,           // synced split view — left & right panes share one camera
   paneLayer: { left:null, right:null }, // image-layer id shown in each split pane
@@ -421,8 +422,11 @@ function compBodyVisible(c){
   return State.compView !== "side" || effXray() || c.side === effDrawSide();
 }
 
-/* traces shown only for the active draw side (X-ray shows all; vias & pads always shown) */
+/* traces shown only for the active draw side (X-ray shows all; vias & pads always shown).
+   The "hide traces" toggle wins over everything, so hidden traces are also non-interactive
+   (hit-testing, vertex handles, cut/edit all key off traceVisible). */
 function traceVisible(t){
+  if (View.hideTraces) return false;
   return State.traceView !== "active" || effXray() || t.side === effDrawSide();
 }
 
@@ -559,7 +563,9 @@ function drawWorld(ctx){
   const selNet = currentHighlightNet();
 
   // --- traces ---
-  for (const t of State.traces){
+  // "hide traces" is a hard override — it also suppresses the focused-net "show across
+  // all layers" exception below, so every trace really disappears
+  if (!View.hideTraces) for (const t of State.traces){
     // a focused net stays visible on every layer, even ones the active-side
     // filter would normally hide — that is the "show the net across all layers" cue
     const focused = selNet && selNet !== -1 && t.netId === selNet;
