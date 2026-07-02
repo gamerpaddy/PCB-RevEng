@@ -545,7 +545,10 @@ function drawWorld(ctx){
       ctx.rotate(l.rot * Math.PI/180);
       ctx.scale(l.scale * (l.mirror ? -1 : 1), l.scale);
     }
-    ctx.drawImage(l.img, -l.img.width/2, -l.img.height/2);
+    // large uploaded photos draw through a level-of-detail tile pyramid (only visible
+    // tiles, at a resolution matched to zoom); everything else is a plain image blit
+    if (l.tiles) ImageTiles.draw(ctx, l);
+    else ctx.drawImage(l.img, -l.img.width/2, -l.img.height/2);
     ctx.restore();
   }
 

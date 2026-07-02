@@ -133,7 +133,8 @@ function serializeLight(){
   return JSON.stringify(full);
 }
 function serializeImages(){
-  return JSON.stringify(State.layers.map(l => ({ id: l.id, dataURL: l.dataURL })));
+  // hosted (URL) layers keep no bytes — only their link (persisted in the light project)
+  return JSON.stringify(State.layers.map(l => ({ id: l.id, dataURL: l.url ? "" : l.dataURL })));
 }
 
 function relTime(ts){

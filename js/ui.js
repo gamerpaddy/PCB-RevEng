@@ -212,7 +212,7 @@ UI.refreshLayerList = () => {
     card.innerHTML = `
       <div class="layer-head">
         <button class="vis" title="Show / hide">${l.visible ? "👁" : "—"}</button>
-        <div class="name" title="${l.name}">${l.name}</div>
+        <div class="name" title="${l.url ? "Hosted image — loaded live from "+escAttr(l.url)+" and NOT saved in the project" : l.name}">${l.url ? "🔗 " : ""}${l.name}</div>
         <button class="del" title="Remove layer">✕</button>
       </div>
       <div class="layer-row">

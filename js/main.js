@@ -61,6 +61,12 @@ function wireToolbar(){
   $("#btn-export").addEventListener("click", ()=> UI.openExport());
   $("#btn-bom").addEventListener("click", ()=> UI.openBomEditor());
   $("#btn-add-layer").addEventListener("click", ()=> $("#file-images").click());
+  $("#btn-add-url").addEventListener("click", ()=> {
+    const inp = $("#url-input");
+    if (inp) inp.value = "";
+    $("#url-dialog").showModal();
+    if (inp) inp.focus();
+  });
   $("#draw-side").addEventListener("change", e => {
     Tools.lastCopperSide = e.target.value;
     // in split view, the draw side controls the focused pane's trace/copper side
@@ -669,40 +675,97 @@ function wireFiles(){
     if (f) openProjectFile(f);
     e.target.value = "";
   });
+  // add-image-from-URL dialog
+  const urlDlg = $("#url-dialog"), urlInput = $("#url-input");
+  const loadUrl = () => { const u = urlInput.value; urlDlg.close(); addImageLayerFromURL(u); };
+  $("#url-ok").addEventListener("click", loadUrl);
+  $("#url-cancel").addEventListener("click", ()=> urlDlg.close());
+  urlInput.addEventListener("keydown", e => { if (e.key === "Enter"){ e.preventDefault(); loadUrl(); } });
+}
+
+/* guess a copper side from a file/layer name, clamped to a side that exists at the
+   current layer count (don't assign Inner 1 on a 2-layer board) */
+function guessLayerSide(name){
+  const n = (name || "").toLowerCase();
+  let side = "front";
+  if (/x-?ray/.test(n)) side = "xray";
+  else if (/back|bottom|b\.|_b/.test(n)) side = "back";
+  else if (/inner|in1|l2/.test(n)) side = "inner1";
+  if (side !== "xray" && !availableSides().includes(side)) side = "front";
+  return side;
+}
+
+/* build the LOD tile pyramid for a big UPLOADED image (hosted/URL layers are left plain) */
+function buildLayerTiles(layer){
+  if (!layer || layer.url || !layer.img) return;              // URL layers are never tiled
+  if (!ImageTiles.shouldTile(layer.img)) return;
+  const tiles = ImageTiles.build(layer.img);
+  if (tiles) layer.tiles = tiles;
+}
+
+/* shared layer construction for both uploaded files and hosted URLs.
+   `dataURL` holds the bytes for uploaded layers (persisted); `url` is set for hosted
+   layers (only the link is persisted — the image is fetched live at load). */
+function addLayerFromImage(img, name, dataURL, url){
+  const side = guessLayerSide(name);
+  const center = screenToWorld(View.width/2, View.height/2);
+  const layer = {
+    id: nextId(), name: (name || "layer").replace(/\.[^.]+$/,""),
+    side, dataURL: url ? "" : (dataURL || ""), url: url || null, img,
+    visible: true, opacity: side === "front" || State.layers.length===0 ? 1 : 0.6,
+    tx: center.x, ty: center.y, scale: 1, rot: 0,
+    mirror: side === "back", locked: false,
+  };
+  buildLayerTiles(layer);
+  State.layers.push(layer);
+  UI.activeLayerId = layer.id;
+  markImagesDirty();
+  UI.refreshLayerList();
+  if (State.layers.length === 1) zoomToFit(); else requestRender();
+  UI.toast("Added layer “" + layer.name + "” as " + SIDE_LABELS[side] +
+           (layer.mirror ? " (mirrored)" : "") + (layer.tiles ? " · tiled (LOD)" : "") +
+           (url ? " · hosted" : ""));
+  return layer;
 }
 
 function addImageLayer(file){
   const reader = new FileReader();
   reader.onload = () => {
     const img = new Image();
-    img.onload = () => {
-      // guess side from filename, then clamp to a side that exists at the current
-      // layer count (e.g. don't assign Inner 1 on a 2-layer board)
-      const n = file.name.toLowerCase();
-      let side = "front";
-      if (/x-?ray/.test(n)) side = "xray";
-      else if (/back|bottom|b\.|_b/.test(n)) side = "back";
-      else if (/inner|in1|l2/.test(n)) side = "inner1";
-      if (side !== "xray" && !availableSides().includes(side)) side = "front";
-      const center = screenToWorld(View.width/2, View.height/2);
-      const layer = {
-        id: nextId(), name: file.name.replace(/\.[^.]+$/,""),
-        side, dataURL: reader.result, img,
-        visible: true, opacity: side === "front" || State.layers.length===0 ? 1 : 0.6,
-        tx: center.x, ty: center.y, scale: 1, rot: 0,
-        mirror: side === "back", locked: false,
-      };
-      State.layers.push(layer);
-      UI.activeLayerId = layer.id;
-      markImagesDirty();
-      UI.refreshLayerList();
-      if (State.layers.length === 1) zoomToFit(); else requestRender();
-      UI.toast("Added layer “" + layer.name + "” as " + SIDE_LABELS[side] +
-               (layer.mirror ? " (mirrored)" : ""));
-    };
+    img.onload = () => addLayerFromImage(img, file.name, reader.result, null);
+    img.onerror = () => UI.toast("Could not read image “" + file.name + "”");
     img.src = reader.result;
   };
   reader.readAsDataURL(file);
+}
+
+/* Load a background image from a live URL. The bytes are NOT downloaded into the project
+   — only the URL is remembered and the image is fetched again on every load. Tries with
+   CORS first (so align/warp/export can read the pixels); falls back to a plain load
+   (image shows, but canvas becomes tainted) so the layer still appears on servers that
+   don't send CORS headers. */
+function addImageLayerFromURL(url){
+  url = (url || "").trim();
+  if (!url) return;
+  if (!/^https?:\/\//i.test(url)){ UI.toast("Enter a full http(s):// image URL"); return; }
+  const attempt = (useCors) => {
+    const img = new Image();
+    if (useCors) img.crossOrigin = "anonymous";
+    img.onload = () => {
+      if (!img.width){ UI.toast("That URL didn’t return a usable image"); return; }
+      const name = (url.split(/[?#]/)[0].split("/").pop() || "hosted image");
+      addLayerFromImage(img, name, "", url);
+      UI.warn("⚠ Hosted image loaded from a URL — it is NOT saved in your project. If the "
+        + "link changes or goes down, this layer will disappear. For anything important, "
+        + "download the image and add it as a file instead.");
+    };
+    img.onerror = () => {
+      if (useCors) attempt(false);   // server may just lack CORS headers — retry taint-mode
+      else UI.toast("Could not load image from that URL (blocked, offline, or not an image)");
+    };
+    img.src = url;
+  };
+  attempt(true);
 }
 
 function saveProject(){

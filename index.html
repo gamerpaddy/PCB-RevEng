@@ -77,6 +77,7 @@
           <button id="btn-calibrate" title="Calibrate board scale: drag along a known distance, then enter its real mm length">Calibrate</button>
           <button id="btn-deskew" title="Deskew / straighten the ACTIVE layer: click two lines that should be parallel &amp; axis-aligned (board edges) to remove perspective and rotation. Only the base layer needs this — align other layers to it with 4-point Align.">Deskew</button>
           <button id="btn-add-layer" title="Add image layer (or drag &amp; drop images onto the canvas)">+ Add</button>
+          <button id="btn-add-url" title="Add an image layer from a web URL (loaded live — not saved into the project)">+ URL</button>
         </span>
       </div>
       <div id="layer-list"></div>
@@ -447,30 +448,50 @@
     </div>
   </dialog>
 
+  <!-- ======= ADD IMAGE FROM URL ======= -->
+  <dialog id="url-dialog">
+    <div class="dlg-title">Add image layer from URL</div>
+    <div class="dlg-row">
+      <input id="url-input" type="url" placeholder="https://example.com/board-front.jpg"
+             style="width:340px" autocomplete="off">
+    </div>
+    <div class="panel-hint" style="margin:8px 0 3px;line-height:1.45;color:#e0b34a">
+      ⚠ Hosted images are loaded <b>live</b> from their URL and are <b>not</b> saved into
+      your project — only the link is stored. If the link changes or goes offline, this
+      layer will disappear. For anything important, download the image and use
+      “+ Add” to embed the file instead.
+    </div>
+    <div class="dlg-buttons">
+      <button id="url-cancel">Cancel</button>
+      <button id="url-ok" class="primary">Load</button>
+    </div>
+  </dialog>
+
   <input type="file" id="file-images" accept="image/*" multiple hidden>
   <input type="file" id="file-project" accept=".json,.pcbrev" hidden>
 </div>
 
 
-<script src="js/state.js?v=60"></script>
+<script src="js/state.js?v=61"></script>
 <script src="js/footprints/core.js?v=49"></script>
 <script src="js/footprints/passives.js?v=49"></script>
 <script src="js/footprints/discrete.js?v=49"></script>
 <script src="js/footprints/connectors.js?v=49"></script>
 <script src="js/footprints/ics.js?v=49"></script>
 <script src="js/footprints/misc.js?v=49"></script>
-<script src="js/view.js?v=63"></script>
+<script src="js/imagetiles.js?v=1"></script>
+<script src="js/view.js?v=64"></script>
 <script src="js/layerstack.js?v=53"></script>
 <script src="js/tools.js?v=67"></script>
-<script src="js/align.js?v=49"></script>
+<script src="js/align.js?v=50"></script>
 <script src="js/keymap.js?v=51"></script>
 <script src="js/resolver.js?v=49"></script>
 <script src="js/netlist.js?v=57"></script>
-<script src="js/ui.js?v=69"></script>
+<script src="js/ui.js?v=70"></script>
 <script src="js/kicadsearch.js?v=51"></script>
 <script src="js/fpdialog.js?v=51"></script>
-<script src="js/autosave.js?v=50"></script>
-<script src="js/main.js?v=66"></script>
+<script src="js/autosave.js?v=51"></script>
+<script src="js/main.js?v=67"></script>
 
 </body>
 </html>

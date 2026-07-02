@@ -524,7 +524,11 @@ function serializeProject(){
     traces: State.traces,
     notes: State.notes,
     layers: State.layers.map(l => ({
-      id:l.id, name:l.name, side:l.side, dataURL:l.dataURL, visible:l.visible,
+      // hosted (URL) layers persist only their link, never the bytes; uploaded layers
+      // persist their dataURL as before
+      id:l.id, name:l.name, side:l.side,
+      dataURL: l.url ? "" : l.dataURL, url: l.url || null,
+      visible:l.visible,
       opacity:l.opacity, tx:l.tx, ty:l.ty, scale:l.scale, rot:l.rot,
       mirror:l.mirror, locked:l.locked, warp:l.warp || null
     })),
@@ -559,12 +563,35 @@ function loadProject(json, done){
   const metas = s.layers || [];
   let pending = metas.length;
   if (!pending){ done && done(); return; }
+  const settle = () => { if (--pending === 0 && done) done(); };
   for (const m of metas){
-    const img = new Image();
-    const layer = { ...m, img };
+    const layer = { ...m, img: null };
     State.layers.push(layer);
-    img.onload = img.onerror = () => { if (--pending === 0 && done) done(); };
-    img.src = m.dataURL;
+    if (m.url){
+      // hosted layer — reload live from its URL. Try CORS first (keeps the canvas
+      // readable for align/export), fall back to a plain load so it still shows on
+      // servers without CORS headers.
+      const attempt = (useCors) => {
+        const img = new Image();
+        if (useCors) img.crossOrigin = "anonymous";
+        img.onload = () => { layer.img = img; settle(); };
+        img.onerror = () => { if (useCors) attempt(false); else { layer.img = img; settle(); } };
+        img.src = m.url;
+      };
+      attempt(true);
+    } else {
+      const img = new Image();
+      layer.img = img;
+      img.onload = () => {
+        // rebuild the LOD tile pyramid for big uploaded images
+        if (typeof ImageTiles !== "undefined" && ImageTiles.shouldTile(img)){
+          const t = ImageTiles.build(img); if (t) layer.tiles = t;
+        }
+        settle();
+      };
+      img.onerror = settle;
+      img.src = m.dataURL;
+    }
   }
 }
 

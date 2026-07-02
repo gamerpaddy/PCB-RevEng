@@ -289,6 +289,10 @@ function applyLineDeskew(layer){
   layer.dataURL = baked.toDataURL("image/jpeg", 0.92);
   img.src = layer.dataURL;
   layer.img = baked;                 // use immediately; img reload keeps dataURL/bitmap in sync
+  layer.url = null;                  // baked pixels are now embedded — no longer a hosted link
+  // the source changed, so any old LOD pyramid is stale; rebuild it for big bakes
+  layer.tiles = (typeof ImageTiles !== "undefined" && ImageTiles.shouldTile(baked))
+    ? ImageTiles.build(baked) : null;
   // straighten the layer transform (deskew supersedes prior rotation/skew)
   layer.warp = null; layer.rot = 0;
   layer.scale = layerEffScale(layer);
