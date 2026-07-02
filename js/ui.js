@@ -839,6 +839,19 @@ UI.traceCurrentRow = (t, opts) => {
   return html;
 };
 
+/* estimated current a bare copper strip of this width (mm) would carry on the ACTIVE
+   copper side — used by the Measure tool so measuring a trace's width reads out its
+   ampacity, using the same IPC-2221 model and copper weights as the trace inspector. */
+UI.widthCurrentEst = (widthMm) => {
+  const side = (typeof effDrawSide === "function") ? effDrawSide()
+             : (UI.drawSide ? UI.drawSide() : "front");
+  const internal = side !== "front" && side !== "back";
+  const oz = internal ? (State.copperOzInner || 0.5) : (State.copperOz || 1);
+  const amps = estimateTraceAmps(widthMm, oz * OZ_TO_MM, internal, 10);
+  const aTxt = amps >= 10 ? amps.toFixed(1) : amps.toFixed(2);
+  return { amps, aTxt, oz, internal, side };
+};
+
 /* trace width as side-by-side mm + mil inputs (stored internally as display px).
    ids: mm = idBase+"mm", mil = idBase+"mil" */
 UI.traceWidthInputs = (widthPx, idBase, uniform) => {

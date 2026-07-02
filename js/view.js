@@ -719,6 +719,41 @@ function drawWorld(ctx){
 
   // sticky-note markers (screen space, constant size, drawn after the world transform)
   drawNotes(ctx);
+  drawMeasureLabel(ctx);
+}
+
+/* live readout for the Measure tool: distance plus, treating that distance as a trace
+   width, the estimated current it could carry on the active copper side. Screen space so
+   it stays a constant size and never covers the measured line. */
+function drawMeasureLabel(ctx){
+  if (Tools.name !== "measure" || !Tools.measureA || !Tools.cursor) return;
+  const a = Tools.measureA, b = Tools.measureB || Tools.cursor;
+  const dpx = Math.hypot(b.x - a.x, b.y - a.y);
+  if (dpx < 2) return;
+  const mm = dpx / State.pxPerMm;
+  const unit = UI.unit();
+  const distTxt = unit === "mil" ? (mm/0.0254).toFixed(0) + " mil" : mm.toFixed(2) + " mm";
+  const est = UI.widthCurrentEst(mm);
+  const l1 = distTxt;
+  const l2 = "~" + est.aTxt + " A  ·  " + est.oz + " oz " + (est.internal ? "int" : "ext");
+  const mid = worldToScreen((a.x + b.x) / 2, (a.y + b.y) / 2);
+
+  ctx.save();
+  ctx.setTransform((View.dpr||1), 0, 0, (View.dpr||1), 0, 0);
+  ctx.font = "12px system-ui, sans-serif";
+  ctx.textBaseline = "top";
+  const pad = 5, lh = 15;
+  const bw = Math.max(ctx.measureText(l1).width, ctx.measureText(l2).width) + pad*2;
+  const bh = lh*2 + pad*2;
+  let x = mid.x + 12, y = mid.y - bh/2;
+  x = Math.min(Math.max(4, x), View.width - bw - 4);
+  y = Math.min(Math.max(4, y), View.height - bh - 4);
+  roundRect(ctx, x, y, bw, bh, 4);
+  ctx.fillStyle = "rgba(20,24,30,.9)"; ctx.fill();
+  ctx.strokeStyle = "#ffb648"; ctx.lineWidth = 1; ctx.stroke();
+  ctx.fillStyle = "#ffe0b0"; ctx.fillText(l1, x + pad, y + pad);
+  ctx.fillStyle = "#ffb648"; ctx.fillText(l2, x + pad, y + pad + lh);
+  ctx.restore();
 }
 
 function currentHighlightNet(){

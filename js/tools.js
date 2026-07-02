@@ -1030,10 +1030,13 @@ function finishMeasure(){
     }
     Tools.measureA = Tools.measureB = null;
   } else {
-    // pure measurement — keep the line on screen until the next click
+    // pure measurement — keep the line on screen until the next click. Also read the
+    // measured span out as a trace width → estimated current on the active copper side.
     const disp = unit === "mil" ? (curMm/0.0254).toFixed(0) + " mil" : curMm.toFixed(2) + " mm";
-    UI.toast("Distance: " + d.toFixed(1) + " px  =  " + disp);
-    UI.setHint("Measured " + disp + " — drag again to re-measure");
+    const est = UI.widthCurrentEst(curMm);
+    const estTxt = "~" + est.aTxt + " A (" + est.oz + " oz " + (est.internal ? "internal" : "external") + ")";
+    UI.toast("Distance: " + d.toFixed(1) + " px  =  " + disp + "   ·   as a trace width: " + estTxt);
+    UI.setHint("Measured " + disp + " → " + estTxt + " trace — drag again to re-measure");
   }
   requestRender();
 }
