@@ -118,7 +118,27 @@ function createNet(name){
   State.nets.push(net);
   return net;
 }
-function getNet(id){ return State.nets.find(n => n.id === id) || null; }
+/* getNet is called per-conductor, per-frame (netColor for every trace/via/pad), so a
+   linear .find over State.nets is O(nets · objects) each render. Keep an id→net Map and
+   rebuild it only when it can't be trusted: net ids never change in place — the array is
+   REASSIGNED on merge/prune/load/undo (ref changes) and only GROWS on createNet (push,
+   same ref). So rebuild when the array reference changes, or on a miss when the array has
+   grown since we indexed it. A genuine absent-id lookup (e.g. a stale netId) then costs at
+   most one extra rebuild and returns null without thrashing. */
+let _netIdx = null, _netIdxRef = null;
+function _rebuildNetIdx(){
+  _netIdx = new Map();
+  for (const n of State.nets) _netIdx.set(n.id, n);
+  _netIdxRef = State.nets;
+}
+function getNet(id){
+  if (id == null) return null;
+  if (_netIdxRef !== State.nets || !_netIdx) _rebuildNetIdx();
+  let n = _netIdx.get(id);
+  if (n !== undefined) return n;
+  if (_netIdx.size !== State.nets.length){ _rebuildNetIdx(); n = _netIdx.get(id); } // a net was pushed
+  return n || null;
+}
 function findNetByName(name){ return State.nets.find(n => n.name === name) || null; }
 
 /* protect / unprotect a net. Protecting locks the name and shields it from accidental

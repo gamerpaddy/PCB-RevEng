@@ -204,6 +204,7 @@ function hitTest(wx, wy){
   // own side (unless its body is visible here — X-ray / "both" / same side)
   for (let i=State.components.length-1; i>=0; i--){
     const c = State.components[i];
+    if (Math.hypot(wx-c.x, wy-c.y) > compRadius(c) + tol) continue; // skip far parts entirely
     const s = State.pxPerMm * (c.scale||1);
     const fp = compFootprint(c);
     const smdShown = compBodyVisible(c);
@@ -264,11 +265,16 @@ function snapToConductor(wx, wy, traceSide, tightTrace, traceWidth, exclude){
   const padCenter = !!traceWidth;
   let best = null, bestD = Infinity;
   const filterPads = traceSide && traceSide !== "any";
+  // widest distance a pad can still snap from, so a component whose bounding circle is
+  // farther than that from the cursor can be skipped without touching its pads
+  const padReach = padCenter ? Math.max(tol, (traceWidth || 0) * 2) : tol;
   for (const c of State.components){
+    if (Math.hypot(wx - c.x, wy - c.y) > compRadius(c) + padReach) continue; // quick reject
     const fp = compFootprint(c);
     const s = State.pxPerMm * (c.scale || 1);
     for (let pi=0; pi<c.pins.length; pi++){
       const fpin = fp.pins[pi];
+      if (!fpin) continue;   // comp.pins can outnumber fp.pins (freestyle / regen) — guard
       // skip pads not reachable from this copper side (SMD pad on a different side)
       if (filterPads && fpin.shape !== "circle" && c.side !== traceSide) continue;
       let wp = null, d, ptol;
@@ -1062,8 +1068,14 @@ let _maskCv = null;
 function renderMask(ctx){
   if (!_maskCv) _maskCv = document.createElement("canvas");
   const mc = _maskCv;
-  mc.width = View.canvas.width; mc.height = View.canvas.height;
+  // only resize when the canvas actually changed — assigning width/height reallocates the
+  // buffer (and clears it), so doing it every frame the mask is on is pure waste
+  if (mc.width !== View.canvas.width || mc.height !== View.canvas.height){
+    mc.width = View.canvas.width; mc.height = View.canvas.height;
+  }
   const m = mc.getContext("2d");
+  m.setTransform(1,0,0,1,0,0);
+  m.clearRect(0,0,mc.width,mc.height);   // clear ourselves since we no longer realloc each frame
   m.setTransform(View.dpr,0,0,View.dpr,0,0);
   const fx = View.flip ? -1 : 1;
   m.translate(View.panX + View._paneDX, View.panY);
@@ -1134,11 +1146,11 @@ function drawNotes(ctx){
   const half = NOTE_MARK/2;
   for (const n of State.notes){
     const sc = worldToScreen(n.x, n.y);
-    // in split mode a note only belongs to the pane whose half it falls in
-    if (View.split){
-      const inLeft = sc.x < View.width/2;
-      if ((View._paneSide === "front") !== inLeft) continue;
-    }
+    // In split mode drawNotes runs once per pane with that pane's _paneDX, and the
+    // surrounding pane clip keeps drawing inside its own half — so each note simply
+    // lands at its true world position in every pane, regardless of the pane's copper
+    // side (notes aren't tied to a layer). The old front/back test mislabelled inner
+    // side panes and could drop notes entirely; the clip handles it correctly instead.
     const col = noteColor(n);
     const selected = UI.sel && UI.sel.type === "note" && UI.sel.note === n;
     const hovered = View.hoverNote === n;

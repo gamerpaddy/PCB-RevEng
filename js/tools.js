@@ -605,10 +605,27 @@ function traceContactPoint(a, b){
 
 /* returns { unnetted, mismatches, shorts } where shorts = same-side trace pairs that
    physically touch but belong to DIFFERENT nets (a short — e.g. from a bad import) */
+/* axis-aligned bounds of a trace, grown by its half width (its copper extent) */
+function traceBBox(t){
+  let minX=Infinity, minY=Infinity, maxX=-Infinity, maxY=-Infinity;
+  for (const p of t.points){
+    if (p.x<minX) minX=p.x; if (p.x>maxX) maxX=p.x;
+    if (p.y<minY) minY=p.y; if (p.y>maxY) maxY=p.y;
+  }
+  const h = (t.width||3)/2;
+  return { minX:minX-h, minY:minY-h, maxX:maxX+h, maxY:maxY+h };
+}
+function bboxOverlap(a, b){
+  return a.minX <= b.maxX && a.maxX >= b.minX && a.minY <= b.maxY && a.maxY >= b.minY;
+}
+
 function runChecker(){
   const unnetted = [];
   const mismatches = [];
   const shorts = [];
+  // precompute each trace's copper bounds once, so the O(n²) short scan can reject
+  // far-apart pairs with a cheap box test before the per-vertex geometry in tracesOverlap
+  const bboxes = State.traces.map(traceBBox);
   // trace-to-trace shorts: two same-side traces of different nets that touch
   for (let i=0; i<State.traces.length; i++){
     const a = State.traces[i];
@@ -616,11 +633,13 @@ function runChecker(){
     for (let j=i+1; j<State.traces.length; j++){
       const b = State.traces[j];
       if (!b.netId || b.netId === a.netId || a.side !== b.side) continue;
+      if (!bboxOverlap(bboxes[i], bboxes[j])) continue;   // quick reject
       if (tracesOverlap(a, b)) shorts.push({ a, b, pos: traceContactPoint(a, b) });
     }
   }
   for (const c of State.components){
     const fp = compFootprint(c);
+    const s = State.pxPerMm * (c.scale||1);
     for (let pi=0; pi<c.pins.length; pi++){
       const p = c.pins[pi];
       if (p.nc) continue;                       // explicitly no-connect → excluded
@@ -629,9 +648,14 @@ function runChecker(){
       if (!p.netId){ unnetted.push({ comp:c, pinIdx:pi, wp }); continue; }
       // does a trace physically touch this pad but carry a different net?
       const tht = fpin.shape === "circle"; // only through-hole pads reach other sides
-      for (const t of State.traces){
+      const padHalf = Math.max(fpin.w, fpin.h) * s / 2;  // pad reach for the bbox reject
+      for (let ti=0; ti<State.traces.length; ti++){
+        const t = State.traces[ti];
         if (t.netId === p.netId || !t.netId) continue;
         if (!(tht || t.side === c.side)) continue; // SMD pad ignores traces on other sides (e.g. copper below it)
+        const bb = bboxes[ti]; // bbox already includes the trace half width
+        if (wp.x < bb.minX - padHalf || wp.x > bb.maxX + padHalf ||
+            wp.y < bb.minY - padHalf || wp.y > bb.maxY + padHalf) continue; // quick reject
         let touch = false;
         for (let k=0;k<t.points.length-1;k++){
           const pr = projectOnSeg(wp.x, wp.y, t.points[k], t.points[k+1]);
