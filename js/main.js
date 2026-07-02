@@ -20,6 +20,7 @@ window.addEventListener("DOMContentLoaded", () => {
 
   UI.rebuildSideSelect();
   wireToolbar();
+  wireButtonHotkeys();
   wireCanvas();
   wireDialogs();
   wireKeyboard();
@@ -88,6 +89,21 @@ function wireToolbar(){
   $("#btn-deskew").addEventListener("click", ()=> startLineDeskew());
   $("#btn-history").addEventListener("click", ()=> UI.openHistory());
   $("#btn-check").addEventListener("click", ()=> UI.openChecker());
+}
+
+/* right-click any bindable toolbar button to set / change / clear its hotkey.
+   Every button with a `btn` selector in KeyActions is covered; unbound ones just
+   have no key until you assign one here. */
+function wireButtonHotkeys(){
+  for (const a of KeyActions){
+    if (!a.btn) continue;
+    document.querySelectorAll(a.btn).forEach(el => {
+      el.addEventListener("contextmenu", e => {
+        e.preventDefault(); e.stopPropagation();
+        UI.openButtonHotkeyMenu(a.id, e.clientX, e.clientY);
+      });
+    });
+  }
 }
 
 function toggleFlip(){

@@ -1313,15 +1313,22 @@ UI.openQuickEdit = (c) => {
 };
 
 /* ---------------- hotkey hints / help ---------------- */
-/* refresh toolbar tooltips with current bindings */
+/* refresh each bindable button's tooltip with its current binding. The button's
+   original title (minus any hard-coded single-key hint like "[S]", but KEEPING
+   modifier combos like "[Ctrl+E]") is cached once in dataset.baseTitle. */
 UI.updateHotkeyHints = () => {
-  document.querySelectorAll("#toolbar .tool").forEach(b => {
-    const key = Keymap.keyFor("tool." + b.dataset.tool);
-    b.title = b.title.replace(/\s*\[[^\]]*\]\s*$/, "") + (key ? "  [" + key + "]" : "");
-  });
-  const flipKey = Keymap.keyFor("view.flip");
-  const fb = $("#btn-flip");
-  fb.title = fb.title.replace(/\s*\[[^\]]*\]\s*$/, "") + (flipKey ? "  [" + flipKey + "]" : "");
+  for (const a of KeyActions){
+    if (!a.btn) continue;
+    document.querySelectorAll(a.btn).forEach(b => {
+      if (b.dataset.baseTitle == null){
+        b.dataset.baseTitle = (b.title || "")
+          .replace(/\s*\[[^\]]*\]\s*$/, m => /ctrl|cmd|alt|shift|\+/i.test(m) ? m : "")
+          .replace(/\s+$/, "");
+      }
+      const key = Keymap.keyFor(a.id);
+      b.title = b.dataset.baseTitle + (key ? "  [" + key + "]" : "");
+    });
+  }
 };
 
 UI.buildHelp = () => {
@@ -1395,11 +1402,15 @@ UI.buildKeysList = () => {
         UI.buildKeysList();
         return;
       }
-      const displaced = Keymap.bind(btn.dataset.id, key);
-      if (displaced){
-        const old = KeyActions.find(x => x.id === displaced);
-        UI.toast("“" + key + "” taken from: " + (old ? old.label : displaced) + " (now unbound)");
+      // already taken by another action → confirm before stealing it
+      const owner = Keymap.actionForKey(key);
+      if (owner && owner.id !== btn.dataset.id &&
+          !confirm("“" + key + "” is already the hotkey for “" + owner.label + "”.\n\n" +
+                   "OK = overwrite (it becomes unbound)\nCancel = keep it")){
+        UI.buildKeysList();   // aborted — restore the row, no change
+        return;
       }
+      Keymap.bind(btn.dataset.id, key);
       UI.buildKeysList();
       UI.updateHotkeyHints();
       UI.buildHelp();
@@ -1407,4 +1418,58 @@ UI.buildKeysList = () => {
     };
     window.addEventListener("keydown", capture, true);
   }));
+};
+
+/* refresh every place a binding is shown after it changes */
+UI.afterHotkeyChange = (msg) => {
+  if (msg) UI.toast(msg);
+  UI.updateHotkeyHints();
+  UI.buildHelp();
+  const kd = $("#keys-dialog");
+  if (kd && kd.open) UI.buildKeysList();
+  UI.refreshInspector();
+};
+
+/* listen for the next key press and bind it to an action (same validation as the
+   hotkey editor). Shared by the editor's rows and the button right-click menu. */
+UI.captureHotkey = (id) => {
+  const a = KeyActions.find(k => k.id === id);
+  if (!a) return;
+  UI.toast("Press a key for “" + a.label + "”   (Esc cancels)");
+  const capture = (e) => {
+    e.preventDefault(); e.stopPropagation();
+    if (["Shift","Control","Alt","Meta"].includes(e.key)) return;   // wait for a real key
+    window.removeEventListener("keydown", capture, true);
+    if (e.key === "Escape") return;
+    const key = normKey(e);
+    if (e.ctrlKey || e.metaKey || e.altKey || RESERVED_KEYS.includes(key) || /^[0-9]$/.test(key)){
+      UI.toast("That key is reserved"); return;
+    }
+    // already taken by another action → confirm before stealing it
+    const owner = Keymap.actionForKey(key);
+    if (owner && owner.id !== id &&
+        !confirm("“" + key + "” is already the hotkey for “" + owner.label + "”.\n\n" +
+                 "OK = overwrite (it becomes unbound)\nCancel = keep it")){
+      UI.toast("Cancelled — “" + owner.label + "” keeps " + key);
+      return;
+    }
+    Keymap.bind(id, key);
+    UI.afterHotkeyChange("“" + a.label + "” → " + key +
+      (owner && owner.id !== id ? "  (was “" + owner.label + "”)" : ""));
+  };
+  window.addEventListener("keydown", capture, true);
+};
+
+/* right-click menu on a bindable toolbar button: set / change / clear its hotkey */
+UI.openButtonHotkeyMenu = (id, x, y) => {
+  const a = KeyActions.find(k => k.id === id);
+  if (!a) return;
+  const key = Keymap.keyFor(id);
+  const items = [
+    { label: key ? "Change hotkey  (now " + key + ")…" : "Set hotkey…", action: () => UI.captureHotkey(id) },
+  ];
+  if (key) items.push({ label: "Clear hotkey", action: () => { Keymap.bind(id, ""); UI.afterHotkeyChange("“" + a.label + "” hotkey cleared"); } });
+  items.push({ sep: true });
+  items.push({ label: "Open hotkey editor…", action: () => UI.openKeysDialog() });
+  UI.showContextMenu(x, y, items);
 };
