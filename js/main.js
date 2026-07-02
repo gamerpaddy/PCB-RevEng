@@ -108,12 +108,22 @@ function toggleMask(){
   requestRender();
 }
 
+/* the Ratsnest button cycles Off → Net (MST over the whole net) → Star (spokes from the
+   selected pad to every connected pad) → Off */
 function toggleRatsnest(){
-  View.ratsnest = !View.ratsnest;
-  $("#btn-ratsnest").classList.toggle("active", View.ratsnest);
-  UI.toast(View.ratsnest
-    ? "Ratsnest ON — airwires link same-net pads/vias; hover or select a net to isolate it"
-    : "Ratsnest off");
+  const btn = $("#btn-ratsnest");
+  if (!View.ratsnest){                    // off → net (MST)
+    View.ratsnest = true; View.ratsnestMode = "mst";
+    UI.toast("Ratsnest: Net — airwires link every same-net pad/via (tree); hover or select a net to isolate it");
+  } else if (View.ratsnestMode === "mst"){ // net → star
+    View.ratsnestMode = "star";
+    UI.toast("Ratsnest: Star — select a pad/via to see spokes to every pad it connects to");
+  } else {                                 // star → off
+    View.ratsnest = false; View.ratsnestMode = "mst";
+    UI.toast("Ratsnest off");
+  }
+  btn.classList.toggle("active", View.ratsnest);
+  btn.textContent = View.ratsnest ? (View.ratsnestMode === "star" ? "Ratsnest: Star" : "Ratsnest: Net") : "Ratsnest";
   requestRender();
 }
 

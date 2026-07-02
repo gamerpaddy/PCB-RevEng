@@ -12,6 +12,7 @@ const View = {
   blinkNet: null,         // net flashing after a net-list click
   blinkOn: false,
   ratsnest: false,        // draw straight "airwire" connections between same-net pads/vias
+  ratsnestMode: "mst",    // "mst" = minimum-spanning tree over the whole net · "star" = spokes from the selected pad to every same-net pad/via
   xrayAuto: false,        // true when X-ray was auto-enabled by viewing the X-ray layer (so leaving it turns X-ray back off)
   split: false,           // synced split view — left & right panes share one camera
   paneLayer: { left:null, right:null }, // image-layer id shown in each split pane
@@ -1035,7 +1036,56 @@ function mstEdges(pts){
   return edges;
 }
 
+/* the currently-selected pad or via as a ratsnest hub: its world point + net. Traces have
+   a net but no single point, so they don't anchor a star. Returns null when nothing usable
+   is selected. */
+function selectedRatsnestNode(){
+  const sel = UI.sel;
+  if (!sel) return null;
+  if (sel.type === "pin"){
+    const fp = compFootprint(sel.comp);
+    const fpin = fp.pins[sel.pinIdx]; if (!fpin) return null;
+    return { p: pinWorldPos(sel.comp, fpin), netId: sel.comp.pins[sel.pinIdx].netId };
+  }
+  if (sel.type === "via") return { p: { x:sel.via.x, y:sel.via.y }, netId: sel.via.netId };
+  return null;
+}
+
+/* "star" ratsnest: spokes from the selected pad/via to every other pad/via on its net —
+   answers "what does THIS pin connect to". Nothing is drawn until a pad/via is selected. */
+function renderRatsnestStar(ctx){
+  const hub = selectedRatsnestNode();
+  if (!hub || !hub.netId) return;
+  const pts = netNodes(hub.netId);
+  if (pts.length < 2) return;
+  const col = netColor(hub.netId);
+  ctx.save();
+  ctx.lineCap = "round";
+  ctx.setLineDash([5/View.zoom, 4/View.zoom]);
+  // spokes hub → each other node
+  ctx.strokeStyle = col;
+  ctx.globalAlpha = 0.95;
+  ctx.lineWidth = 1.7/View.zoom;
+  ctx.beginPath();
+  for (const p of pts){
+    if (Math.hypot(p.x-hub.p.x, p.y-hub.p.y) < 1e-6) continue; // skip the hub itself
+    ctx.moveTo(hub.p.x, hub.p.y);
+    ctx.lineTo(p.x, p.y);
+  }
+  ctx.stroke();
+  ctx.setLineDash([]);
+  // node dots
+  ctx.globalAlpha = 0.9; ctx.fillStyle = col;
+  for (const p of pts){ ctx.beginPath(); ctx.arc(p.x, p.y, 2.4/View.zoom, 0, Math.PI*2); ctx.fill(); }
+  // emphasise the hub
+  ctx.globalAlpha = 1; ctx.fillStyle = "#ffffff";
+  ctx.beginPath(); ctx.arc(hub.p.x, hub.p.y, 3.6/View.zoom, 0, Math.PI*2); ctx.fill();
+  ctx.strokeStyle = col; ctx.lineWidth = 1.6/View.zoom; ctx.setLineDash([]); ctx.stroke();
+  ctx.restore();
+}
+
 function renderRatsnest(ctx, selNet){
+  if (View.ratsnestMode === "star"){ renderRatsnestStar(ctx); return; }
   const focused = selNet && selNet !== -1;
   ctx.save();
   ctx.lineCap = "round";
