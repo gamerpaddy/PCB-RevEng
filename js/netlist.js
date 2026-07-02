@@ -256,7 +256,22 @@ function schGeometry(){
       }
       body = ['(rectangle (start ' + F(-w/2) + ' ' + F(h/2) + ') (end ' + F(w/2) + ' ' + F(-h/2) + ') (stroke (width 0.254) (type default)) (fill (type background)))'];
     }
-    geo.set(c.id, { w, h, pins, body, hide });
+    // effective bounding box for spacing: the box plus the pin stubs and the net
+    // label text hung off each pin. Labels are what actually overlap between parts,
+    // so arrangement/de-overlap must reserve room for them, not just the box.
+    let leftExt = 0, rightExt = 0;
+    for (let i=0;i<c.pins.length;i++){
+      const pin = c.pins[i];
+      const pg = pins[i];
+      const stub = (pg ? Math.abs(pg.x) - w/2 + (pg.len||0) : 2.54);   // box edge → label anchor
+      const nameLen = pin.netId ? (getNet(pin.netId)?.name || "").length : 0;
+      const labelW = stub + nameLen * 1.05 + 2.0;                      // + text (~1.05mm/char) + tail
+      if (pg && pg.angle === 180) rightExt = Math.max(rightExt, labelW);
+      else                        leftExt  = Math.max(leftExt,  labelW);
+    }
+    const bw = w + 2 * Math.max(leftExt, rightExt);   // symmetric envelope (de-overlap tests centred boxes)
+    const bh = h + 2 * 2.54;                           // ref/value text above and below the box
+    geo.set(c.id, { w, h, pins, body, hide, bw, bh });
   }
   return geo;
 }
@@ -273,10 +288,10 @@ function schGridLayout(order, geo, groupKey){
   for (const c of order){
     const g = geo.get(c.id); if (!g) continue;
     const key = groupKey ? groupKey(c) : null;
-    if (X > 260 || (groupKey && prevKey !== null && key !== prevKey)){ X = 30; Y += rowH + 25; rowH = 0; }
-    rowH = Math.max(rowH, g.h + 15);
+    if (X > 320 || (groupKey && prevKey !== null && key !== prevKey)){ X = 30; Y += rowH + 15; rowH = 0; }
+    rowH = Math.max(rowH, g.bh + 10);
     pos.set(c.id, { x: X, y: Y });
-    X += g.w + 45;
+    X += g.bw + 15;
     prevKey = key;
   }
   return pos;
@@ -295,7 +310,7 @@ function schDeOverlap(pos, geo, iters){
     for (let i=0;i<n;i++) for (let j=i+1;j<n;j++){
       const pa = pos.get(comps[i].id), pb = pos.get(comps[j].id);
       const ga = geo.get(comps[i].id), gb = geo.get(comps[j].id);
-      const minX = (ga.w+gb.w)/2 + pad, minY = (ga.h+gb.h)/2 + pad;
+      const minX = (ga.bw+gb.bw)/2 + pad, minY = (ga.bh+gb.bh)/2 + pad;
       const dx = pb.x-pa.x, dy = pb.y-pa.y;
       const ox = minX - Math.abs(dx), oy = minY - Math.abs(dy);
       if (ox > 0 && oy > 0){                      // overlapping — separate on the shallower axis
