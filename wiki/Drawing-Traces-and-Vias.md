@@ -13,9 +13,15 @@ The **Draw on** dropdown in the top bar sets the copper side that new traces and
 3. Click along the path of the copper to add corner points.
 4. Finish by clicking the destination pad, by pressing Enter, or by double clicking.
 
-If both ends land on pads that already have nets, the program joins those nets. If joining two large nets, it asks first so you do not connect them by mistake. Press Escape to cancel a trace you have started.
+If both ends land on pads that already have nets, the program joins those nets. If joining two large nets, it asks first so you do not connect them by mistake. When a trace connects two smaller nets, they are joined right away and a short notice appears at the top of the screen and fades by itself, so you can see it happened without having to click anything. Press Escape to cancel a trace you have started.
 
 When a new trace crosses another trace on the same side, the program offers to join them so the copper stays connected.
+
+## Trace width and the current estimate
+
+Select a trace to see its width in the Inspector, shown in both **millimetres and mils** side by side; type into either box and the other follows. The Inspector also shows an estimate of how much current the trace can carry, worked out from its width, its length and the copper thickness, using the IPC-2221 guideline.
+
+The copper thickness comes from **Options**, where you can set it separately for the outer layers and the inner layers, because inner copper is usually thinner (often 0.5 oz). The estimate is a guide for reading a board, not a substitute for a proper thermal calculation.
 
 ## Important: surface mount pads stay on their own side
 

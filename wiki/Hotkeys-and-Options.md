@@ -22,16 +22,17 @@ View
 - Z or Home: zoom to fit
 - H: toggle the coverage mask
 - X: toggle the X-ray overlay
+- Y: toggle split view (front left, back right)
 - Plus and minus: zoom in and out from the center
-- 1 to 9 and 0: switch the view to image layer 1 to 10
-- Shift with a number: layers 11 to 20
+- 1 to 9 and 0: switch the view to image layer 1 to 10. In split view these set the left half, and Shift with a number sets the right half.
+- ^ (caret): view with no photo (black). Shift with ^ blanks the right half in split view.
 
 Editing
 
 - R: rotate 90 degrees, or Shift with R for 15 degrees
 - B: flip the selected component to the other side
 - L: lock or unlock the selected component
-- D: cycle the active draw side
+- D: cycle the active draw side. Hold Shift with D to also switch the shown photo to that side.
 - N: name the net of the selection
 - Delete or Backspace: delete the selection
 - Escape: cancel the current action or clear the selection
@@ -71,8 +72,11 @@ Click **Options** in the top bar to open the settings. The settings are:
 - Components: show parts on both sides, or only the side you are viewing.
 - Traces: show traces on all sides, or only the active side.
 - Reference text: the size of the component labels.
+- Copper (outer) and Copper (inner): the copper foil weight, in ounces, of the outer and inner layers. These feed the trace current estimate in the Inspector. Inner copper is usually lighter, often 0.5 oz.
+- Non-sel. opacity: how far the rest of the board fades when a net is selected or hovered. Lower fades it more so the focused net stands out.
 - Overlap check: warn when a moved pad lands on copper of another net.
 - Big merge warning: warn before joining two nets that each have more than three pads.
 - History length: how many actions the undo timeline keeps.
+- Autosave after: how long after a change the board is saved into this browser. Autosave never runs while you are dragging something, and you can set it to off.
 - Units: millimetres or mils.
 - Keys 1 to 0: whether the number keys switch the view to a layer or toggle the layer visibility.

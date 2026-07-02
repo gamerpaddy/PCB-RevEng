@@ -11,7 +11,9 @@ Nothing is installed and nothing is uploaded. Everything runs locally in the bro
 - Place resistors, capacitors, diodes, connectors, ICs and custom parts.
 - Draw the copper traces and add vias where the copper changes sides.
 - Group everything into nets and name the power and ground rails.
-- Check for unfinished work and export a KiCad netlist, a KiCad schematic, a CSV or a JSON file.
+- Follow connections across sides with a split front/back view and ratsnest airwires.
+- Pin sticky notes to the board, and estimate how much current a trace can carry.
+- Check for unfinished work — including shorts between different nets — and export a KiCad netlist, a KiCad schematic, a CSV or a JSON file.
 
 ## Quick start
 
@@ -31,6 +33,7 @@ Nothing is installed and nothing is uploaded. Everything runs locally in the bro
 - [[Drawing Traces and Vias|Drawing-Traces-and-Vias]]
 - [[Working with Nets|Working-with-Nets]]
 - [[Selecting and Editing|Selecting-and-Editing]]
+- [[Notes and Annotations|Notes-and-Annotations]]
 - [[Viewing the Board|Viewing-the-Board]]
 - [[Checking and Exporting|Checking-and-Exporting]]
 - [[Saving and Loading|Saving-and-Loading]]
@@ -39,7 +42,7 @@ Nothing is installed and nothing is uploaded. Everything runs locally in the bro
 
 ## Where things are on screen
 
-- The top bar holds the project buttons (New, Open, Save, Export Netlist), the tools (Select, Comp, Trace, Via, Cut), the Draw on side selector, the view buttons (Flip view, Mask, X-ray), and the undo, history, Options, hotkey and help buttons.
+- The top bar holds the project buttons (New, Open, Save, Export Netlist), the tools (Select, Comp, Trace, Via, Cut, Note), the Draw on side selector, the view buttons (Flip view, Mask, Hide traces, X-ray, Split, Ratsnest, 3D), and the undo, history, Options, hotkey and help buttons.
 - The left panel lists your image layers at the top and your nets at the bottom.
 - The center is the board canvas.
 - The right panel is the Inspector, which shows the details of whatever you have selected.

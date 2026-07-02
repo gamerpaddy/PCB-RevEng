@@ -8,6 +8,7 @@
 - [[Drawing Traces and Vias|Drawing-Traces-and-Vias]]
 - [[Working with Nets|Working-with-Nets]]
 - [[Selecting and Editing|Selecting-and-Editing]]
+- [[Notes and Annotations|Notes-and-Annotations]]
 - [[Viewing the Board|Viewing-the-Board]]
 - [[Checking and Exporting|Checking-and-Exporting]]
 - [[Saving and Loading|Saving-and-Loading]]

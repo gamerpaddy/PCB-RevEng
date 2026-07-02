@@ -47,8 +47,10 @@ want to keep or move between machines.
    layer can then just be 4-point-aligned to it. Aligning or deskewing a layer that
    already has components/traces on its side prompts a warning first, since the image
    moves but the placed elements don't. Use the opacity sliders to onion-skin
-   layers while aligning. Number keys 1…0 switch the view to a layer
-   (Shift = +10), or toggle visibility - pick the behavior in *Board / display*.
+   layers while aligning. Number keys 1…0 switch the view to a layer, or toggle
+   visibility - pick the behavior in *Board / display*. (In **split view** the
+   numbers set the left half and `Shift`+number the right half.) You can also load
+   an image straight from a URL with **+ URL** (see *Hosted image layers* below).
 3. **Calibrate**  - Click calibrate in the left toolbar, drag along a known dimension (e.g. a 2.54 mm header pitch
    ×10) and enter the real length in mm. Footprints then render at true board scale.
 4. **Place components** (`C`) - footprint selector with parametric DIP / SOIC / TSSOP /
@@ -93,6 +95,58 @@ Board & display settings live in the ⚙ **Options** menu. Components have separ
 The **Mask** toggle (`H`) darkens board areas that have no components yet (and
 tints them red), leaving placed parts bright, so you can see at a glance what's
 left to identify on a crowded board.
+
+## Newer features
+
+**Split view (`Y`).** Front on the left, back on the right, sharing one camera so
+the same board area lines up in both halves - ideal for following a link across
+sides. A faint second cursor shows where you are in the other half. Number keys set
+the **left** half's layer, `Shift`+number the **right** half; each half also has its
+own layer dropdown. The **Draw on** side follows whichever half the cursor is in.
+
+**Ratsnest airwires.** The **Ratsnest** button cycles Off → **Net** → **Star**.
+*Net* draws a minimum-spanning tree over every same-net pad/via (across all layers);
+hover or select a net to isolate it. *Star* draws spokes from one pad to every pad it
+connects to - just **hover a pad** (or select it) to see its connections; vias are
+not shown as spokes in this mode.
+
+**Hide traces.** The **Hide traces** button hides every drawn trace (and makes them
+non-selectable) so you can read the bare photo, pads and vias. Click again to restore.
+
+**Sticky notes.** The **Note** tool (📝) drops annotations on the board; the text
+only appears on hover, so notes never obstruct the view. Select a note to edit its
+text and colour in the Inspector; drag its marker to move it. Notes are saved with
+the project.
+
+**Hosted image layers (`+ URL`).** Load a photo live from a web address instead of a
+file. Only the *link* is stored (never the bytes), so a hosted layer re-fetches on
+open and **vanishes if the link dies** - a warning says as much, and hosted layers
+are flagged with 🔗 in the layer list. For anything important, download the image and
+add it as a file. The loader tries CORS first, then a plain load, so it still shows on
+servers without CORS headers.
+
+**Gigapixel photos (LOD tiling).** Very large uploaded scans are automatically built
+into a level-of-detail tile pyramid: only the visible tiles are drawn, at a resolution
+matched to the zoom, so huge images pan and zoom smoothly and even render at all (a
+single texture over ~16k px would otherwise blank out). Nothing to configure.
+
+**Trace current estimate.** Selecting a trace shows its width in **mm and mil** (edit
+either box) plus an IPC-2221 current estimate from the width, length and copper weight.
+Copper weight is set per **outer** and **inner** layer in Options (inner is usually
+0.5 oz).
+
+**Shorts check.** The **Check** report now also lists **shorts** - two traces of
+*different* nets touching on the same side (a stray anchor on the wrong centerline, or
+an overlap). Each one jumps to the marked contact point on the board.
+
+**Smaller conveniences.** A merge of two *small* nets shows a brief self-dismissing
+notice (no OK button); the big-merge confirmation still guards large nets. `Shift`+`D`
+switches the shown photo to the side you're now drawing on; the **^** key blanks the
+view to no-photo (black). Viewing an X-ray photo layer turns the X-ray overlay on
+automatically (and off again when you leave it, unless you'd enabled it by hand).
+**Options** gained a configurable **autosave interval** (never runs mid-drag; can be
+switched off) and a **non-selected opacity** slider for how far the rest of the board
+fades when a net is focused.
 
 **More interaction.** **Right-click** anything for a context menu whose options
 match what's under the cursor - right-clicking a *pad* offers pad actions (set/clear
@@ -173,10 +227,15 @@ diodes, screw terminals, JST, MSOP, crystals and mounting holes.
   `core.js` (registry/generator/renderer) + `passives.js`, `discrete.js`,
   `connectors.js`, `ics.js`, `misc.js` - each registers its footprints via
   `Footprints.register(def)`
-- `js/view.js` - canvas renderer, pan/zoom/flip, hit testing
-- `js/tools.js` - select / place / trace / via / align / measure tools
+- `js/view.js` - canvas renderer, pan/zoom/flip, hit testing, ratsnest, mask
+- `js/imagetiles.js` - level-of-detail tile pyramid for gigapixel image layers
+- `js/tools.js` - select / place / trace / via / align / measure / note tools
+- `js/align.js` - image deskew and 4-point alignment (homography warp)
+- `js/layerstack.js` - exploded pseudo-3D layer-stack viewer
 - `js/keymap.js` - rebindable hotkey system (persisted in localStorage)
 - `js/resolver.js` - resistor value resolver (SMD codes, EIA-96, color bands)
 - `js/netlist.js` - KiCad / CSV / JSON exporters
-- `js/ui.js` - panels, inspector, footprint & export dialogs
-- `js/main.js` - event wiring, hotkeys, file I/O
+- `js/ui.js` - panels, inspector, export & checker dialogs
+- `js/fpdialog.js` - footprint picker dialog
+- `js/autosave.js` - background IndexedDB autosave (project + images + undo)
+- `js/main.js` - event wiring, hotkeys, file I/O, view toggles

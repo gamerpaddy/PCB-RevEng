@@ -8,6 +8,7 @@ Click the **Check** button next to the Nets title in the left panel. A report op
 
 - Pads that have no net assigned. Click **Show on board** to jump to the first one.
 - Pins whose net does not match a trace that touches them. Each mismatch has two fix buttons: one makes the pin take the trace net, the other makes the trace take the pin net.
+- Shorts, where two traces of **different nets** touch each other on the same side. These are the mistakes that are easy to miss by eye — an anchor dropped onto the wrong copper, or two traces that just overlap. Each one has a button to jump straight to the spot, which is marked on the board so you can see exactly where the copper meets.
 
 Pads marked as no connect are left out of the report. When everything is clean the report says so.
 

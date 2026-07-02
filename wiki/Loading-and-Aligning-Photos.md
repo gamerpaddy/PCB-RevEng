@@ -4,12 +4,23 @@ Each photo of the board is an image layer. You stack the front, back and any inn
 
 ## Adding photos
 
-There are two ways to add a photo.
+There are three ways to add a photo.
 
 - Drag one or more image files from your computer onto the canvas.
 - Click **+ Add** at the top of the left panel, then choose the image files.
+- Click **+ URL** to load an image straight from a web address (see below).
 
-Each photo becomes a card in the Image layers list on the left. The program guesses the side from the file name; a name containing back or bottom is set to Back, and a name containing xray is set to X-ray.
+Each photo becomes a card in the Image layers list on the left. The program guesses the side from the file name; a name containing back or bottom is set to Back, one containing inner is set to an inner layer, and one containing xray is set to X-ray.
+
+## Loading a photo from a web address
+
+Click **+ URL** and paste the address of an image to load it live from the web instead of from a file. This is handy for quickly pulling in a photo that is already hosted online.
+
+Please read the warning shown in the box: a hosted image is **not** saved inside your project — only the link to it is. The picture is fetched again every time you open the project, so if the link ever changes or goes offline the layer will disappear. Hosted layers are marked with a 🔗 in the layer list. For anything you want to keep, download the image and add it as a file with **+ Add** instead.
+
+## Very large photos
+
+Huge, high-resolution scans (many thousands of pixels across) are handled automatically. When you add a large image file, the program builds it into tiles at several zoom levels and only draws the parts you are looking at, at a detail level that matches your zoom. This keeps even gigapixel-sized photos smooth to pan and zoom, with no setup on your part.
 
 ## The layer card
 
@@ -65,4 +76,4 @@ Lock a layer once it is positioned so you do not move it by mistake.
 
 ## Switching which photo you see
 
-Press the number keys 1 through 9 and 0 to jump the view to image layers 1 through 10. Hold Shift with a number for layers 11 through 20. In the Options dialog you can change the number keys to toggle visibility instead of switching the view.
+Press the number keys 1 through 9 and 0 to jump the view to image layers 1 through 10. In the Options dialog you can change the number keys to toggle visibility instead of switching the view. In split view the numbers set the left half and Shift with a number sets the right half — see [[Viewing the Board|Viewing-the-Board]].
