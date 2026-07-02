@@ -208,8 +208,10 @@ function handleDrag(pt, w, e){
       // anchor): split the trace here ONE time so the anchor pulls free of its junction.
       if (d.detach && !d.detached){
         detachAnchor(d); d.detached = true;
-        if (!d.excl) d.excl = new Set();
-        d.excl.add(d.trace);   // don't let the freed anchor snap back onto its own trace
+        // after detaching, exclude ONLY the moving piece from snapping — so the freed
+        // anchor can be re-snapped to the very trace it was detached from (or any other),
+        // just not to its own segment
+        d.excl = new Set([d.trace]);
       }
       // Snapping is suppressed only WHILE Shift is currently held. So: Shift-grab detaches
       // and pulls free without snapping; RELEASE Shift and the freed anchor snaps onto a
