@@ -125,7 +125,7 @@ function toggleRatsnest(){
     UI.toast("Ratsnest: Net — airwires link every same-net pad/via (tree); hover or select a net to isolate it");
   } else if (View.ratsnestMode === "mst"){ // net → star
     View.ratsnestMode = "star";
-    UI.toast("Ratsnest: Star — select a pad/via to see spokes to every pad it connects to");
+    UI.toast("Ratsnest: Star — hover or select a pad to see spokes to every pad it connects to");
   } else {                                 // star → off
     View.ratsnest = false; View.ratsnestMode = "mst";
     UI.toast("Ratsnest off");

@@ -9,6 +9,7 @@ const View = {
   width: 0, height: 0,
   hoverNetId: null,       // net under cursor → highlighted
   hoverNote: null,        // sticky note under cursor → show its text
+  hoverPin: null,         // {comp,pinIdx} pad under cursor → anchors the "star" ratsnest on hover
   blinkNet: null,         // net flashing after a net-list click
   blinkOn: false,
   ratsnest: false,        // draw straight "airwire" connections between same-net pads/vias
@@ -1005,7 +1006,7 @@ function drawAlignOverlay(ctx){
    bright; otherwise every net is drawn faintly so the whole board's connectivity
    reads at a glance. This is a reverse-engineering aid, not a router — it links the
    things that SHOULD be on one net, regardless of which copper layer they sit on. */
-function netNodes(netId){
+function netNodes(netId, includeVias = true){
   const pts = [];
   for (const c of State.components){
     const fp = compFootprint(c);
@@ -1015,7 +1016,7 @@ function netNodes(netId){
       pts.push(pinWorldPos(c, fpin));
     }
   }
-  for (const v of State.vias) if (v.netId === netId) pts.push({ x:v.x, y:v.y });
+  if (includeVias) for (const v of State.vias) if (v.netId === netId) pts.push({ x:v.x, y:v.y });
   return pts;
 }
 
@@ -1042,27 +1043,29 @@ function mstEdges(pts){
   return edges;
 }
 
-/* the currently-selected pad or via as a ratsnest hub: its world point + net. Traces have
-   a net but no single point, so they don't anchor a star. Returns null when nothing usable
-   is selected. */
-function selectedRatsnestNode(){
+/* the pad a star ratsnest hangs off: the HOVERED pad if there is one, else the SELECTED
+   pad. Vias never anchor a star, and traces have no single point — only pads qualify.
+   Returns its world point + net, or null when nothing usable is under the cursor/selected. */
+function ratsnestHubNode(){
+  const asHub = (comp, pinIdx) => {
+    const fp = compFootprint(comp);
+    const fpin = fp.pins[pinIdx]; if (!fpin) return null;
+    return { p: pinWorldPos(comp, fpin), netId: comp.pins[pinIdx].netId };
+  };
+  const hv = View.hoverPin;
+  if (hv && hv.comp) return asHub(hv.comp, hv.pinIdx);
   const sel = UI.sel;
-  if (!sel) return null;
-  if (sel.type === "pin"){
-    const fp = compFootprint(sel.comp);
-    const fpin = fp.pins[sel.pinIdx]; if (!fpin) return null;
-    return { p: pinWorldPos(sel.comp, fpin), netId: sel.comp.pins[sel.pinIdx].netId };
-  }
-  if (sel.type === "via") return { p: { x:sel.via.x, y:sel.via.y }, netId: sel.via.netId };
+  if (sel && sel.type === "pin") return asHub(sel.comp, sel.pinIdx);
   return null;
 }
 
-/* "star" ratsnest: spokes from the selected pad/via to every other pad/via on its net —
-   answers "what does THIS pin connect to". Nothing is drawn until a pad/via is selected. */
+/* "star" ratsnest: spokes from the hovered/selected pad to every other PAD on its net —
+   answers "what does THIS pad connect to". Vias are excluded; nothing is drawn until a
+   pad is hovered or selected. */
 function renderRatsnestStar(ctx){
-  const hub = selectedRatsnestNode();
+  const hub = ratsnestHubNode();
   if (!hub || !hub.netId) return;
-  const pts = netNodes(hub.netId);
+  const pts = netNodes(hub.netId, false);   // pads only — no vias in star mode
   if (pts.length < 2) return;
   const col = netColor(hub.netId);
   ctx.save();

@@ -129,15 +129,19 @@ function onPointerMove(e){
   // hover net / note highlight in select mode
   if (Tools.name === "select"){
     const h = hitTest(w.x, w.y);
-    let net = null, note = null;
+    let net = null, note = null, pin = null;
     if (h){
-      if (h.type==="pin") net = h.comp.pins[h.pinIdx].netId;
+      if (h.type==="pin"){ net = h.comp.pins[h.pinIdx].netId; pin = { comp:h.comp, pinIdx:h.pinIdx }; }
       else if (h.type==="via") net = h.via.netId;
       else if (h.type==="trace") net = h.trace.netId;
       else if (h.type==="note") note = h.note;
     }
+    // track the hovered pad so the "star" ratsnest can hang off it on hover, not just click
+    const pinChanged = (pin?.comp !== View.hoverPin?.comp) || (pin?.pinIdx !== View.hoverPin?.pinIdx);
+    View.hoverPin = pin;
     if (net !== View.hoverNetId){ View.hoverNetId = net; }
     if (note !== View.hoverNote){ View.hoverNote = note; requestRender(); }
+    if (pinChanged && View.ratsnest && View.ratsnestMode === "star") requestRender();
     View.canvas.style.cursor = h ? "pointer" : "default";
   }
 
