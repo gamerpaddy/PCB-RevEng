@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PCB RevEng — Reverse Engineering Workbench</title>
 
-<link rel="stylesheet" href="css/style.css?v=64">
+<link rel="stylesheet" href="css/style.css?v=65">
 
 </head>
 <body>
@@ -159,7 +159,16 @@
         <option value="json">JSON</option>
       </select>
     </label>
+    <label class="dlg-row" id="export-arrange-row" style="display:none">Arrangement
+      <select id="export-arrange">
+        <option value="closest">Closest — group by net distance</option>
+        <option value="pcb">Same as PCB — keep board positions</option>
+        <option value="type" selected>Sorted — group part types</option>
+        <option value="name">Sorted by name</option>
+      </select>
+    </label>
     <div id="export-warn" style="display:none"></div>
+    <div id="export-svg" style="display:none"></div>
     <textarea id="export-preview" spellcheck="false"></textarea>
     <div class="dlg-buttons">
       <button id="export-close">Close</button>
@@ -487,8 +496,8 @@
 <script src="js/align.js?v=50"></script>
 <script src="js/keymap.js?v=51"></script>
 <script src="js/resolver.js?v=49"></script>
-<script src="js/netlist.js?v=57"></script>
-<script src="js/ui.js?v=71"></script>
+<script src="js/netlist.js?v=58"></script>
+<script src="js/ui.js?v=72"></script>
 <script src="js/kicadsearch.js?v=51"></script>
 <script src="js/fpdialog.js?v=51"></script>
 <script src="js/autosave.js?v=51"></script>

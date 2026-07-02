@@ -935,9 +935,17 @@ UI.openExport = () => {
   const dlg = $("#export-dialog");
   if (typeof loadKicadFootprints === "function") loadKicadFootprints(); // ensure the list is available for the check
   const warn = $("#export-warn");
+  const svg = $("#export-svg");
+  const arrangeRow = $("#export-arrange-row");
   const update = () => {
     const fmt = $("#export-format").value;
-    $("#export-preview").value = netlistFor(fmt).text;
+    const isSch = fmt === "sch";
+    const arrange = $("#export-arrange").value;
+    arrangeRow.style.display = isSch ? "" : "none";
+    $("#export-preview").value = netlistFor(fmt, arrange).text;
+    // the schematic export gets a visual arrangement preview
+    if (isSch){ svg.style.display = ""; svg.innerHTML = schPreviewSVG(arrange); }
+    else { svg.style.display = "none"; svg.innerHTML = ""; }
     // only KiCad exports carry footprints, so only warn for those formats
     const missing = (fmt === "kicad" || fmt === "sch") ? missingKicadFootprints() : null;
     if (missing && missing.length){
@@ -953,6 +961,7 @@ UI.openExport = () => {
     }
   };
   $("#export-format").onchange = update;
+  $("#export-arrange").onchange = update;
   update();
   dlg.showModal();
 };

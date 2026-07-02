@@ -305,6 +305,8 @@ dialog::backdrop{background:rgba(0,0,0,.55);}
 
 /* export dialog */
 #export-preview{width:640px; height:340px; font:11px/1.4 Consolas,monospace; white-space:pre; resize:vertical;}
+#export-svg{width:640px; height:300px; background:#12161c; border:1px solid #2a3240; border-radius:6px; margin-bottom:8px; overflow:hidden;}
+#export-svg svg{width:100%; height:100%; display:block;}
 
 /* help */
 #help-body{display:grid; grid-template-columns:1fr 1fr; gap:4px 28px; max-height:60vh; overflow-y:auto;}

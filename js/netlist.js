@@ -211,22 +211,22 @@ const SCH_PRIMS = {
   ]}
 };
 
-function exportKiCadSch(){
-  const L = [];
+/* the component's "type" for grouping/sorting — the leading letters of its ref
+   designator (R, C, U, Q…), upper-cased. */
+function _refType(c){ return (/^[A-Za-z]+/.exec(c.ref)||["U"])[0].toUpperCase(); }
+
+/* per-component symbol geometry: box/primitive size plus each pin's local position.
+   Independent of where the symbol lands on the sheet, so both the exporter and the
+   arrangement/preview share one source of truth. Returns Map comp.id -> {w,h,pins,body,hide}. */
+function schGeometry(){
   const F = (n)=>n.toFixed(2);
-  L.push('(kicad_sch (version 20211123) (generator "pcb-reveng")');
-  L.push('  (uuid ' + _uuid() + ')');
-  L.push('  (paper "A2")');
-  // one symbol definition per component (pin names/numbers are per-part)
-  L.push('  (lib_symbols');
-  const geo = new Map(); // comp.id -> {w, h, pins:[{x,y,angle,len}]}
+  const geo = new Map();
   for (const c of State.components){
     const pl = schPlacement(c);
     const refLetter = (/^[A-Za-z]+/.exec(c.ref)||["U"])[0];
     // 2-pin R/C/L/D render as KiCad's real primitive shape; everything else is a
     // sized box (KiCad draws ICs as background-filled boxes, so that stays consistent).
     const prim = c.pins.length === 2 ? SCH_PRIMS[refLetter.toUpperCase()] : null;
-    const sym = "REV_" + c.ref;
     let w, h, pins, body, hide;
     if (prim){
       hide = true;
@@ -256,12 +256,203 @@ function exportKiCadSch(){
       }
       body = ['(rectangle (start ' + F(-w/2) + ' ' + F(h/2) + ') (end ' + F(w/2) + ' ' + F(-h/2) + ') (stroke (width 0.254) (type default)) (fill (type background)))'];
     }
-    geo.set(c.id, { w, h, pins });
+    geo.set(c.id, { w, h, pins, body, hide });
+  }
+  return geo;
+}
+
+/* ---------- schematic arrangements ----------
+   Each returns Map comp.id -> {x,y} (the symbol's centre in schematic mm). */
+
+/* pack an ordered list of components left-to-right, wrapping at the sheet width.
+   groupKey (optional): start a fresh row whenever the key changes between two
+   consecutive parts, so each group forms a visible horizontal band. */
+function schGridLayout(order, geo, groupKey){
+  const pos = new Map();
+  let X = 30, Y = 30, rowH = 0, prevKey = null;
+  for (const c of order){
+    const g = geo.get(c.id); if (!g) continue;
+    const key = groupKey ? groupKey(c) : null;
+    if (X > 260 || (groupKey && prevKey !== null && key !== prevKey)){ X = 30; Y += rowH + 25; rowH = 0; }
+    rowH = Math.max(rowH, g.h + 15);
+    pos.set(c.id, { x: X, y: Y });
+    X += g.w + 45;
+    prevKey = key;
+  }
+  return pos;
+}
+
+/* push apart any symbols whose boxes overlap (a few relaxation passes). Guarantees
+   front/back parts that share a board location don't land on top of each other. */
+function schDeOverlap(pos, geo, iters){
+  const comps = State.components.filter(c => pos.has(c.id) && geo.has(c.id));
+  const n = comps.length;
+  if (n < 2) return;
+  iters = iters || (n > 400 ? 40 : 80);
+  const pad = 5;
+  for (let it=0; it<iters; it++){
+    let moved = false;
+    for (let i=0;i<n;i++) for (let j=i+1;j<n;j++){
+      const pa = pos.get(comps[i].id), pb = pos.get(comps[j].id);
+      const ga = geo.get(comps[i].id), gb = geo.get(comps[j].id);
+      const minX = (ga.w+gb.w)/2 + pad, minY = (ga.h+gb.h)/2 + pad;
+      const dx = pb.x-pa.x, dy = pb.y-pa.y;
+      const ox = minX - Math.abs(dx), oy = minY - Math.abs(dy);
+      if (ox > 0 && oy > 0){                      // overlapping — separate on the shallower axis
+        moved = true;
+        if (ox <= oy){ const s = (dx<0?-1:1)*ox/2; pa.x -= s; pb.x += s; }
+        else         { const s = (dy<0?-1:1)*oy/2; pa.y -= s; pb.y += s; }
+      }
+    }
+    if (!moved) break;
+  }
+}
+
+/* "Same as PCB" — scale the board's part positions onto the sheet, then de-overlap.
+   Keeps the physical layout the user knows; the relaxation stops front/bottom parts
+   at the same XY from colliding. */
+function schArrangePCB(geo){
+  const comps = State.components.filter(c => geo.has(c.id));
+  const pos = new Map();
+  if (!comps.length) return pos;
+  let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity;
+  for (const c of comps){ minX=Math.min(minX,c.x); maxX=Math.max(maxX,c.x); minY=Math.min(minY,c.y); maxY=Math.max(maxY,c.y); }
+  const spanX = Math.max(maxX-minX,1), spanY = Math.max(maxY-minY,1);
+  const target = Math.max(200, 40*Math.sqrt(comps.length));   // sheet region grows with part count
+  const scale = target / Math.max(spanX, spanY);
+  for (const c of comps) pos.set(c.id, { x: 30 + (c.x-minX)*scale, y: 30 + (c.y-minY)*scale });
+  schDeOverlap(pos, geo);
+  return pos;
+}
+
+/* "Closest" — a light force-directed relaxation that pulls net-connected parts
+   together (spring to each net's centroid) while a pairwise repulsion keeps parts
+   spread out. Seeded from the PCB layout; de-overlapped at the end. */
+function schArrangeClosest(geo){
+  const comps = State.components.filter(c => geo.has(c.id));
+  const n = comps.length;
+  const pos = schArrangePCB(geo);
+  if (n < 2) return pos;
+  const P = comps.map(c => { const p = pos.get(c.id); return { x:p.x, y:p.y }; });
+  // nets touching >1 part are the only ones that pull anything together
+  const nets = new Map();
+  comps.forEach((c,i) => { for (const pin of c.pins) if (pin.netId){ let a = nets.get(pin.netId); if (!a) nets.set(pin.netId, a=new Set()); a.add(i); } });
+  const netArr = [...nets.values()].map(s => [...s]).filter(a => a.length > 1);
+  const iters = n > 250 ? 60 : 150;
+  const kAttr = 0.08, kRep = 900;
+  for (let it=0; it<iters; it++){
+    const fx = new Float64Array(n), fy = new Float64Array(n);
+    for (const a of netArr){                                  // attraction toward net centroid
+      let cx=0, cy=0; for (const i of a){ cx+=P[i].x; cy+=P[i].y; } cx/=a.length; cy/=a.length;
+      for (const i of a){ fx[i] += (cx-P[i].x)*kAttr; fy[i] += (cy-P[i].y)*kAttr; }
+    }
+    for (let i=0;i<n;i++) for (let j=i+1;j<n;j++){             // pairwise repulsion
+      let dx = P[i].x-P[j].x, dy = P[i].y-P[j].y, d2 = dx*dx+dy*dy;
+      if (d2 < 1) d2 = 1;
+      const inv = 1/Math.sqrt(d2), f = kRep/d2;
+      fx[i] += dx*inv*f; fy[i] += dy*inv*f; fx[j] -= dx*inv*f; fy[j] -= dy*inv*f;
+    }
+    for (let i=0;i<n;i++){                                     // integrate with a step clamp
+      P[i].x += Math.max(-20, Math.min(20, fx[i]));
+      P[i].y += Math.max(-20, Math.min(20, fy[i]));
+    }
+  }
+  comps.forEach((c,i) => pos.set(c.id, { x:P[i].x, y:P[i].y }));
+  schDeOverlap(pos, geo);
+  return pos;
+}
+
+/* dispatch the requested arrangement mode ("closest"|"pcb"|"type"|"name"). */
+function schArrange(mode, geo){
+  const comps = State.components;
+  if (!comps.length) return new Map();
+  switch (mode){
+    case "pcb":     return schArrangePCB(geo);
+    case "closest": return schArrangeClosest(geo);
+    case "name":    return schGridLayout([...comps].sort((a,b)=> _refCmp(a.ref,b.ref)), geo, null);
+    case "type":
+    default: {
+      const order = [...comps].sort((a,b)=>{
+        const ta = _refType(a), tb = _refType(b);
+        return ta < tb ? -1 : ta > tb ? 1 : _refCmp(a.ref, b.ref);
+      });
+      return schGridLayout(order, geo, c => _refType(c));
+    }
+  }
+}
+
+function _svgEsc(s){
+  return String(s == null ? "" : s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+}
+
+/* an SVG preview of a schematic arrangement — component boxes coloured by side
+   (front/back) plus a thin star from every connected pin to its net centroid, so
+   the effect of each arrangement (especially "closest") is visible before export. */
+function schPreviewSVG(mode){
+  const geo = schGeometry();
+  const pos = schArrange(mode || "type", geo);
+  const comps = State.components.filter(c => geo.has(c.id) && pos.has(c.id));
+  const f = (n)=> (Math.round(n*100)/100);
+  if (!comps.length)
+    return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 40"><text x="60" y="23" fill="#888" font-size="6" text-anchor="middle">No components to preview</text></svg>';
+  let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity;
+  for (const c of comps){
+    const g = geo.get(c.id), p = pos.get(c.id);
+    minX=Math.min(minX,p.x-g.w/2); maxX=Math.max(maxX,p.x+g.w/2);
+    minY=Math.min(minY,p.y-g.h/2); maxY=Math.max(maxY,p.y+g.h/2);
+  }
+  const m = 10; minX-=m; minY-=m; maxX+=m; maxY+=m;
+  const el = [];
+  // net stars (drawn first, behind the boxes)
+  const netPts = new Map();
+  for (const c of comps){
+    const g = geo.get(c.id), p = pos.get(c.id);
+    for (let i=0;i<c.pins.length;i++){
+      const pin = c.pins[i]; if (!pin.netId) continue;
+      const pg = g.pins[i] || { x:0, y:0 };
+      let a = netPts.get(pin.netId); if (!a) netPts.set(pin.netId, a=[]);
+      a.push({ x: p.x+pg.x, y: p.y-pg.y });        // schematic y points down
+    }
+  }
+  for (const [netId, pts] of netPts){
+    if (pts.length < 2) continue;
+    let cx=0, cy=0; for (const q of pts){ cx+=q.x; cy+=q.y; } cx/=pts.length; cy/=pts.length;
+    const col = _svgEsc(netColor(netId));
+    for (const q of pts)
+      el.push('<line x1="'+f(q.x)+'" y1="'+f(q.y)+'" x2="'+f(cx)+'" y2="'+f(cy)+'" stroke="'+col+'" stroke-width="0.4" opacity="0.5"/>');
+  }
+  // component boxes + ref labels
+  for (const c of comps){
+    const g = geo.get(c.id), p = pos.get(c.id);
+    const back = c.side === "back";
+    const fill = back ? "#2b3a66" : "#5a4a1e", stroke = back ? "#7da0ff" : "#ffd24d";
+    el.push('<rect x="'+f(p.x-g.w/2)+'" y="'+f(p.y-g.h/2)+'" width="'+f(g.w)+'" height="'+f(g.h)+'" rx="1" fill="'+fill+'" stroke="'+stroke+'" stroke-width="0.4"/>');
+    const fs = Math.min(3.2, g.h*0.5);
+    el.push('<text x="'+f(p.x)+'" y="'+f(p.y)+'" fill="#fff" font-size="'+f(fs)+'" text-anchor="middle" dominant-baseline="central" font-family="Consolas,monospace">'+_svgEsc(c.ref)+'</text>');
+  }
+  return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="'+f(minX)+' '+f(minY)+' '+f(maxX-minX)+' '+f(maxY-minY)+'" preserveAspectRatio="xMidYMid meet">'+el.join("")+'</svg>';
+}
+
+function exportKiCadSch(mode){
+  const L = [];
+  const F = (n)=>n.toFixed(2);
+  const geo = schGeometry();
+  const pos = schArrange(mode || "type", geo);
+  L.push('(kicad_sch (version 20211123) (generator "pcb-reveng")');
+  L.push('  (uuid ' + _uuid() + ')');
+  L.push('  (paper "A2")');
+  // one symbol definition per component (pin names/numbers are per-part)
+  L.push('  (lib_symbols');
+  for (const c of State.components){
+    const g = geo.get(c.id);
+    const refLetter = (/^[A-Za-z]+/.exec(c.ref)||["U"])[0];
+    const sym = "REV_" + c.ref;
+    const { w, h, pins, body, hide } = g;
     L.push('    (symbol "reveng:' + sym + '"' + (hide ? ' (pin_numbers (hide yes)) (pin_names (hide yes))' : '') + ' (in_bom yes) (on_board yes)');
     L.push('      (property "Reference" "' + _schEsc(refLetter) + '" (at 0 ' + F(h/2+1.27) + ' 0) (effects (font (size 1.27 1.27))))');
     L.push('      (property "Value" "' + _schEsc(c.value || c.part || "~") + '" (at 0 ' + F(-h/2-1.27) + ' 0) (effects (font (size 1.27 1.27))))');
     L.push('      (symbol "' + sym + '_0_1"');
-    for (const g of body) L.push('        ' + g);
+    for (const gg of body) L.push('        ' + gg);
     L.push('      )');
     L.push('      (symbol "' + sym + '_1_1"');
     for (let i=0;i<c.pins.length;i++){
@@ -275,24 +466,23 @@ function exportKiCadSch(){
     L.push('    )');
   }
   L.push('  )');
-  // instances + global labels
-  let X = 30, Y = 30, rowH = 0;
+  // instances + global labels, placed by the chosen arrangement
   for (const c of State.components){
     const g = geo.get(c.id);
-    if (X > 260){ X = 30; Y += rowH + 25; rowH = 0; }
-    rowH = Math.max(rowH, g.h + 15);
+    const p = pos.get(c.id) || { x: 30, y: 30 };
+    const X = p.x, Y = p.y;
     const sym = "REV_" + c.ref;
     L.push('  (symbol (lib_id "reveng:' + sym + '") (at ' + F(X) + ' ' + F(Y) + ' 0) (unit 1) (in_bom yes) (on_board yes)');
     L.push('    (uuid ' + _uuid() + ')');
     L.push('    (property "Reference" "' + _schEsc(c.ref) + '" (at ' + F(X) + ' ' + F(Y-g.h/2-2.54) + ' 0) (effects (font (size 1.27 1.27))))');
     L.push('    (property "Value" "' + _schEsc(c.value || c.part || "~") + '" (at ' + F(X) + ' ' + F(Y+g.h/2+2.54) + ' 0) (effects (font (size 1.27 1.27))))');
     L.push('    (property "Footprint" "' + _schEsc(c.kicad || "") + '" (at ' + F(X) + ' ' + F(Y) + ' 0) (effects (font (size 1.27 1.27)) hide))');
-    for (const p of c.pins) L.push('    (pin "' + _schEsc(p.num) + '" (uuid ' + _uuid() + '))');
+    for (const p2 of c.pins) L.push('    (pin "' + _schEsc(p2.num) + '" (uuid ' + _uuid() + '))');
     L.push('  )');
     for (let i=0;i<c.pins.length;i++){
-      const p = c.pins[i];
-      if (!p.netId) continue;
-      const net = getNet(p.netId);
+      const p2 = c.pins[i];
+      if (!p2.netId) continue;
+      const net = getNet(p2.netId);
       if (!net) continue;
       const pg = g.pins[i] || { x: -g.w/2-2.54, y: 0, angle: 0 };
       const onLeft = pg.angle === 0;
@@ -302,7 +492,6 @@ function exportKiCadSch(){
     L.push('    (effects (font (size 1.27 1.27)) (justify ' + (onLeft?"right":"left") + '))');
       L.push('    (uuid ' + _uuid() + '))');
     }
-    X += g.w + 45;
   }
   L.push(')');
   return L.join("\n");
@@ -340,12 +529,12 @@ function missingKicadFootprints(){
   return out;
 }
 
-function netlistFor(format){
+function netlistFor(format, arrange){
   switch (format){
     case "bom":  return { text: exportBOM(),      ext: "csv",       mime: "text/csv",        base: "bom" };
     case "csv":  return { text: exportCSV(),      ext: "csv",       mime: "text/csv",        base: "netlist" };
     case "json": return { text: exportJSON(),     ext: "json",      mime: "application/json", base: "netlist" };
-    case "sch":  return { text: exportKiCadSch(), ext: "kicad_sch", mime: "text/plain",      base: "schematic" };
+    case "sch":  return { text: exportKiCadSch(arrange), ext: "kicad_sch", mime: "text/plain", base: "schematic" };
     default:     return { text: exportKiCad(),    ext: "net",       mime: "text/plain",      base: "netlist" };
   }
 }

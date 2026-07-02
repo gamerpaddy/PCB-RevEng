@@ -655,7 +655,7 @@ function wireDialogs(){
     UI.toast("Copied to clipboard");
   });
   $("#export-download").addEventListener("click", ()=>{
-    const f = netlistFor($("#export-format").value);
+    const f = netlistFor($("#export-format").value, $("#export-arrange").value);
     downloadFile((f.base || "netlist") + "." + f.ext, f.text, f.mime);
   });
   $("#bom-close").addEventListener("click", ()=> $("#bom-dialog").close());
