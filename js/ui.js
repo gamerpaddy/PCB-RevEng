@@ -205,7 +205,9 @@ function bindLive(el, label, apply){
 UI.refreshLayerList = () => {
   const list = $("#layer-list");
   list.innerHTML = "";
-  $("#drop-hint").style.display = State.layers.length ? "none" : "flex";
+  const dh = $("#drop-hint");
+  dh.style.display = State.layers.length ? "none" : "flex";
+  if (!State.layers.length) dh.classList.remove("faded");   // show fresh; activity re-fades it
   for (const l of State.layers){
     const card = document.createElement("div");
     card.className = "layer-card" + (l.id === UI.activeLayerId ? " active" : "");
@@ -685,12 +687,18 @@ UI.inspectComponent = (c, selPin) => {
   if (isFree){
     pinSec.querySelectorAll(".pshape").forEach(sel => sel.addEventListener("change", e => {
       const i = +e.target.dataset.i;
-      pushUndo("pad type"); ensureFreePin(c, i).shape = e.target.value; c._fp = null;
+      pushUndo("pad type");
+      const pl = ensureFreePin(c, i); pl.shape = e.target.value; delete pl.w; delete pl.h; // square from now on
+      pl.tht = pl.shape === "circle";   // THT round pad gets a drill hole; SMD (rect) has none
+      c._fp = null;
       UI.refreshInspector(); requestRender();
     }));
     pinSec.querySelectorAll(".psize").forEach(inp => inp.addEventListener("change", e => {
       const i = +e.target.dataset.i;
-      pushUndo("pad size"); ensureFreePin(c, i).size = Math.max(0.2, parseFloat(e.target.value)||1.0); c._fp = null;
+      pushUndo("pad size");
+      const pl = ensureFreePin(c, i);
+      pl.size = Math.max(0.2, parseFloat(e.target.value)||1.0); delete pl.w; delete pl.h; // manual size overrides imported w/h
+      c._fp = null;
       requestRender();
     }));
   }

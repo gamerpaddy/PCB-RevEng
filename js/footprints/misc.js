@@ -25,9 +25,13 @@ Footprints.register({
           {key:"h",label:"Body H mm",type:"int",def:10,min:1,max:200,step:1}],
   gen(p){
     const pins = (p.pinList || []).map(pl => {
-      const shape = pl.shape || "circle";          // "circle" = THT, "rect" = SMD
+      const shape = pl.shape || "circle";          // "circle" = round pad, "rect" = SMD rectangle
       const sz = pl.size || (shape==="circle" ? 1.6 : 1.2);
-      return _pin(pl.num, pl.x, pl.y, { shape, w: sz, h: sz });
+      // pl.w/pl.h give a non-square pad (e.g. imported SMD/QFP pads); fall back to size
+      const w = pl.w || sz, h = pl.h || sz;
+      // tht:false marks a round pad with no drill (e.g. an imported BGA ball); a round pad
+      // defaults to through-hole (with a drill), which is what a hand-placed round pad means
+      return _pin(pl.num, pl.x, pl.y, { shape, w, h, tht: pl.tht });
     });
     return { label:"Free-"+pins.length, pins, body:{w:p.w, h:p.h}, kicad:"" };
   }

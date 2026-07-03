@@ -7,9 +7,10 @@ const View = {
   flip: false,            // true = look at the board from the back (mirror X)
   mask: false,            // coverage mask overlay
   width: 0, height: 0,
-  hoverNetId: null,       // net under cursor → highlighted
+  hoverNetId: null,       // net under cursor → highlights the WHOLE net (only when nothing is selected)
+  hoverObj: null,         // trace/via under cursor → highlighted on its own (the "just this thing" hover cue)
   hoverNote: null,        // sticky note under cursor → show its text
-  hoverPin: null,         // {comp,pinIdx} pad under cursor → anchors the "star" ratsnest on hover
+  hoverPin: null,         // {comp,pinIdx} pad under cursor → anchors the "star" ratsnest on hover + single-pad hover cue
   blinkNet: null,         // net flashing after a net-list click
   blinkOn: false,
   ratsnest: false,        // draw straight "airwire" connections between same-net pads/vias
@@ -161,6 +162,67 @@ function pinEdgeDist(comp, fpin, wx, wy){
   const ex = Math.max(Math.abs(px) - fpin.w*s/2, 0);
   const ey = Math.max(Math.abs(py) - fpin.h*s/2, 0);
   return Math.hypot(ex, ey);
+}
+
+/* a pad as an oriented box in world px: centre, the two (unit) edge axes rotated by the
+   component, and the half-extents. (Back-side mirror flips an axis sign, which doesn't
+   change the box, so it's ignored here.) */
+function pinOBB(comp, fpin){
+  const s = State.pxPerMm * (comp.scale || 1);
+  const wp = pinWorldPos(comp, fpin);
+  const a = comp.rot * Math.PI/180, ca = Math.cos(a), sa = Math.sin(a);
+  return { cx: wp.x, cy: wp.y, ux: ca, uy: sa, vx: -sa, vy: ca, hw: fpin.w*s/2, hh: fpin.h*s/2 };
+}
+
+/* separating-axis test for two oriented boxes — true when they overlap (within tol px) */
+function obbOverlap(A, B, tol){
+  tol = tol || 0;
+  const dx = B.cx - A.cx, dy = B.cy - A.cy;
+  const axes = [[A.ux,A.uy], [A.vx,A.vy], [B.ux,B.uy], [B.vx,B.vy]];
+  for (const [lx, ly] of axes){
+    const rA = Math.abs(A.hw*(A.ux*lx + A.uy*ly)) + Math.abs(A.hh*(A.vx*lx + A.vy*ly));
+    const rB = Math.abs(B.hw*(B.ux*lx + B.uy*ly)) + Math.abs(B.hh*(B.vx*lx + B.vy*ly));
+    if (Math.abs(dx*lx + dy*ly) > rA + rB + tol) return false;   // found a separating axis
+  }
+  return true;
+}
+
+/* do two pads' copper actually overlap? Uses the real rectangle (SAT) for rect pads, and
+   an exact centre-to-edge distance when either pad is round — never the max(w,h) circle
+   approximation that makes tall thin pads look like they reach into their neighbours. */
+function padsOverlap(cA, fA, cB, fB, tol){
+  tol = tol || 0;
+  if (fA.shape === "circle"){
+    const c = pinWorldPos(cA, fA);
+    return pinEdgeDist(cB, fB, c.x, c.y) <= fA.w*State.pxPerMm*(cA.scale||1)/2 + tol;
+  }
+  if (fB.shape === "circle"){
+    const c = pinWorldPos(cB, fB);
+    return pinEdgeDist(cA, fA, c.x, c.y) <= fB.w*State.pxPerMm*(cB.scale||1)/2 + tol;
+  }
+  return obbOverlap(pinOBB(cA, fA), pinOBB(cB, fB), tol);
+}
+
+/* a trace segment (thick line) as an oriented box: centred on the segment midpoint,
+   long axis along it, half-width = the trace's half copper width */
+function segOBB(p0, p1, halfW){
+  let dx = p1.x - p0.x, dy = p1.y - p0.y;
+  const len = Math.hypot(dx, dy) || 1; dx /= len; dy /= len;
+  return { cx: (p0.x+p1.x)/2, cy: (p0.y+p1.y)/2, ux: dx, uy: dy, vx: -dy, vy: dx, hw: len/2, hh: halfW };
+}
+
+/* does a pad's copper actually overlap a trace segment of half-width halfW? Rectangular
+   pads use the real rectangle-vs-rectangle (SAT) test instead of a centre-projection with
+   a fat tolerance, so a trace landing on its own pad isn't reported as touching the
+   0.5 mm-pitch neighbour beside it. */
+function padHitsSeg(comp, fpin, p0, p1, halfW, tol){
+  tol = tol || 0;
+  if (fpin.shape === "circle"){
+    const c = pinWorldPos(comp, fpin);
+    const pr = projectOnSeg(c.x, c.y, p0, p1);
+    return pr.d <= fpin.w*State.pxPerMm*(comp.scale||1)/2 + halfW + tol;
+  }
+  return obbOverlap(pinOBB(comp, fpin), segOBB(p0, p1, halfW), tol);
 }
 function compRadius(comp){
   const fp = compFootprint(comp);
@@ -565,13 +627,24 @@ function drawWorld(ctx){
 
   // --- traces ---
   // "hide traces" is a hard override — it also suppresses the focused-net "show across
-  // all layers" exception below, so every trace really disappears
-  if (!View.hideTraces) for (const t of State.traces){
-    // a focused net stays visible on every layer, even ones the active-side
-    // filter would normally hide — that is the "show the net across all layers" cue
-    const focused = selNet && selNet !== -1 && t.netId === selNet;
-    if (!traceVisible(t) && !focused) continue;
-    drawTrace(ctx, t, selNet);
+  // all layers" exception below, so every trace really disappears.
+  // Two passes by side so the ACTIVE-side copper always draws on top: otherwise a
+  // focused net's other-side trace (shown "across all layers") could paint over the
+  // active-side trace the cursor is actually on.
+  if (!View.hideTraces){
+    const aSide = effDrawSide();
+    const pass = (activeSidePass) => {
+      for (const t of State.traces){
+        // a focused net stays visible on every layer, even ones the active-side
+        // filter would normally hide — that is the "show the net across all layers" cue
+        const focused = selNet && selNet !== -1 && t.netId === selNet;
+        if (!traceVisible(t) && !focused) continue;
+        if ((t.side === aSide) !== activeSidePass) continue;
+        drawTrace(ctx, t, selNet);
+      }
+    };
+    pass(false);   // other layers first (behind)
+    pass(true);    // active-side traces on top
   }
   // --- in-progress trace preview ---
   if (Tools.tracePts && Tools.tracePts.length){
@@ -759,7 +832,12 @@ function drawMeasureLabel(ctx){
 function currentHighlightNet(){
   if (View.blinkNet && View.blinkOn) return View.blinkNet;
   if (View.blinkNet && !View.blinkOn) return -1; // suppress other highlights mid-blink-off
-  if (View.hoverNetId) return View.hoverNetId;
+  // Whole-net hover highlight ONLY when nothing is selected. With a selection active,
+  // hovering a different net must not light up that whole net — just the single hovered
+  // object is emphasised (see drawTrace/drawVia/drawComponent), and the selection's net
+  // stays the highlighted one.
+  const hasSelection = !!(UI.sel || UI.activeNetId);
+  if (View.hoverNetId && !hasSelection) return View.hoverNetId;
   if (UI.activeNetId) return UI.activeNetId;
   const sel = UI.sel;
   if (!sel) return null;
@@ -792,14 +870,21 @@ function focusAlpha(netId, selNet){
 }
 
 function drawTrace(ctx, t, selNet){
-  const hl = selNet && selNet !== -1 && t.netId === selNet;
-  const fa = focusAlpha(t.netId, selNet) * xrayDim(t.side);
+  // the single hovered trace glows and stays full-bright even when it's not on the
+  // focused net (so a selection can be held while pointing at another net's trace)
+  const isHover = View.hoverObj === t;
+  const hl = (selNet && selNet !== -1 && t.netId === selNet) || isHover;
+  // while a net is highlighted, traces on a layer other than the active one are drawn
+  // at half opacity so the active-layer copper reads clearly on top (xray has its own
+  // dimming, so leave it alone there)
+  const otherDim = (selNet && selNet !== -1 && t.side !== effDrawSide() && !effXray()) ? 0.5 : 1;
+  const fa = (isHover ? 1 : focusAlpha(t.netId, selNet)) * xrayDim(t.side) * otherDim;
   ctx.save();
   ctx.lineCap = "round"; ctx.lineJoin = "round";
   if (hl){
     ctx.strokeStyle = "#ffffff";
     ctx.lineWidth = (t.width||3) + 7/View.zoom;
-    ctx.globalAlpha = 0.5;
+    ctx.globalAlpha = 0.5 * otherDim;
     pathTrace(ctx, t); ctx.stroke();
   }
   const sel = (UI.sel && UI.sel.type==="trace" && UI.sel.trace===t) || UI.isTraceSelected(t);
@@ -822,8 +907,9 @@ function pathTrace(ctx, t){
 function drawVia(ctx, v, selNet){
   const pth = v.kind === "pth";
   const r = v.r || 5;
-  const hl = selNet && selNet !== -1 && v.netId === selNet;
-  const fa = focusAlpha(v.netId, selNet);
+  const isHover = View.hoverObj === v;   // single hovered via glows on its own
+  const hl = (selNet && selNet !== -1 && v.netId === selNet) || isHover;
+  const fa = isHover ? 1 : focusAlpha(v.netId, selNet);
   const sel = UI.sel && UI.sel.type==="via" && UI.sel.via===v;
   ctx.save();
   if (hl){
@@ -893,12 +979,15 @@ function drawComponent(ctx, c, selNet, padsOnly){
     if (padsOnly && fpin.shape !== "circle") continue;
     const st = c.pins[pi] || {};
     const hasNet = !!st.netId;
-    const hl = selNet && st.netId === selNet;
+    // the single hovered pad glows on its own (the "just this thing" hover cue), so a
+    // selection can be held while pointing at another net's pad
+    const isHoverPad = View.hoverPin && View.hoverPin.comp === c && View.hoverPin.pinIdx === pi;
+    const hl = (selNet && st.netId === selNet) || isHoverPad;
     const x=fpin.xmm*s, y=fpin.ymm*s, w=fpin.w*s, h=fpin.h*s;
     const selPin = (UI.sel && UI.sel.type==="pin" && UI.sel.comp===c && UI.sel.pinIdx===pi) ||
                    UI.isPinSelected(c, pi);
-    // a pad on the focused net stays full-bright even if its component is dimmed
-    const padA = (selNet && selNet !== -1 && st.netId === selNet) ? (padsOnly?0.45:1) : padDim;
+    // a pad on the focused net (or the hovered pad) stays full-bright even if its component is dimmed
+    const padA = ((selNet && selNet !== -1 && st.netId === selNet) || isHoverPad) ? (padsOnly?0.45:1) : padDim;
     if (hl){
       ctx.fillStyle="#fff"; ctx.globalAlpha=.5;
       ctx.beginPath(); ctx.arc(x,y,Math.max(w,h)/2+4/View.zoom,0,Math.PI*2); ctx.fill();
@@ -910,8 +999,12 @@ function drawComponent(ctx, c, selNet, padsOnly){
     if (fpin.shape==="circle"){
       ctx.beginPath(); ctx.arc(x,y,w/2,0,Math.PI*2); ctx.fill();
       if (darkNet){ ctx.strokeStyle="#9aa3ad"; ctx.lineWidth=1/View.zoom; ctx.stroke(); }
-      ctx.fillStyle="#0d0f12";
-      ctx.beginPath(); ctx.arc(x,y,w/5,0,Math.PI*2); ctx.fill();
+      // drill hole only for through-hole pads — a round SMD pad (tht:false, e.g. a BGA
+      // ball) is a solid dot with no hole
+      if (fpin.tht !== false){
+        ctx.fillStyle="#0d0f12";
+        ctx.beginPath(); ctx.arc(x,y,w/5,0,Math.PI*2); ctx.fill();
+      }
     } else {
       ctx.fillRect(x-w/2,y-h/2,w,h);
       if (darkNet){ ctx.strokeStyle="#9aa3ad"; ctx.lineWidth=1/View.zoom; ctx.strokeRect(x-w/2,y-h/2,w,h); }

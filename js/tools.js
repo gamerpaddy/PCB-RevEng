@@ -129,19 +129,24 @@ function onPointerMove(e){
   // hover net / note highlight in select mode
   if (Tools.name === "select"){
     const h = hitTest(w.x, w.y);
-    let net = null, note = null, pin = null;
+    let net = null, note = null, pin = null, obj = null;
     if (h){
       if (h.type==="pin"){ net = h.comp.pins[h.pinIdx].netId; pin = { comp:h.comp, pinIdx:h.pinIdx }; }
-      else if (h.type==="via") net = h.via.netId;
-      else if (h.type==="trace") net = h.trace.netId;
+      else if (h.type==="via"){ net = h.via.netId; obj = h.via; }
+      else if (h.type==="trace"){ net = h.trace.netId; obj = h.trace; }
       else if (h.type==="note") note = h.note;
     }
     // track the hovered pad so the "star" ratsnest can hang off it on hover, not just click
     const pinChanged = (pin?.comp !== View.hoverPin?.comp) || (pin?.pinIdx !== View.hoverPin?.pinIdx);
+    const objChanged = obj !== View.hoverObj;
     View.hoverPin = pin;
+    View.hoverObj = obj;
     if (net !== View.hoverNetId){ View.hoverNetId = net; }
     if (note !== View.hoverNote){ View.hoverNote = note; requestRender(); }
     if (pinChanged && View.ratsnest && View.ratsnestMode === "star") requestRender();
+    // the single-object / single-pad hover cue changes even when the net doesn't (moving
+    // between two traces of the same net), so redraw on any hovered-object change too
+    if (objChanged || pinChanged) requestRender();
     View.canvas.style.cursor = h ? "pointer" : "default";
   }
 
@@ -547,13 +552,13 @@ function checkMoveOverlaps(comp){
   const s = State.pxPerMm * (comp.scale||1);
   const conflicts = [];
   const seenPairs = new Set();
-  const thru = (pin) => pin.shape === "circle"; // through-hole pads reach every copper side
+  const thru = (pin) => pin.shape === "circle" && pin.tht !== false; // THT pads reach every copper side (round SMD pads don't)
   for (let pi=0; pi<comp.pins.length; pi++){
     const myNet = comp.pins[pi].netId;
     if (!myNet) continue;
     const fpin = fp.pins[pi]; if (!fpin) continue;
     const wp = pinWorldPos(comp, fpin);
-    const myR = Math.max(fpin.w, fpin.h)*s/2;
+    const myDiag = Math.hypot(fpin.w, fpin.h)*s/2;   // circumradius, for the cheap broad reject
     const myThru = thru(fpin);
     const hitNet = (otherNet, label) => {
       if (!otherNet || otherNet === myNet) return;
@@ -572,18 +577,20 @@ function checkMoveOverlaps(comp){
         // copper only touches if they share a side, or either pad is through-hole
         if (!(myThru || thru(opin) || o.side === comp.side)) continue;
         const op = pinWorldPos(o, opin);
-        if (Math.hypot(wp.x-op.x, wp.y-op.y) <= myR + Math.max(opin.w,opin.h)*os/2)
+        // cheap circumradius reject, then the REAL rectangle overlap (so tall thin pads
+        // don't falsely "reach" sideways into their neighbours)
+        if (Math.hypot(wp.x-op.x, wp.y-op.y) > myDiag + Math.hypot(opin.w,opin.h)*os/2) continue;
+        if (padsOverlap(comp, fpin, o, opin, 1))
           hitNet(o.pins[oi].netId, o.ref + "." + o.pins[oi].num);
       }
     }
     for (const v of State.vias)
-      if (Math.hypot(wp.x-v.x, wp.y-v.y) <= myR + (v.r||5)) hitNet(v.netId, "via");
+      if (pinEdgeDist(comp, fpin, v.x, v.y) <= (v.r||5) + 1) hitNet(v.netId, "via");
     for (const t of State.traces){
       // a trace is copper on a single side — ignore unless the pad reaches that side
       if (!(myThru || t.side === comp.side)) continue;
       for (let k=0;k<t.points.length-1;k++){
-        const pr = projectOnSeg(wp.x, wp.y, t.points[k], t.points[k+1]);
-        if (pinEdgeDist(comp, fpin, pr.x, pr.y) <= (t.width||3)/2 + 2){ hitNet(t.netId, "trace"); break; }
+        if (padHitsSeg(comp, fpin, t.points[k], t.points[k+1], (t.width||3)/2, 0.5)){ hitNet(t.netId, "trace"); break; }
       }
     }
   }
@@ -651,7 +658,7 @@ function runChecker(){
       const wp = pinWorldPos(c, fpin);
       if (!p.netId){ unnetted.push({ comp:c, pinIdx:pi, wp }); continue; }
       // does a trace physically touch this pad but carry a different net?
-      const tht = fpin.shape === "circle"; // only through-hole pads reach other sides
+      const tht = fpin.shape === "circle" && fpin.tht !== false; // only through-hole pads reach other sides
       const padHalf = Math.max(fpin.w, fpin.h) * s / 2;  // pad reach for the bbox reject
       for (let ti=0; ti<State.traces.length; ti++){
         const t = State.traces[ti];
@@ -662,8 +669,7 @@ function runChecker(){
             wp.y < bb.minY - padHalf || wp.y > bb.maxY + padHalf) continue; // quick reject
         let touch = false;
         for (let k=0;k<t.points.length-1;k++){
-          const pr = projectOnSeg(wp.x, wp.y, t.points[k], t.points[k+1]);
-          if (pinEdgeDist(c, fpin, pr.x, pr.y) <= (t.width||3)/2 + 2){ touch = true; break; }
+          if (padHitsSeg(c, fpin, t.points[k], t.points[k+1], (t.width||3)/2, 0.5)){ touch = true; break; }
         }
         if (touch){ mismatches.push({ comp:c, pinIdx:pi, pinNet:p.netId, traceNet:t.netId, trace:t }); break; }
       }

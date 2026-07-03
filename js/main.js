@@ -374,9 +374,22 @@ function wirePanelResizer(rzSel, panelSel, key, side){
   rz.addEventListener("pointercancel", end);
 }
 
+/* The "Drop … photos here" hint (shown while there are no image layers) recedes once
+   the user starts working on the canvas without adding photos, and eases back in after
+   a spell of inactivity so it stays discoverable. No-op once a layer exists. */
+let _dropHintIdle = null;
+function nudgeDropHint(){
+  const el = document.getElementById("drop-hint");
+  if (!el || State.layers.length) return;   // hidden entirely once photos are loaded
+  el.classList.add("faded");
+  clearTimeout(_dropHintIdle);
+  _dropHintIdle = setTimeout(() => el.classList.remove("faded"), 12000);
+}
+
 /* ---------------- canvas events ---------------- */
 function wireCanvas(){
   const cv = View.canvas;
+  ["pointerdown","wheel"].forEach(ev => cv.addEventListener(ev, nudgeDropHint, { passive:true }));
   cv.addEventListener("pointerdown", e => { cv.setPointerCapture(e.pointerId); onPointerDown(e); });
   cv.addEventListener("pointermove", onPointerMove);
   cv.addEventListener("pointerup", onPointerUp);
@@ -432,6 +445,7 @@ function wireCanvas(){
     const files = [...(e.dataTransfer?.files || [])];
     for (const f of files){
       if (f.type.startsWith("image/")) addImageLayer(f);
+      else if (/\.(brd|cad)$/i.test(f.name)) importBoardFile(f);
       else if (/\.json$/i.test(f.name)) openProjectFile(f);
     }
   });
@@ -450,7 +464,7 @@ function showCanvasContextMenu(cx, cy, w){
     if (c.fpId === "free"){
       const pl = ensureFreePin(c, h.pinIdx);
       items.push({ sep:true });
-      items.push({ label: pl.shape==="rect" ? "Pad → THT (round)" : "Pad → SMD (rect)", action:()=>{ pushUndo("pad type"); pl.shape = pl.shape==="rect"?"circle":"rect"; c._fp=null; UI.refreshInspector(); requestRender(); } });
+      items.push({ label: pl.shape==="rect" ? "Pad → THT (round)" : "Pad → SMD (rect)", action:()=>{ pushUndo("pad type"); pl.shape = pl.shape==="rect"?"circle":"rect"; pl.tht = pl.shape==="circle"; delete pl.w; delete pl.h; c._fp=null; UI.refreshInspector(); requestRender(); } });
       items.push({ label:"Remove this pad", danger:true, action:()=>{ pushUndo("remove pad"); removeFreePin(c, h.pinIdx); UI.select({type:"comp",comp:c}); UI.refreshInspector(); UI.refreshNets(); requestRender(); } });
     }
     items.push({ sep:true });
@@ -808,6 +822,7 @@ function saveProject(){
 }
 
 function openProjectFile(file){
+  if (/\.(brd|cad)$/i.test(file.name)){ importBoardFile(file); return; }
   const reader = new FileReader();
   reader.onload = () => {
     try {
@@ -823,6 +838,31 @@ function openProjectFile(file){
     } catch (err){
       alert("Could not open file: " + err.message);
     }
+  };
+  reader.readAsText(file);
+}
+
+/* import a boardview file — EAGLE .brd or GENCAD .cad — replacing the current board
+   (there are no image layers to keep). The parser is chosen by extension. */
+function importBoardFile(file){
+  if (State.components.length && !confirm("Import “" + file.name + "”? This replaces the current board. Unsaved work will be lost.")) return;
+  const isCad = /\.cad$/i.test(file.name);
+  const reader = new FileReader();
+  reader.onload = () => {
+    let sum;
+    try { sum = isCad ? importGencadCAD(reader.result) : importEagleBRD(reader.result); }
+    catch (err){ alert("Could not import board: " + err.message); return; }
+    UI.activeLayerId = null;
+    UI.select(null);
+    UI.rebuildSideSelect(); syncSettings();
+    UI.refreshLayerList(); UI.refreshNets(); UI.refreshInspector();
+    zoomToFit();
+    markDirty();
+    const layerNote = (sum.physicalLayers && sum.physicalLayers > sum.layers)
+      ? sum.layers + " copper layers (board is " + sum.physicalLayers + "-layer; inner planes carry no traces)"
+      : sum.layers + " layers";
+    UI.toast("Imported " + file.name + " — " + sum.components + " parts · " + sum.nets +
+             " nets · " + sum.traces + " traces · " + sum.vias + " vias · " + layerNote);
   };
   reader.readAsText(file);
 }

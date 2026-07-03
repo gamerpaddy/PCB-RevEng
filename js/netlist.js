@@ -550,6 +550,7 @@ function netlistFor(format, arrange){
     case "csv":  return { text: exportCSV(),      ext: "csv",       mime: "text/csv",        base: "netlist" };
     case "json": return { text: exportJSON(),     ext: "json",      mime: "application/json", base: "netlist" };
     case "sch":  return { text: exportKiCadSch(arrange), ext: "kicad_sch", mime: "text/plain", base: "schematic" };
+    case "eagle":return { text: exportEagleBRD(),  ext: "brd",       mime: "application/xml",  base: "board" };
     default:     return { text: exportKiCad(),    ext: "net",       mime: "text/plain",      base: "netlist" };
   }
 }

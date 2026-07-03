@@ -7,3 +7,9 @@ get_kicad_footprints.bat
 # Local Claude Code / dev preview config (machine-specific)
 .claude/
 pcb-wiki/
+
+# Sample / test boards (not part of the app)
+Arduino_MEGA2560_ref.brd
+*.brd
+*.cad
+sample.cad
