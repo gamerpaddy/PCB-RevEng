@@ -858,8 +858,8 @@ function importBoardFile(file){
     UI.refreshLayerList(); UI.refreshNets(); UI.refreshInspector();
     zoomToFit();
     markDirty();
-    const layerNote = (sum.physicalLayers && sum.physicalLayers > sum.layers)
-      ? sum.layers + " copper layers (board is " + sum.physicalLayers + "-layer; inner planes carry no traces)"
+    const layerNote = (sum.emptyInner > 0)
+      ? sum.layers + " layers (" + sum.emptyInner + " inner plane layer" + (sum.emptyInner>1?"s":"") + " have no copper geometry in the file)"
       : sum.layers + " layers";
     UI.toast("Imported " + file.name + " — " + sum.components + " parts · " + sum.nets +
              " nets · " + sum.traces + " traces · " + sum.vias + " vias · " + layerNote);

@@ -258,15 +258,18 @@ function importGencadCAD(text){
   const devices = gencadParseDevices(sec.DEVICES || []);
   const tracks = gencadParseTracks(sec.TRACKS || []);
 
-  // routed copper — parsed up front so the layer count reflects the copper actually
-  // present. GENCAD commonly lists inner power/ground planes with no drawn traces; those
-  // empty inner layers only clutter the view, so we count the layers that carry copper
-  // (the header's physical layer count is kept only for the toast).
+  // Layer count = the board's real stackup: the header's "Number of Routing Layers", at
+  // least as deep as any inner layer that actually carries copper. Some GENCAD exports
+  // omit the inner power/ground PLANE copper entirely — only top/bottom signal copper and
+  // the via stitching are written — so those inner layers come in empty. We still show the
+  // true layer count (like a 4-layer EAGLE board) and report how many inner layers have no
+  // copper geometry in the file.
   const { segsByNet, vias } = gencadParseRoutes(sec.ROUTES || [], tracks, padstacks, pads);
-  let maxInner = 0;
-  for (const segs of segsByNet.values()) for (const s of segs){ const m = /inner(\d+)/.exec(s.side); if (m) maxInner = Math.max(maxInner, +m[1]); }
-  State.layerCount = Math.max(2, maxInner + 2);
-  const physicalLayers = gencadLayerCount(sec.HEADER);
+  const usedInner = new Set();
+  for (const segs of segsByNet.values()) for (const s of segs){ const m = /inner(\d+)/.exec(s.side); if (m) usedInner.add(+m[1]); }
+  const deepestUsed = usedInner.size ? Math.max(...usedInner) : 0;
+  State.layerCount = Math.max(2, deepestUsed + 2, gencadLayerCount(sec.HEADER));
+  const emptyInner = (State.layerCount - 2) - usedInner.size;
 
   // components (footprint pins resolved through shape → padstack → pad)
   const compByRef = new Map();
@@ -333,5 +336,5 @@ function importGencadCAD(text){
   pruneNets();
 
   return { components: State.components.length, nets: State.nets.length, traces: traceCount, vias: vlist.length,
-           layers: State.layerCount, physicalLayers };
+           layers: State.layerCount, emptyInner };
 }
