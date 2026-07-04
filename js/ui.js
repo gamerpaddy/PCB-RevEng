@@ -44,7 +44,9 @@ UI.setStatusPos = (w) => {
   $("#status-pos").textContent = `x ${w.x.toFixed(0)}  y ${w.y.toFixed(0)} px   (${u(w.x)}, ${u(w.y)} ${UI.unit()})`;
   $("#status-zoom").textContent = "zoom " + (View.zoom*100).toFixed(0) + "%" + (View.flip ? "  ·  BACK VIEW" : "");
 };
-UI.setHint = (t) => { $("#status-hint").textContent = t; };
+UI.setHint = (t) => { const el = $("#status-hint"); if (el) el.textContent = t; };  // hint element removed; no-op
+/* hovered-pad readout (ref.pin · net) — cleared with "" */
+UI.setStatusPad = (t) => { $("#status-pad").textContent = t || ""; };
 
 UI.toast = (msg) => {
   let el = $("#toast");
@@ -661,8 +663,20 @@ UI.inspectComponent = (c, selPin) => {
   pinSec.className = "insp-section";
   const isFree = c.fpId === "free";
   const plist = isFree ? (c.fpParams.pinList || []) : null;
+  // Big footprints (BGAs with thousands of pads) would render thousands of native
+  // <select>/<input> controls — the browser's layout/paint of those can hang for many
+  // seconds. Only render a window of rows (centred on the selected pad); edit the rest
+  // by clicking a pad on the board, which selects it and re-centres this window.
+  const PIN_CAP = 300;
+  const total = c.pins.length;
+  const truncated = total > PIN_CAP;
+  let lo = 0, hi = total;
+  if (truncated){
+    lo = selPin >= 0 ? Math.max(0, Math.min(selPin - (PIN_CAP >> 1), total - PIN_CAP)) : 0;
+    hi = Math.min(lo + PIN_CAP, total);
+  }
   let rows = "";
-  for (let i=0;i<c.pins.length;i++){
+  for (let i=lo;i<hi;i++){
     const p = c.pins[i];
     const netName = p.nc ? "" : (p.netId ? (getNet(p.netId)?.name || "") : "");
     const pl = plist && plist[i];
@@ -679,8 +693,11 @@ UI.inspectComponent = (c, selPin) => {
       <td style="width:24px;text-align:center" title="No-connect (excluded from checker)"><input type="checkbox" class="pnc" data-i="${i}" ${p.nc?"checked":""}></td>
       ${padCells}</tr>`;
   }
+  const truncNote = truncated
+    ? `<div style="color:#c8922e;font-weight:400;font-size:10px;padding:2px 0">Showing pads ${lo+1}–${hi} of ${total}. Click a pad on the board to jump to &amp; edit it (large footprints aren’t fully listed, for performance).</div>`
+    : "";
   pinSec.innerHTML = `<div class="insp-title" style="font-size:12px">Pins (${c.pins.length})
-    <span style="color:#8b96a5;font-weight:400;font-size:10px">— net · NC = no-connect${isFree?" · pad type/size":""}</span></div>
+    <span style="color:#8b96a5;font-weight:400;font-size:10px">— net · NC = no-connect${isFree?" · pad type/size":""}</span></div>${truncNote}
     <table class="pin-table"><tr><th>#</th><th>Name</th><th>Net</th><th>NC</th>${isFree?"<th>Pad</th><th>mm</th><th></th>":""}</tr>${rows}</table>`;
   box.appendChild(pinSec);
 

@@ -82,7 +82,9 @@ function wireToolbar(){
   $("#btn-xray").addEventListener("click", toggleXray);
   $("#btn-split").addEventListener("click", toggleSplit);
   $("#btn-ratsnest").addEventListener("click", toggleRatsnest);
-  $("#btn-hidetraces").addEventListener("click", toggleHideTraces);
+  $("#chk-hidetraces").addEventListener("change", toggleHideTraces);
+  $("#chk-hidevias").addEventListener("change", toggleHideVias);
+  $("#chk-hidelabels").addEventListener("change", toggleHideLabels);
   $("#btn-stack3d").addEventListener("click", ()=> Stack3D.open());
   $("#btn-measure").addEventListener("click", ()=> setTool("measure"));
   $("#btn-calibrate").addEventListener("click", ()=> setTool("calibrate"));
@@ -125,10 +127,26 @@ function toggleMask(){
   requestRender();
 }
 
+/* the three "Hide" status-bar checkboxes flip a View flag, keep the box in sync (so a
+   hotkey and a click stay consistent), toast, and redraw */
 function toggleHideTraces(){
   View.hideTraces = !View.hideTraces;
-  $("#btn-hidetraces").classList.toggle("active", View.hideTraces);
+  $("#chk-hidetraces").checked = View.hideTraces;
   UI.toast(View.hideTraces ? "Traces hidden — pads, vias & photo only (traces are non-selectable while hidden)" : "Traces shown");
+  requestRender();
+}
+
+function toggleHideVias(){
+  View.hideVias = !View.hideVias;
+  $("#chk-hidevias").checked = View.hideVias;
+  UI.toast(View.hideVias ? "Vias hidden (non-selectable while hidden)" : "Vias shown");
+  requestRender();
+}
+
+function toggleHideLabels(){
+  View.hideLabels = !View.hideLabels;
+  $("#chk-hidelabels").checked = View.hideLabels;
+  UI.toast(View.hideLabels ? "Component labels hidden (designators & values)" : "Component labels shown");
   requestRender();
 }
 

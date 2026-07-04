@@ -60,6 +60,7 @@ function setTool(name){
   Tools.deskewLayer = null;
   Tools.addPinFor = null;
   if (name !== "component"){ Tools.ghostFp = null; Tools.pending = null; }
+  if (name !== "select"){ View.hoverPin = null; UI.setStatusPad(""); Tools._readout = ""; }   // pad/comp readout is select-mode only
   Tools.name = name;
   document.querySelectorAll("#toolbar .tool").forEach(b =>
     b.classList.toggle("active", b.dataset.tool === name));
@@ -106,6 +107,24 @@ function onPointerDown(e){
   }
 }
 
+/* status-bar text for whatever is under the cursor: a pad shows "ref.pin [name] · net",
+   a component body shows "ref"; both append the part's [value · part] when set */
+function hoverReadout(h){
+  if (!h) return "";
+  let c, head;
+  if (h.type === "pin"){
+    c = h.comp;
+    const p = c.pins[h.pinIdx];
+    const nm = (p.name && p.name !== p.num) ? " " + p.name : "";
+    const net = p.nc ? "no-connect" : (p.netId ? (getNet(p.netId)?.name || "?") : "(no net)");
+    head = c.ref + "." + p.num + nm + "  ·  " + net;
+  } else if (h.type === "comp"){
+    c = h.comp; head = c.ref;
+  } else return "";
+  const vp = [...new Set([c.value, c.part].filter(Boolean))].join(" · ");   // dedupe when value==part
+  return head + (vp ? "   [" + vp + "]" : "");
+}
+
 function onPointerMove(e){
   const pt = canvasPoint(e);
   updatePane(pt);
@@ -147,6 +166,9 @@ function onPointerMove(e){
     // the single-object / single-pad hover cue changes even when the net doesn't (moving
     // between two traces of the same net), so redraw on any hovered-object change too
     if (objChanged || pinChanged) requestRender();
+    // bottom-bar readout: hovered pad (ref.pin · net) or component (ref), plus value/part
+    const readout = hoverReadout(h);
+    if (readout !== Tools._readout){ Tools._readout = readout; UI.setStatusPad(readout); }
     View.canvas.style.cursor = h ? "pointer" : "default";
   }
 

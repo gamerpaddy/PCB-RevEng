@@ -163,12 +163,21 @@ select:focus,input:focus,textarea:focus{outline:1px solid var(--accent);}
 #canvas-wrap{flex:1 1 auto; position:relative; min-width:0; background:#0d0f12;}
 #canvas{position:absolute; inset:0; width:100%; height:100%; display:block; touch-action:none;}
 #status-bar{
-  position:absolute; left:0; right:0; bottom:0; display:flex; gap:18px;
+  position:absolute; left:0; right:0; bottom:0; display:flex; gap:18px; align-items:center;
   background:rgba(20,23,28,.92); border-top:1px solid var(--line);
-  padding:3px 12px; font-size:12px; color:var(--fg-dim); pointer-events:none;
+  padding:3px 12px; font-size:12px; color:var(--fg-dim); pointer-events:none; overflow:hidden;
 }
+#status-bar > span{ min-width:0; }   /* let the middle items shrink so the Hide group stays visible */
+#status-pad{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 #status-tool{color:var(--accent); font-weight:600;}
-#status-hint{margin-left:auto; color:var(--accent2);}
+#status-pad{color:#ffd24d; font-weight:600;}
+/* compact "hide X" checkboxes on the far right of the status bar (status bar itself is
+   pointer-events:none, so re-enable them here) */
+#status-hide{margin-left:auto; flex-shrink:0; display:flex; align-items:center; gap:10px; pointer-events:auto;}
+#status-hide .sh-label{color:var(--fg-dim);}
+#status-hide label{display:inline-flex; align-items:center; gap:3px; cursor:pointer; color:#aeb7c2; user-select:none;}
+#status-hide label:hover{color:#e6ecf3;}
+#status-hide input{margin:0; cursor:pointer; width:12px; height:12px;}
 #drop-hint{
   position:absolute; inset:0; display:flex; flex-direction:column; gap:6px;
   align-items:center; justify-content:center; color:var(--fg-dim);

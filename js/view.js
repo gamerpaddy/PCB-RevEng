@@ -16,6 +16,8 @@ const View = {
   ratsnest: false,        // draw straight "airwire" connections between same-net pads/vias
   ratsnestMode: "mst",    // "mst" = minimum-spanning tree over the whole net · "star" = spokes from the selected pad to every same-net pad/via
   hideTraces: false,      // hide all drawn traces (also makes them non-interactive) to read the bare photo/pads
+  hideLabels: false,      // hide component reference-designator + value text (declutter dense boards)
+  hideVias: false,        // hide all vias (also makes them non-interactive)
   xrayAuto: false,        // true when X-ray was auto-enabled by viewing the X-ray layer (so leaving it turns X-ray back off)
   split: false,           // synced split view — left & right panes share one camera
   paneLayer: { left:null, right:null }, // image-layer id shown in each split pane
@@ -497,6 +499,7 @@ function traceVisible(t){
    sides it actually reaches — same idea as compBodyVisible, so it disappears on
    layers it isn't on (X-ray shows all) */
 function viaVisible(v){
+  if (View.hideVias) return false;   // hard hide → also non-interactive (hitTest keys off this)
   return effXray() || viaOnSide(v, effDrawSide());
 }
 
@@ -664,7 +667,9 @@ function drawWorld(ctx){
   for (const c of State.components) drawComponent(ctx, c, selNet, !compBodyVisible(c));
 
   // --- vias (drawn AFTER components so a via inside a pad stays visible) ---
-  for (const v of State.vias){
+  // "hide vias" is a hard override — like "hide traces" it also suppresses the focused-net
+  // "show across all layers" exception below, so every via really disappears
+  if (!View.hideVias) for (const v of State.vias){
     // a focused net keeps its vias visible across every layer (matches traces above);
     // otherwise a blind/buried via is hidden on layers it doesn't reach
     const focused = selNet && selNet !== -1 && v.netId === selNet;
@@ -1030,7 +1035,7 @@ function drawComponent(ctx, c, selNet, padsOnly){
   ctx.restore();
 
   // reference text (always upright, readable, never mirrored) — hugs the body's top edge
-  if (!padsOnly && View.zoom * s > 1.0){
+  if (!padsOnly && !View.hideLabels && View.zoom * s > 1.0){
     const sc = worldToScreen(c.x, c.y);
     const ar = c.rot * Math.PI/180;
     const vert = (Math.abs(Math.sin(ar))*fp.body.w + Math.abs(Math.cos(ar))*fp.body.h)/2 * s;
@@ -1175,17 +1180,21 @@ function mstEdges(pts){
    pad. Vias never anchor a star, and traces have no single point — only pads qualify.
    Returns its world point + net, or null when nothing usable is under the cursor/selected. */
 function ratsnestHubNode(){
-  const asHub = (comp, pinIdx) => {
+  const asHub = (comp, pinIdx, hover) => {
     const fp = compFootprint(comp);
     const fpin = fp.pins[pinIdx]; if (!fpin) return null;
-    return { p: pinWorldPos(comp, fpin), netId: comp.pins[pinIdx].netId };
+    return { p: pinWorldPos(comp, fpin), netId: comp.pins[pinIdx].netId, hover };
   };
   const hv = View.hoverPin;
-  if (hv && hv.comp) return asHub(hv.comp, hv.pinIdx);
+  if (hv && hv.comp) return asHub(hv.comp, hv.pinIdx, true);
   const sel = UI.sel;
-  if (sel && sel.type === "pin") return asHub(sel.comp, sel.pinIdx);
+  if (sel && sel.type === "pin") return asHub(sel.comp, sel.pinIdx, false);
   return null;
 }
+
+/* above this many same-net pads, a hovered star is just a hairball — don't draw it on a
+   passing hover (an explicit pad SELECTION still shows the full star) */
+const RATSNEST_HOVER_MAX = 50;
 
 /* "star" ratsnest: spokes from the hovered/selected pad to every other PAD on its net —
    answers "what does THIS pad connect to". Vias are excluded; nothing is drawn until a
@@ -1195,6 +1204,8 @@ function renderRatsnestStar(ctx){
   if (!hub || !hub.netId) return;
   const pts = netNodes(hub.netId, false);   // pads only — no vias in star mode
   if (pts.length < 2) return;
+  // on a passing hover, don't draw a hairball for a big net (spokes = pads − the hub)
+  if (hub.hover && pts.length - 1 > RATSNEST_HOVER_MAX) return;
   const col = netColor(hub.netId);
   ctx.save();
   ctx.lineCap = "round";
