@@ -158,6 +158,8 @@ select:focus,input:focus,textarea:focus{outline:1px solid var(--accent);}
 .set-row label span{color:var(--fg);}
 .set-row select{font-size:12px;}
 .set-row input[type=range]{width:100%;}
+.opt-io-btns{display:flex; gap:6px;}
+.opt-io-btns button{flex:1; font-size:12px;}
 
 /* ---------- canvas ---------- */
 #canvas-wrap{flex:1 1 auto; position:relative; min-width:0; background:#0d0f12;}

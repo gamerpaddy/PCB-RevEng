@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PCB RevEng - Reverse Engineering Workbench</title>
 
-<link rel="stylesheet" href="css/style.css?v=69">
+<link rel="stylesheet" href="css/style.css?v=70">
 
 </head>
 <body>
@@ -294,6 +294,13 @@
           <option value="toggle">Toggle layer visibility</option>
         </select>
       </div>
+      <div class="set-row" title="Options (hotkeys, units, view toggles, panel sizes…) are stored per-browser, not in the project file. Export them to move your setup to another browser or machine.">
+        <label>Options file</label>
+        <span class="opt-io-btns">
+          <button id="opt-export" type="button">Export…</button>
+          <button id="opt-import" type="button">Import…</button>
+        </span>
+      </div>
     </div>
     <div class="dlg-buttons"><button id="options-close" class="primary">Close</button></div>
   </dialog>
@@ -486,6 +493,7 @@
 
   <input type="file" id="file-images" accept="image/*" multiple hidden>
   <input type="file" id="file-project" accept=".json,.pcbrev,.brd,.cad" hidden>
+  <input type="file" id="file-options" accept=".json" hidden>
 </div>
 
 
@@ -510,7 +518,7 @@
 <script src="js/kicadsearch.js?v=51"></script>
 <script src="js/fpdialog.js?v=51"></script>
 <script src="js/autosave.js?v=51"></script>
-<script src="js/main.js?v=80"></script>
+<script src="js/main.js?v=81"></script>
 
 </body>
 </html>

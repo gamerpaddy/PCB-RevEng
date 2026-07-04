@@ -26,6 +26,7 @@ window.addEventListener("DOMContentLoaded", () => {
   wireKeyboard();
   wireFiles();
   wireSettings();
+  restoreHideFlags();                   // re-apply persisted Hide toggles (View flag + checkbox)
   wirePanelResizer("#right-resizer", "#right-panel", "pcbreveng.inspW", "right");
   wirePanelResizer("#left-resizer",  "#left-panel",  "pcbreveng.leftW",  "left");
   Resolver.wire();
@@ -128,10 +129,30 @@ function toggleMask(){
 }
 
 /* the three "Hide" status-bar checkboxes flip a View flag, keep the box in sync (so a
-   hotkey and a click stay consistent), toast, and redraw */
+   hotkey and a click stay consistent), toast, and redraw. The flags are view preferences
+   (not project data) so they live in localStorage and are restored on load — see
+   restoreHideFlags(): otherwise the browser restores the *checkbox* state on reload but the
+   View flag stays false, so the box looks ticked yet nothing is hidden. */
+const HIDE_KEY = "pcbreveng.hide";
+function saveHideFlags(){
+  try { localStorage.setItem(HIDE_KEY, JSON.stringify({
+    traces: View.hideTraces, vias: View.hideVias, labels: View.hideLabels })); } catch(e){}
+}
+function restoreHideFlags(){
+  let s = {};
+  try { s = JSON.parse(localStorage.getItem(HIDE_KEY) || "{}") || {}; } catch(e){}
+  View.hideTraces = !!s.traces;
+  View.hideVias   = !!s.vias;
+  View.hideLabels = !!s.labels;
+  $("#chk-hidetraces").checked = View.hideTraces;
+  $("#chk-hidevias").checked   = View.hideVias;
+  $("#chk-hidelabels").checked = View.hideLabels;
+}
+
 function toggleHideTraces(){
   View.hideTraces = !View.hideTraces;
   $("#chk-hidetraces").checked = View.hideTraces;
+  saveHideFlags();
   UI.toast(View.hideTraces ? "Traces hidden — pads, vias & photo only (traces are non-selectable while hidden)" : "Traces shown");
   requestRender();
 }
@@ -139,6 +160,7 @@ function toggleHideTraces(){
 function toggleHideVias(){
   View.hideVias = !View.hideVias;
   $("#chk-hidevias").checked = View.hideVias;
+  saveHideFlags();
   UI.toast(View.hideVias ? "Vias hidden (non-selectable while hidden)" : "Vias shown");
   requestRender();
 }
@@ -146,6 +168,7 @@ function toggleHideVias(){
 function toggleHideLabels(){
   View.hideLabels = !View.hideLabels;
   $("#chk-hidelabels").checked = View.hideLabels;
+  saveHideFlags();
   UI.toast(View.hideLabels ? "Component labels hidden (designators & values)" : "Component labels shown");
   requestRender();
 }
@@ -741,6 +764,13 @@ function wireFiles(){
     if (f) openProjectFile(f);
     e.target.value = "";
   });
+  $("#opt-export").addEventListener("click", exportOptions);
+  $("#opt-import").addEventListener("click", ()=> $("#file-options").click());
+  $("#file-options").addEventListener("change", e => {
+    const f = e.target.files[0];
+    if (f) importOptions(f);
+    e.target.value = "";
+  });
   // add-image-from-URL dialog
   const urlDlg = $("#url-dialog"), urlInput = $("#url-input");
   const loadUrl = () => { const u = urlInput.value; urlDlg.close(); addImageLayerFromURL(u); };
@@ -837,6 +867,50 @@ function addImageLayerFromURL(url){
 function saveProject(){
   downloadFile("project.pcbrev.json", serializeProject(), "application/json");
   UI.toast("Project downloaded");
+}
+
+/* Options / preferences are stored per-browser in localStorage under the "pcbreveng."
+   prefix (hotkeys, units, key mode, history length, autosave interval, panel widths, the
+   Hide toggles, …) — deliberately NOT in the project file, so a board you share doesn't
+   carry your personal hotkeys. These two helpers let you move that whole set between
+   browsers/machines as a small JSON file. */
+const OPTIONS_PREFIX = "pcbreveng.";
+function exportOptions(){
+  const opts = {};
+  try {
+    for (let i = 0; i < localStorage.length; i++){
+      const k = localStorage.key(i);
+      if (k && k.startsWith(OPTIONS_PREFIX)) opts[k] = localStorage.getItem(k);
+    }
+  } catch(e){}
+  downloadFile("pcb-reveng-options.json", JSON.stringify(
+    { app:"pcb-reveng-options", version:1, options:opts }, null, 2), "application/json");
+  UI.toast("Options exported (hotkeys, units, view toggles… — not project data)");
+}
+
+function importOptions(file){
+  const reader = new FileReader();
+  reader.onload = () => {
+    let data;
+    try { data = JSON.parse(reader.result); }
+    catch(err){ alert("Could not read options file: " + err.message); return; }
+    const opts = data && data.options;
+    if (!opts || typeof opts !== "object"){ alert("That file is not a PCB RevEng options export."); return; }
+    if (!confirm("Import these options? Your current hotkeys, units and view preferences in this browser will be replaced.")) return;
+    try {
+      // drop the browser's existing preference keys, then write the imported ones
+      const drop = [];
+      for (let i = 0; i < localStorage.length; i++){
+        const k = localStorage.key(i);
+        if (k && k.startsWith(OPTIONS_PREFIX)) drop.push(k);
+      }
+      for (const k of drop) localStorage.removeItem(k);
+      for (const k in opts) if (k.startsWith(OPTIONS_PREFIX)) localStorage.setItem(k, opts[k]);
+    } catch(e){ alert("Could not write options to this browser: " + e.message); return; }
+    // reload so every subsystem (keymap, panel widths, units…) re-reads the new prefs cleanly
+    location.reload();
+  };
+  reader.readAsText(file);
 }
 
 function openProjectFile(file){
