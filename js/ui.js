@@ -86,6 +86,12 @@ UI.copperSide = () => (typeof effDrawSide === "function" ? effDrawSide() : UI.dr
 UI.activeLayer = () => getLayer(UI.activeLayerId);
 UI.layerKeyMode = () => localStorage.getItem("pcbreveng.layerKeyMode") || "switch";
 
+/* mouse-wheel zoom sensitivity as a percent of the original speed (5–200).
+   100 == the old hard-coded 1.15 factor (default); lower = finer/slower zoom,
+   200 = double. Used by the canvas wheel handler. */
+UI.zoomSens = () => { const v = parseInt(localStorage.getItem("pcbreveng.zoomSens"), 10);
+  return (v >= 5 && v <= 200) ? v : 100; };
+
 /* measurement units (user preference, persisted) */
 UI.unit = () => localStorage.getItem("pcbreveng.unit") || "mm";
 const MM_PER_MIL = 0.0254;

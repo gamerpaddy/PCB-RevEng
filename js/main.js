@@ -312,6 +312,12 @@ function wireSettings(){
     UI.toast("Units: " + (units.value === "mil" ? "mils (thou)" : "millimetres"));
     requestRender();
   });
+  const zsens = $("#set-zoomsens");
+  zsens.addEventListener("input", e => {
+    const v = Math.max(5, Math.min(200, parseInt(e.target.value, 10) || 100));
+    try { localStorage.setItem("pcbreveng.zoomSens", String(v)); } catch(ex){}
+    $("#set-zoomsens-val").textContent = v + "%";
+  });
   const kmode = $("#set-keymode");
   kmode.value = UI.layerKeyMode();
   kmode.addEventListener("change", ()=>{
@@ -342,6 +348,7 @@ function syncSettings(){
   $("#set-bigmerge").value = State.bigMergeWarn ? "on" : "off";
   $("#set-histlen").value = Undo.max;
   $("#set-histlen-val").textContent = Undo.max;
+  { const zs = UI.zoomSens(); $("#set-zoomsens").value = zs; $("#set-zoomsens-val").textContent = zs + "%"; }
 }
 
 function setLayerCount(n){
@@ -470,7 +477,8 @@ function wireCanvas(){
       }
       return;
     }
-    zoomAt(pt.x, pt.y, e.deltaY < 0 ? 1.15 : 1/1.15);
+    const zf = 1 + 0.15 * (UI.zoomSens()/100);   // 100% == original 1.15 factor (Options)
+    zoomAt(pt.x, pt.y, e.deltaY < 0 ? zf : 1/zf);
     UI.setStatusPos(screenToWorld(pt.x, pt.y));
   }, { passive:false });
 
