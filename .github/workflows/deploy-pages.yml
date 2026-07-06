@@ -24,11 +24,13 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  deploy:
+  # Build and deploy are split into separate jobs so that recovering from a
+  # failed deploy means re-running ONLY the deploy job. Re-running the whole
+  # workflow ("Re-run all jobs") would re-execute upload-pages-artifact and
+  # leave two "github-pages" artifacts in the run, which makes deploy-pages
+  # abort with "Multiple artifacts named github-pages were unexpectedly found".
+  build:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -38,6 +40,14 @@ jobs:
         uses: actions/upload-pages-artifact@v3
         with:
           path: '.'
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
