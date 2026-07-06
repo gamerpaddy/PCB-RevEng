@@ -148,6 +148,30 @@ function compFootprint(comp){
   return comp._fp;
 }
 
+/* footprint-local mm ⇄ world px (same rotate/mirror convention as pinWorldPos) — used by
+   the visual pad editor to place handles and read the cursor back into pad coordinates */
+function compMmToWorld(comp, mx, my){
+  const s = State.pxPerMm * (comp.scale || 1);
+  let x = mx*s, y = my*s;
+  if (comp.side === "back") x = -x;
+  const a = comp.rot * Math.PI/180, ca = Math.cos(a), sa = Math.sin(a);
+  return { x: comp.x + x*ca - y*sa, y: comp.y + x*sa + y*ca };
+}
+function compWorldToMm(comp, wx, wy){
+  const s = State.pxPerMm * (comp.scale || 1);
+  let dx = wx - comp.x, dy = wy - comp.y;
+  const a = -comp.rot * Math.PI/180, ca = Math.cos(a), sa = Math.sin(a);
+  let lx = dx*ca - dy*sa, ly = dx*sa + dy*ca;
+  if (comp.side === "back") lx = -lx;
+  return { x: lx/s, y: ly/s };
+}
+/* the pad's 4 corners in world px (its oriented bounding box) */
+function padCornersWorld(comp, fpin){
+  const hw = fpin.w/2, hh = fpin.h/2, x = fpin.xmm, y = fpin.ymm;
+  return [ compMmToWorld(comp, x-hw, y-hh), compMmToWorld(comp, x+hw, y-hh),
+           compMmToWorld(comp, x+hw, y+hh), compMmToWorld(comp, x-hw, y+hh) ];
+}
+
 /* distance in world pixels from a world point to a pad's ACTUAL edge (0 when the
    point is inside the pad). Rectangular SMD pads use their real rectangle,
    respecting component rotation, scale and back-side mirror, instead of a round
@@ -366,6 +390,9 @@ function snapToConductor(wx, wy, traceSide, tightTrace, traceWidth, exclude){
     for (const t of State.traces){
       if (exclude && (exclude === t || (exclude.has && exclude.has(t)))) continue;
       if (traceSide !== "any" && t.side !== traceSide) continue;
+      // never snap onto a trace that isn't currently drawn (hidden, or on a copper side
+      // that's filtered out by the trace-view setting) — X-ray shows all, so it snaps there
+      if (!traceVisible(t)) continue;
       const ttol = tightTrace ? ((t.width||3)/2 + 2/View.zoom) : traceTol;
       for (let k=0; k<t.points.length-1; k++){
         const pr = projectOnSeg(wx, wy, t.points[k], t.points[k+1]);
@@ -798,6 +825,39 @@ function drawWorld(ctx){
   // sticky-note markers (screen space, constant size, drawn after the world transform)
   drawNotes(ctx);
   drawMeasureLabel(ctx);
+  drawPadEditOverlay(ctx);
+}
+
+/* visual pad editor: draw the selected pad's oriented box with square corner handles
+   (drag to resize) and a round centre handle (drag to move). Screen space so the handles
+   stay a constant grabbable size at any zoom. */
+function drawPadEditOverlay(ctx){
+  const pe = Tools.padEdit;
+  if (!pe || !pe.comp) return;
+  if (!State.components.includes(pe.comp)){ Tools.padEdit = null; return; }
+  const fp = compFootprint(pe.comp), fpin = fp && fp.pins[pe.idx];
+  if (!fpin) return;
+  const corners = padCornersWorld(pe.comp, fpin).map(c => worldToScreen(c.x, c.y));
+  const cw = pinWorldPos(pe.comp, fpin);
+  const ctr = worldToScreen(cw.x, cw.y);
+  ctx.save();
+  ctx.setTransform((View.dpr||1),0,0,(View.dpr||1),0,0);
+  // box outline
+  ctx.strokeStyle = "#4fd0ff"; ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  corners.forEach((s,i)=> i ? ctx.lineTo(s.x,s.y) : ctx.moveTo(s.x,s.y));
+  ctx.closePath(); ctx.stroke();
+  // corner resize handles
+  for (const s of corners){
+    ctx.beginPath(); ctx.rect(s.x-4, s.y-4, 8, 8);
+    ctx.fillStyle = "#0d1117"; ctx.fill();
+    ctx.strokeStyle = "#4fd0ff"; ctx.lineWidth = 1.5; ctx.stroke();
+  }
+  // centre move handle
+  ctx.beginPath(); ctx.arc(ctr.x, ctr.y, 5, 0, Math.PI*2);
+  ctx.fillStyle = "#ffb648"; ctx.fill();
+  ctx.strokeStyle = "#0d1117"; ctx.lineWidth = 1.2; ctx.stroke();
+  ctx.restore();
 }
 
 /* live readout for the Measure tool: distance plus, treating that distance as a trace

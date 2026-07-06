@@ -137,6 +137,31 @@ function buildFpParams(){
     box.appendChild(label);
     FPD.params[prm.key] = read(prm, inp);
   }
+  // universal SMD pad tuning — scale every pad, and stretch pads along their length
+  // (radially outward). Hidden for THT footprints, where it has no effect.
+  const probe = generateFootprint(FPD.catId, FPD.params);
+  if (isSmdFootprint(probe)){
+    const grp = document.createElement("div");
+    grp.className = "fp-pad-tune";
+    grp.innerHTML = `<div class="fp-pad-tune-h">SMD pad tuning</div>`;
+    const mk = (key, text, def) => {
+      const label = document.createElement("label");
+      label.textContent = text;
+      const inp = document.createElement("input");
+      inp.type = "number"; inp.min = "0.3"; inp.max = "4"; inp.step = "0.05";
+      inp.value = FPD.params[key] !== undefined ? FPD.params[key] : def;
+      inp.addEventListener("input", ()=>{
+        const v = parseFloat(inp.value); FPD.params[key] = (isFinite(v) && v > 0) ? v : def; drawFpPreview();
+      });
+      label.appendChild(inp);
+      grp.appendChild(label);
+      if (FPD.params[key] === undefined) FPD.params[key] = def;
+    };
+    mk("padScale", "Pad scale ×", 1);
+    mk("padLen",   "Pad length ×", 1);
+    box.appendChild(grp);
+  }
+
   // R/C/L chip: spell out the modifier-click → refdes mapping right in the dialog
   if (FPD.catId === "chip2"){
     const note = document.createElement("div");

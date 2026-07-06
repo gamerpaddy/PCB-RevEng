@@ -318,6 +318,21 @@ function wireSettings(){
     try { localStorage.setItem("pcbreveng.zoomSens", String(v)); } catch(ex){}
     $("#set-zoomsens-val").textContent = v + "%";
   });
+  $("#set-edgescroll").addEventListener("change", e => {
+    try { localStorage.setItem("pcbreveng.edgeScroll", e.target.value === "off" ? "off" : "on"); } catch(ex){}
+    syncEdgeScrollRows();
+    UI.toast(UI.edgeScrollOn() ? "Edge auto-scroll on" : "Edge auto-scroll off");
+  });
+  $("#set-edge-margin").addEventListener("input", e => {
+    const v = Math.max(20, Math.min(400, parseInt(e.target.value, 10) || 120));
+    try { localStorage.setItem("pcbreveng.edgeMargin", String(v)); } catch(ex){}
+    $("#set-edge-margin-val").textContent = v + " px";
+  });
+  $("#set-edge-speed").addEventListener("input", e => {
+    const v = Math.max(2, Math.min(40, parseInt(e.target.value, 10) || 12));
+    try { localStorage.setItem("pcbreveng.edgeSpeed", String(v)); } catch(ex){}
+    $("#set-edge-speed-val").textContent = v + " px";
+  });
   const kmode = $("#set-keymode");
   kmode.value = UI.layerKeyMode();
   kmode.addEventListener("change", ()=>{
@@ -349,6 +364,21 @@ function syncSettings(){
   $("#set-histlen").value = Undo.max;
   $("#set-histlen-val").textContent = Undo.max;
   { const zs = UI.zoomSens(); $("#set-zoomsens").value = zs; $("#set-zoomsens-val").textContent = zs + "%"; }
+  $("#set-edgescroll").value = UI.edgeScrollOn() ? "on" : "off";
+  { const em = UI.edgeMargin(); $("#set-edge-margin").value = em; $("#set-edge-margin-val").textContent = em + " px"; }
+  { const es = UI.edgeSpeed();  $("#set-edge-speed").value  = es; $("#set-edge-speed-val").textContent  = es + " px"; }
+  syncEdgeScrollRows();
+}
+
+/* grey out the margin/speed rows when edge auto-scroll is switched off */
+function syncEdgeScrollRows(){
+  const on = UI.edgeScrollOn();
+  for (const id of ["#set-edge-margin-row", "#set-edge-speed-row"]){
+    const el = $(id); if (el) el.style.opacity = on ? "" : "0.4";
+  }
+  const m = $("#set-edge-margin"), s = $("#set-edge-speed");
+  if (m) m.disabled = !on;
+  if (s) s.disabled = !on;
 }
 
 function setLayerCount(n){
@@ -510,9 +540,13 @@ function showCanvasContextMenu(cx, cy, w){
     items.push({ label:"Set net…", action:()=>promptNetName(h) });
     if (p.netId) items.push({ label:"Clear net", action:()=>{ pushUndo("clear pin net"); assignNetToObject(h,""); UI.refreshNets(); UI.refreshInspector(); requestRender(); } });
     items.push({ label: p.nc ? "Unset no-connect" : "Mark no-connect (NC)", action:()=>{ pushUndo("pin NC"); p.nc=!p.nc; if(p.nc)p.netId=null; pruneNets(); UI.refreshNets(); UI.refreshInspector(); requestRender(); } });
+    // visual pad editor — drag handles to resize / move this pad (free & generated alike)
+    items.push({ sep:true });
+    items.push({ label:"Edit pad size / position (drag)", action:()=>enterPadEdit(c, h.pinIdx) });
+    if (c.fpId !== "free" && c.fpParams && c.fpParams.padOv && c.fpParams.padOv[p.num])
+      items.push({ label:"Reset pad to default", action:()=>padResetOverride(c, h.pinIdx) });
     if (c.fpId === "free"){
       const pl = ensureFreePin(c, h.pinIdx);
-      items.push({ sep:true });
       items.push({ label: pl.shape==="rect" ? "Pad → THT (round)" : "Pad → SMD (rect)", action:()=>{ pushUndo("pad type"); pl.shape = pl.shape==="rect"?"circle":"rect"; pl.tht = pl.shape==="circle"; delete pl.w; delete pl.h; c._fp=null; UI.refreshInspector(); requestRender(); } });
       items.push({ label:"Remove this pad", danger:true, action:()=>{ pushUndo("remove pad"); removeFreePin(c, h.pinIdx); UI.select({type:"comp",comp:c}); UI.refreshInspector(); UI.refreshNets(); requestRender(); } });
     }
@@ -628,7 +662,8 @@ function wireKeyboard(){
       case "Backspace": deleteSelection(); break;
       case "Enter": if (Tools.name==="trace") finishTrace(); break;
       case "Escape":
-        if (Tools.addPinFor){ Tools.addPinFor=null; UI.setHint(TOOL_HINTS[Tools.name]||""); UI.refreshInspector(); }
+        if (Tools.padEdit){ Tools.padEdit=null; UI.toast("Pad editing finished"); requestRender(); }
+        else if (Tools.addPinFor){ Tools.addPinFor=null; UI.setHint(TOOL_HINTS[Tools.name]||""); UI.refreshInspector(); }
         else if (Tools.tracePts) cancelTrace();
         else if (Tools.deskewPts){ Tools.deskewPts=null; Tools.deskewLayer=null; UI.setHint(TOOL_HINTS.align); requestRender(); }
         else if (Tools.alignPts){ Tools.alignPts=null; Tools.alignLayer=null; Tools.alignReturnId=null; UI.setHint(TOOL_HINTS.align); requestRender(); }

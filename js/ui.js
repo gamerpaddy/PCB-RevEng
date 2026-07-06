@@ -92,6 +92,15 @@ UI.layerKeyMode = () => localStorage.getItem("pcbreveng.layerKeyMode") || "switc
 UI.zoomSens = () => { const v = parseInt(localStorage.getItem("pcbreveng.zoomSens"), 10);
   return (v >= 5 && v <= 200) ? v : 100; };
 
+/* edge auto-scroll while dragging/placing near the viewport border (see tools.js).
+   Preferences (per-browser, ride along with Options export/import):
+   · on/off (default OFF) · margin px where it starts · max speed px/frame at the edge */
+UI.edgeScrollOn = () => localStorage.getItem("pcbreveng.edgeScroll") === "on";
+UI.edgeMargin = () => { const v = parseInt(localStorage.getItem("pcbreveng.edgeMargin"), 10);
+  return (v >= 20 && v <= 400) ? v : 120; };
+UI.edgeSpeed = () => { const v = parseFloat(localStorage.getItem("pcbreveng.edgeSpeed"));
+  return (v >= 2 && v <= 40) ? v : 12; };
+
 /* measurement units (user preference, persisted) */
 UI.unit = () => localStorage.getItem("pcbreveng.unit") || "mm";
 const MM_PER_MIL = 0.0254;
@@ -1382,6 +1391,7 @@ UI.buildHelp = () => {
       [k("edit.rotate") + " / Shift+" + k("edit.rotate"),"Rotate 90° / 15° (selection or ghost)"],
       [k("edit.side"),"Flip component side front/back"],
       [k("edit.lock"),"Lock / unlock component (blocks move, edit, delete)"],
+      [k("edit.padsize"),"Edit selected pad — drag handles to resize / move it"],
       [k("edit.delete") + " / Backspace","Delete selection"],["Esc","Cancel current action / deselect"],
       ["Enter","Finish trace"],["Double-click pad/trace/via","Name its net"],["Shift+double-click via","Set layer span (blind / buried)"],
       ["Shift+drag trace anchor","Detach it (no snapping)"],

@@ -4,9 +4,30 @@
 Footprints.register({
   id:"chip2", name:"R / C / L chip (SMD)", prefix:"R",
   params:[{key:"size",label:"Size",type:"select",def:"0805",
-           options:["0201","0402","0603","0805","1206","1210","2010","2512"]},
+           options:["0201","0402","0603","0805","1206","1210","2010","2512",
+                    "Tant 2012-12","Tant 3216-18","Tant 3528-15","Tant 3528-21",
+                    "Tant 6032-28","Tant 7343-31","Tant 7343-43"]},
           {key:"polarized",label:"Polarized (tantalum)",type:"bool",def:false}],
   gen(p){
+    // Tantalum SMD cap (EIA metric case code, e.g. 3216-18 = 3.2×1.6mm, 1.8mm tall).
+    // Always polarized: pin 1 = + (anode), wide gull-wing terminations at each end.
+    if (p.size && p.size.startsWith("Tant ")){
+      const code = p.size.slice(5);
+      const tdims = { // [body length, body width] mm — the 4-digit part of the code
+        "2012-12":[2.0,1.25], "3216-18":[3.2,1.6], "3528-15":[3.5,2.8], "3528-21":[3.5,2.8],
+        "6032-28":[6.0,3.2],  "7343-31":[7.3,4.3], "7343-43":[7.3,4.3] };
+      const kem = { "3216-18":"_Kemet-A", "3528-21":"_Kemet-B", "6032-28":"_Kemet-C",
+                    "7343-31":"_Kemet-D", "7343-43":"_Kemet-X" };
+      const [L,W] = tdims[code] || [3.2,1.6];
+      const px = L*0.42, pw = L*0.375, ph = W*0.75;   // pad centre / radial length / tangential width
+      return {
+        label:"Tantalum "+code,
+        pins:[_pin(1,-px,0,{w:pw,h:ph,name:"+"}), _pin(2,px,0,{w:pw,h:ph,name:"-"})],
+        body:{w:L, h:W},
+        polar:true,
+        kicad:"Capacitor_Tantalum_SMD:CP_EIA-"+code+(kem[code]||"")
+      };
+    }
     const dims = {  // [length, width] mm
       "0201":[0.6,0.3],"0402":[1.0,0.5],"0603":[1.6,0.8],"0805":[2.0,1.25],
       "1206":[3.2,1.6],"1210":[3.2,2.5],"2010":[5.0,2.5],"2512":[6.3,3.2] };
@@ -78,11 +99,13 @@ Footprints.register({
           {key:"polarized",label:"Polarized",type:"bool",def:true}],
   gen(p){
     const d = parseFloat(p.dia);
-    const px = d/2 + 0.6;
+    // gull-wing pads reach OUTWARD (radially, along X): long axis = w, short axis = h
+    const padL = d*0.55, padW = 1.2;
+    const px = d/2 + padL/2;          // sit the pad just outside the can
     const pol = !!p.polarized;
     return {
       label:"E-cap D"+p.dia,
-      pins:[_pin(1,-px,0,{w:1.2,h:d*0.55,name:pol?"+":""}), _pin(2,px,0,{w:1.2,h:d*0.55,name:pol?"-":""})],
+      pins:[_pin(1,-px,0,{w:padL,h:padW,name:pol?"+":""}), _pin(2,px,0,{w:padL,h:padW,name:pol?"-":""})],
       body:{w:d, h:d, shape:"circle"},
       polar:pol,
       kicad:"Capacitor_SMD:CP_Elec_"+p.dia+"x"+(d*0.8).toFixed(1)

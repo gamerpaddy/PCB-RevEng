@@ -18,10 +18,56 @@ const Footprints = {
 
 function getFootprintDef(id){ return Footprints.catalog.find(f => f.id === id) || null; }
 
+/* an SMD footprint has no through-hole pads (a THT pad = a round pad that keeps its
+   drill, i.e. shape "circle" and tht !== false). BGA balls (round, tht:false) still
+   count as SMD. Used to gate the global pad-scale/length tuning. */
+function isSmdFootprint(fp){
+  return fp && fp.pins && fp.pins.length > 0 &&
+         fp.pins.every(pin => !(pin.shape === "circle" && pin.tht !== false));
+}
+
+function _padMul(v, def){
+  const n = parseFloat(v);
+  if (!isFinite(n) || n <= 0) return def;
+  return Math.max(0.1, Math.min(6, n));
+}
+
+/* resize/reposition pads after gen():
+   · padScale — scales every pad (SMD footprints only)
+   · padLen   — scales each pad along its LENGTH axis, i.e. radially outward from the
+                body centre (SMD only); round pads scale uniformly instead
+   · padOv    — per-pin ABSOLUTE overrides { [pinNum]:{w,h,x,y} } from the visual pad
+                editor (drag handles), for ANY generated footprint; whatever is set wins
+                over the scaled base. (Free footprints carry their per-pad geometry in
+                pinList instead, so they don't use padOv.) */
+function applyPadAdjust(fp, p){
+  const smd = isSmdFootprint(fp);
+  const gScale = smd ? _padMul(p.padScale, 1) : 1;
+  const gLen   = smd ? _padMul(p.padLen, 1) : 1;
+  const ov = (p.padOv && typeof p.padOv === "object") ? p.padOv : null;
+  if (gScale === 1 && gLen === 1 && !ov) return;
+  for (const pin of fp.pins){
+    let w = pin.w * gScale, h = pin.h * gScale;
+    if (gLen !== 1){
+      if (pin.shape === "circle"){ w *= gLen; h *= gLen; }            // round: no length axis
+      else if (Math.abs(pin.xmm) >= Math.abs(pin.ymm)) w *= gLen;      // pad points along X
+      else h *= gLen;                                                  // pad points along Y
+    }
+    const o = ov && ov[pin.num];
+    if (o){
+      if (o.w != null) w = o.w;
+      if (o.h != null) h = o.h;
+      if (o.x != null) pin.xmm = o.x;
+      if (o.y != null) pin.ymm = o.y;
+    }
+    pin.w = w; pin.h = h;
+  }
+}
+
 function generateFootprint(fpId, params){
   const def = getFootprintDef(fpId);
   if (!def) return null;
-  const p = Object.assign({}, params); // keep undeclared extras (e.g. freestyle pinList)
+  const p = Object.assign({}, params); // keep undeclared extras (e.g. freestyle pinList, pad tuning)
   for (const prm of def.params) p[prm.key] = params && params[prm.key] !== undefined ? params[prm.key] : prm.def;
   // sanitize ints
   for (const prm of def.params) if (prm.type === "int"){
@@ -31,6 +77,7 @@ function generateFootprint(fpId, params){
     p[prm.key] = v;
   }
   const fp = def.gen(p);
+  applyPadAdjust(fp, p);   // global pad scale/length + per-pin overrides
   fp.fpId = fpId; fp.params = p;
   return fp;
 }

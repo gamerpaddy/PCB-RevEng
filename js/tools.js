@@ -29,6 +29,7 @@ const Tools = {
   // drag state
   drag: null,
   dragVert: null,      // {trace,i} currently-dragged trace vertex (for render)
+  padEdit: null,       // {comp,idx} pad being visually resized/moved (draws handles)
 };
 
 const TOOL_HINTS = {
@@ -59,6 +60,7 @@ function setTool(name){
   Tools.deskewPts = null;
   Tools.deskewLayer = null;
   Tools.addPinFor = null;
+  Tools.padEdit = null;   // leave the visual pad editor when switching tools
   if (name !== "component"){ Tools.ghostFp = null; Tools.pending = null; }
   if (name !== "select"){ View.hoverPin = null; UI.setStatusPad(""); Tools._readout = ""; }   // pad/comp readout is select-mode only
   Tools.name = name;
@@ -131,18 +133,24 @@ function onPointerMove(e){
   const w = screenToWorld(pt.x, pt.y);
   Tools.cursor = w;
   UI.setStatusPos(w);
+  Tools._lastPt = pt; Tools._lastEvt = e;
 
   if (Tools.drag){
     handleDrag(pt, w, e);
+    updateEdgeScroll(pt);   // auto-pan when a dragged object nears the viewport edge
     requestRender();
     return;
   }
+
+  // ghost placement (component tool) follows the cursor with no drag object, but should
+  // still auto-pan near the edges so you can drop a part off-screen
+  updateEdgeScroll(pt);
 
   // snap preview for relevant tools
   if (Tools.name === "trace"){
     Tools.snap = snapToConductor(w.x, w.y, Tools.tracePts ? Tools.traceSide : UI.copperSide(), true, State.traceW);
   } else if (Tools.name === "via"){
-    Tools.snap = snapToConductor(w.x, w.y, "any");
+    Tools.snap = e.shiftKey ? null : snapToConductor(w.x, w.y, "any");   // Shift = free placement, no snap
   } else Tools.snap = null;
 
   // hover net / note highlight in select mode
@@ -172,13 +180,14 @@ function onPointerMove(e){
     View.canvas.style.cursor = h ? "pointer" : "default";
   }
 
-  if (View.split || Tools.name==="trace" || Tools.name==="component" || Tools.name==="measure" || Tools.alignPts || Tools.deskewPts)
-    requestRender();   // split view redraws every move so the mirror cursor tracks
+  if (View.split || Tools.name==="trace" || Tools.name==="via" || Tools.name==="component" || Tools.name==="measure" || Tools.alignPts || Tools.deskewPts)
+    requestRender();   // redraw every move so the ghost / snap-ring / mirror cursor tracks the pointer
   else if (View.hoverNetId !== Tools._lastHover){ Tools._lastHover = View.hoverNetId; requestRender(); }
 }
 
 function onPointerUp(e){
   if (!Tools.drag) return;
+  stopEdgeScroll();
   const d = Tools.drag;
   Tools.drag = null;
   if (d.kind === "pan"){
@@ -207,6 +216,11 @@ function onPointerUp(e){
     Tools.snap = null;
     UI.refreshInspector();
     if (d.kind === "move-comp" && d.moved) checkMoveOverlaps(d.comp); // only after the move ends
+  }
+  if (d.kind === "pad-resize" || d.kind === "pad-move"){
+    if (!d.moved) Undo.stack.pop();               // a click that didn't drag: keep undo clean
+    else Tools._dragEndedAt = Date.now();          // don't let the drag double as a dblclick
+    UI.refreshInspector();
   }
   if (d.kind === "measure"){
     finishMeasure();
@@ -285,14 +299,105 @@ function handleDrag(pt, w, e){
       UI.refreshLayerList();
       break;
     }
+    case "pad-resize": {
+      d.moved = true;
+      const fp = compFootprint(d.comp), fpin = fp && fp.pins[d.idx];
+      if (!fpin) break;
+      const loc = compWorldToMm(d.comp, w.x, w.y);          // cursor in footprint mm
+      if (fpin.shape === "circle"){
+        const dia = Math.hypot(loc.x-fpin.xmm, loc.y-fpin.ymm) * 2;  // round pad stays square
+        padSetSize(d.comp, d.idx, dia, dia);
+      } else {
+        // resize symmetrically about the pad centre so the pin position (and its traces) hold
+        padSetSize(d.comp, d.idx, Math.abs(loc.x-fpin.xmm)*2, Math.abs(loc.y-fpin.ymm)*2);
+      }
+      break;
+    }
+    case "pad-move": {
+      d.moved = true;
+      const loc = compWorldToMm(d.comp, w.x, w.y);
+      padSetPos(d.comp, d.idx, loc.x, loc.y);
+      break;
+    }
     case "measure":
       Tools.measureB = w;
       break;
   }
 }
 
+/* ---------- edge auto-scroll (drag / place near the viewport border → pan) ------
+   Touchpad users can't easily pan mid-drag (no free hand for space+drag / middle
+   drag). When a dragged object — or a component ghost being placed — nears an edge
+   we pan the view toward it and keep it under the cursor, so you can move/drop it
+   clear across a board that's larger than the screen. Only translation drags and
+   component placement qualify (not view-pan / rotate / measure). */
+const EDGE_SCROLL_KINDS = { "move-comp":1, "move-via":1, "move-vert":1, "move-note":1, "move-layer":1 };
+
+/* true when the current interaction is one that should auto-pan near the edges:
+   a translation drag, or the component tool tracking a ghost about to be placed.
+   The whole feature can be switched off in Options (UI.edgeScrollOn). */
+function edgeScrollAllowed(){
+  if (!UI.edgeScrollOn()) return false;
+  if (Tools.drag) return !!EDGE_SCROLL_KINDS[Tools.drag.kind];
+  return Tools.name === "component" && !!Tools.pending;
+}
+
+function updateEdgeScroll(pt){
+  if (!edgeScrollAllowed()){ stopEdgeScroll(); return; }
+  const m = UI.edgeMargin(), speed = UI.edgeSpeed(), W = View.width, H = View.height;
+  const clamp = t => t < 0 ? 0 : t > 1 ? 1 : t;   // pointer capture can report pts past the edge
+  let vx = 0, vy = 0;
+  if (pt.x < m)          vx =  clamp((m - pt.x) / m);
+  else if (pt.x > W - m) vx = -clamp((pt.x - (W - m)) / m);
+  if (pt.y < m)          vy =  clamp((m - pt.y) / m);
+  else if (pt.y > H - m) vy = -clamp((pt.y - (H - m)) / m);
+  if (!vx && !vy){ stopEdgeScroll(); return; }
+  Tools._edgeVel = { x: vx * speed, y: vy * speed };
+  if (!Tools._edgeRAF) Tools._edgeRAF = requestAnimationFrame(edgeScrollTick);
+}
+
+function edgeScrollTick(){
+  Tools._edgeRAF = 0;
+  const v = Tools._edgeVel, pt = Tools._lastPt;
+  if (!edgeScrollAllowed() || !v || !pt) return;
+  View.panX += v.x; View.panY += v.y;
+  // re-drive from the last cursor screen point: as the board scrolls under a stationary
+  // finger, the object (or ghost) keeps tracking the pointer and moves along with it
+  const w = screenToWorld(pt.x, pt.y);
+  Tools.cursor = w;
+  if (Tools.drag) handleDrag(pt, w, Tools._lastEvt);   // ghost needs only the updated cursor
+  UI.setStatusPos(w);
+  requestRender();
+  Tools._edgeRAF = requestAnimationFrame(edgeScrollTick);
+}
+
+function stopEdgeScroll(){
+  if (Tools._edgeRAF){ cancelAnimationFrame(Tools._edgeRAF); Tools._edgeRAF = 0; }
+  Tools._edgeVel = null;
+}
+
 /* ---------------- select tool ---------------- */
 function selectDown(w, pt, e){
+  // visual pad editor active → grab a resize corner or the move centre first
+  if (Tools.padEdit && State.components.includes(Tools.padEdit.comp)){
+    const pe = Tools.padEdit, fp = compFootprint(pe.comp), fpin = fp && fp.pins[pe.idx];
+    if (fpin){
+      const hr = 9/View.zoom;
+      const ctr = pinWorldPos(pe.comp, fpin);
+      if (Math.hypot(w.x-ctr.x, w.y-ctr.y) <= hr){
+        pushUndo("move pad"); Tools.drag = { kind:"pad-move", comp:pe.comp, idx:pe.idx, moved:false };
+        requestRender(); return;
+      }
+      for (const cn of padCornersWorld(pe.comp, fpin)){
+        if (Math.hypot(w.x-cn.x, w.y-cn.y) <= hr){
+          pushUndo("resize pad"); Tools.drag = { kind:"pad-resize", comp:pe.comp, idx:pe.idx, moved:false };
+          requestRender(); return;
+        }
+      }
+    }
+    // clicked away from the handles → leave pad-edit mode, then fall through to a normal click
+    Tools.padEdit = null; requestRender();
+  }
   // dragging a vertex handle of the already-selected trace
   if (UI.sel && UI.sel.type === "trace" && traceVisible(UI.sel.trace)){
     const t = UI.sel.trace, hr = 7/View.zoom;
@@ -722,8 +827,10 @@ function componentDown(w, e){
     const m = /^([A-Za-z]+)/.exec(ref);
     if (m) p.refPrefix = m[1];
   } else if (p.fpId === "chip2"){
-    // R/C/L chip: click = R, Shift = C, Ctrl = L — modifier decides the refdes prefix
-    const prefix = e.ctrlKey ? "L" : e.shiftKey ? "C" : "R";
+    // tantalum size = always a capacitor (C); otherwise R/C/L chip where the click
+    // modifier decides the refdes prefix (click = R, Shift = C, Ctrl = L)
+    const tant = p.fpParams && (p.fpParams.size || "").startsWith("Tant ");
+    const prefix = tant ? "C" : (e.ctrlKey ? "L" : e.shiftKey ? "C" : "R");
     ref = nextRef(prefix);
   } else {
     ref = nextRef(p.refPrefix || refPrefixFor(p.fpId, p.value));
@@ -1009,9 +1116,10 @@ function viaDown(w, e){
     }
   }
   pushUndo(pth ? "place PTH" : "place via");
-  const snap = snapToConductor(w.x, w.y, "any");
+  // Shift = free placement: don't snap to a conductor and don't inherit its net
+  const snap = e.shiftKey ? null : snapToConductor(w.x, w.y, "any");
   let netId = snap ? snap.netId : null;
-  if (!netId){
+  if (!netId && !e.shiftKey){
     // near a trace?
     const h = hitTest(w.x, w.y);
     if (h && h.type === "trace") netId = h.trace.netId;
@@ -1276,6 +1384,58 @@ function removeFreePin(comp, idx){
   comp.pins.splice(idx, 1);
   comp._fp = null;
   pruneNets();
+}
+
+/* ---- visual pad editor: resize/move a single pad by dragging handles ----
+   Storage is per footprint type: free footprints keep per-pad geometry in pinList
+   (native), generated footprints get an absolute override in fpParams.padOv[num].
+   Either way the pin CENTRE for a resize stays put, so connected traces hold. */
+function padSetSize(comp, idx, w, h){
+  w = Math.max(0.2, w); h = Math.max(0.2, h);
+  if (comp.fpId === "free"){
+    const pl = ensureFreePin(comp, idx);
+    pl.w = +w.toFixed(3); pl.h = +h.toFixed(3); delete pl.size;   // explicit W/H overrides size
+  } else {
+    const num = comp.pins[idx].num;
+    const p = comp.fpParams || (comp.fpParams = {});
+    const e = (p.padOv || (p.padOv = {}));
+    const o = (e[num] || (e[num] = {}));
+    o.w = +w.toFixed(3); o.h = +h.toFixed(3);
+  }
+  comp._fp = null;
+}
+function padSetPos(comp, idx, x, y){
+  if (comp.fpId === "free"){
+    const pl = ensureFreePin(comp, idx);
+    pl.x = +x.toFixed(3); pl.y = +y.toFixed(3);
+  } else {
+    const num = comp.pins[idx].num;
+    const p = comp.fpParams || (comp.fpParams = {});
+    const e = (p.padOv || (p.padOv = {}));
+    const o = (e[num] || (e[num] = {}));
+    o.x = +x.toFixed(3); o.y = +y.toFixed(3);
+  }
+  comp._fp = null;
+}
+/* enter pad-edit mode on a component's pad — select the pad and show its drag handles */
+function enterPadEdit(comp, idx){
+  if (compEditLocked(comp)){ UI.toast(comp.ref + " is edit-locked"); return; }
+  Tools.padEdit = { comp, idx };
+  UI.select({ type:"pin", comp, pinIdx:idx });
+  setTool("select");
+  Tools.padEdit = { comp, idx };   // setTool cleared it — re-arm after the tool switch
+  UI.toast("Editing pad " + comp.ref + "." + comp.pins[idx].num + " — drag ▢ corners to resize, ● centre to move · Esc when done");
+  requestRender();
+}
+/* clear any per-pad override on a generated footprint (free pads have no override to clear) */
+function padResetOverride(comp, idx){
+  if (comp.fpId === "free") return;
+  const num = comp.pins[idx].num;
+  if (!(comp.fpParams && comp.fpParams.padOv && comp.fpParams.padOv[num])) return;
+  pushUndo("reset pad");
+  delete comp.fpParams.padOv[num];
+  if (!Object.keys(comp.fpParams.padOv).length) delete comp.fpParams.padOv;
+  comp._fp = null; UI.refreshInspector(); requestRender();
 }
 
 /* the pinList entry for pin index i, created if a legacy pin lacks one */
