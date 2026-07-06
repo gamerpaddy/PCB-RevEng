@@ -240,6 +240,7 @@ UI.refreshLayerList = () => {
           <input type="checkbox" class="mir" ${l.mirror?"checked":""}>⇋</label>
         <label title="Lock layer against accidental dragging"><input type="checkbox" class="lock" ${l.locked?"checked":""}>🔒</label>
         <button class="align2" title="4-point align: click 4 reference features, then the same 4 features on this layer (corrects offset, rotation, scale and skew)">Align</button>
+        <button class="crop2" title="Crop: drag a box around the part to keep — trims off the rest (do this after aligning)">Crop</button>
       </div>
       <input type="range" class="op" min="0" max="100" value="${Math.round(l.opacity*100)}" title="Opacity">`;
     card.querySelector(".side-sel").value = l.side;
@@ -282,6 +283,10 @@ UI.refreshLayerList = () => {
     card.querySelector(".align2").addEventListener("click", ()=>{
       UI.activeLayerId = l.id; UI.refreshLayerList();
       startPointAlign();
+    });
+    card.querySelector(".crop2").addEventListener("click", ()=>{
+      UI.activeLayerId = l.id; UI.setDrawSide(l.side); UI.refreshLayerList();
+      startCrop();
     });
     card.querySelector(".op").addEventListener("input", (e)=>{ l.opacity = e.target.value/100; requestRender(); });
     list.appendChild(card);

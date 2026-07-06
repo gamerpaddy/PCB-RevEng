@@ -100,8 +100,8 @@ Footprints.register({
   gen(p){
     const d = parseFloat(p.dia);
     // gull-wing pads reach OUTWARD (radially, along X): long axis = w, short axis = h
-    const padL = d*0.55, padW = 1.2;
-    const px = d/2 + padL/2;          // sit the pad just outside the can
+    const padL = d*0.495, padW = 1.2;   // pad length 10% shorter (was d*0.55)
+    const px = d/2 - padL*0.1;           // nudged another 10% of padL outward
     const pol = !!p.polarized;
     return {
       label:"E-cap D"+p.dia,

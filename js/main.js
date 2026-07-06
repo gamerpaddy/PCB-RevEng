@@ -663,6 +663,7 @@ function wireKeyboard(){
       case "Enter": if (Tools.name==="trace") finishTrace(); break;
       case "Escape":
         if (Tools.padEdit){ Tools.padEdit=null; UI.toast("Pad editing finished"); requestRender(); }
+        else if (Tools.name==="crop"){ Tools.cropLayer=null; Tools.cropA=Tools.cropB=null; setTool("select"); UI.toast("Crop cancelled"); requestRender(); }
         else if (Tools.addPinFor){ Tools.addPinFor=null; UI.setHint(TOOL_HINTS[Tools.name]||""); UI.refreshInspector(); }
         else if (Tools.tracePts) cancelTrace();
         else if (Tools.deskewPts){ Tools.deskewPts=null; Tools.deskewLayer=null; UI.setHint(TOOL_HINTS.align); requestRender(); }

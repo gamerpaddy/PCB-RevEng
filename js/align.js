@@ -139,6 +139,74 @@ function applyPointAlign(layer){
   requestRender();
 }
 
+/* ============ crop: trim an (already-aligned) image to a rectangle ============
+   Drag a rectangle in world space around the part to KEEP. The current on-screen
+   pixels of the layer — including any alignment warp/rotation/mirror — are baked into
+   a new axis-aligned bitmap positioned exactly where the rectangle was, so annotations
+   placed on that side stay lined up. Everything outside the rectangle is discarded. */
+function startCrop(){
+  const layer = UI.activeLayer();
+  if (!layer || !layer.img){ UI.toast("Select an image layer in the Layers panel first"); return; }
+  if (layer.locked){ UI.toast("Layer is locked"); return; }
+  setTool("crop");
+  Tools.cropLayer = layer;                 // capture now; setTool cleared it first
+  Tools.cropA = Tools.cropB = null;
+  UI.setHint("Crop “" + layer.name + "”: drag a box around the part to KEEP · Esc to cancel");
+}
+
+function cropDown(w, e){
+  if (!Tools.cropLayer){ setTool("select"); return; }
+  Tools.cropA = { x:w.x, y:w.y };
+  Tools.cropB = { x:w.x, y:w.y };
+  Tools.drag = { kind:"crop-rect", moved:false };
+}
+
+function applyCrop(){
+  const layer = Tools.cropLayer, A = Tools.cropA, B = Tools.cropB;
+  Tools.cropA = Tools.cropB = null;
+  if (!layer || !layer.img || !A || !B){ setTool("select"); Tools.cropLayer = null; return; }
+  const x0 = Math.min(A.x, B.x), y0 = Math.min(A.y, B.y);
+  const Wworld = Math.abs(B.x - A.x), Hworld = Math.abs(B.y - A.y);
+  if (Wworld < 4 || Hworld < 4){ UI.toast("Crop area too small — try again"); return; }
+  // output resolution: match the layer's current image detail (image px per world px),
+  // capped so a wildly-zoomed crop can't allocate a monster canvas
+  const eff = layerEffScale(layer) || 1;   // world px per source-image px
+  let k = 1 / eff;                          // source px per world px
+  let outW = Math.round(Wworld * k), outH = Math.round(Hworld * k);
+  const MAXDIM = 8192, big = Math.max(outW, outH);
+  if (big > MAXDIM){ const f = MAXDIM / big; outW = Math.round(outW*f); outH = Math.round(outH*f); k *= f; }
+  outW = Math.max(1, outW); outH = Math.max(1, outH);
+
+  const cnv = document.createElement("canvas");
+  cnv.width = outW; cnv.height = outH;
+  const cx = cnv.getContext("2d");
+  // world → output px, then the layer's own transform (same pipeline as drawWorld)
+  cx.setTransform(k, 0, 0, k, -x0*k, -y0*k);
+  cx.translate(layer.tx, layer.ty);
+  if (layer.warp){
+    cx.transform(layer.warp.a, layer.warp.b, layer.warp.c, layer.warp.d, 0, 0);
+  } else {
+    cx.rotate(layer.rot * Math.PI/180);
+    cx.scale(layer.scale * (layer.mirror ? -1 : 1), layer.scale);
+  }
+  cx.drawImage(layer.img, -layer.img.width/2, -layer.img.height/2);
+
+  pushUndo("crop " + layer.name);
+  layer.img = cnv;
+  layer.dataURL = cnv.toDataURL("image/jpeg", 0.92);
+  layer.url = null;                         // baked pixels are embedded now
+  layer.warp = null; layer.rot = 0; layer.mirror = false;   // plain axis-aligned bitmap
+  layer.tx = x0 + Wworld/2; layer.ty = y0 + Hworld/2;        // centred on the crop box
+  layer.scale = 1 / k;                      // world px per output px → sits exactly where the box was
+  layer.tiles = (typeof ImageTiles !== "undefined" && ImageTiles.shouldTile(cnv)) ? ImageTiles.build(cnv) : null;
+  if (typeof markImagesDirty === "function") markImagesDirty();
+  Tools.cropLayer = null;
+  setTool("select");
+  UI.refreshLayerList();
+  UI.toast("Cropped “" + layer.name + "” to " + outW + "×" + outH + " px");
+  requestRender();
+}
+
 /* ============ 2-line deskew / perspective straighten ============ */
 
 /* world point -> source-image pixel coords (0..w, 0..h), undoing the layer transform */

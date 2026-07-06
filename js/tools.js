@@ -30,6 +30,9 @@ const Tools = {
   drag: null,
   dragVert: null,      // {trace,i} currently-dragged trace vertex (for render)
   padEdit: null,       // {comp,idx} pad being visually resized/moved (draws handles)
+  // crop tool
+  cropLayer: null,     // image layer being cropped
+  cropA: null, cropB: null,   // world-space crop rectangle corners (during the drag)
 };
 
 const TOOL_HINTS = {
@@ -42,12 +45,13 @@ const TOOL_HINTS = {
   align:     "Drag active layer to move · Alt+wheel scale · Shift+drag rotate · “Align” button = 4-point skew-correcting fit",
   measure:   "Drag to measure a distance (px and mm)",
   calibrate: "Drag along a KNOWN distance, then enter its real length in mm",
+  crop:      "Drag a box around the part of the image to KEEP · Esc to cancel",
   pan:       "Drag to pan",
 };
 
 function toolCursor(name){
   return { select:"default", component:"crosshair", trace:"crosshair", via:"crosshair",
-           align:"move", measure:"crosshair", calibrate:"crosshair", cut:"crosshair", note:"crosshair", pan:"grab" }[name] || "default";
+           align:"move", measure:"crosshair", calibrate:"crosshair", cut:"crosshair", note:"crosshair", crop:"crosshair", pan:"grab" }[name] || "default";
 }
 
 function setTool(name){
@@ -61,6 +65,7 @@ function setTool(name){
   Tools.deskewLayer = null;
   Tools.addPinFor = null;
   Tools.padEdit = null;   // leave the visual pad editor when switching tools
+  Tools.cropLayer = null; Tools.cropA = Tools.cropB = null;   // leave the crop tool
   if (name !== "component"){ Tools.ghostFp = null; Tools.pending = null; }
   if (name !== "select"){ View.hoverPin = null; UI.setStatusPad(""); Tools._readout = ""; }   // pad/comp readout is select-mode only
   Tools.name = name;
@@ -106,6 +111,7 @@ function onPointerDown(e){
     case "calibrate": return measureDown(w, e);
     case "cut":       return cutDown(w, e);
     case "note":      return noteDown(w, e);
+    case "crop":      return cropDown(w, e);
   }
 }
 
@@ -225,6 +231,9 @@ function onPointerUp(e){
   if (d.kind === "measure"){
     finishMeasure();
   }
+  if (d.kind === "crop-rect"){
+    applyCrop();   // bakes the kept region; stays no-op & keeps undo clean if the box was tiny
+  }
   requestRender();
 }
 
@@ -321,6 +330,10 @@ function handleDrag(pt, w, e){
     }
     case "measure":
       Tools.measureB = w;
+      break;
+    case "crop-rect":
+      d.moved = true;
+      Tools.cropB = { x:w.x, y:w.y };
       break;
   }
 }

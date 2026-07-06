@@ -826,6 +826,27 @@ function drawWorld(ctx){
   drawNotes(ctx);
   drawMeasureLabel(ctx);
   drawPadEditOverlay(ctx);
+  drawCropOverlay(ctx);
+}
+
+/* crop tool: dim everything outside the drag rectangle and draw its dashed border, so
+   it's obvious what will be KEPT. Screen space, constant thickness. */
+function drawCropOverlay(ctx){
+  if (Tools.name !== "crop" || !Tools.cropA) return;
+  const b = Tools.cropB || Tools.cursor; if (!b) return;
+  const a = worldToScreen(Tools.cropA.x, Tools.cropA.y);
+  const c = worldToScreen(b.x, b.y);
+  const x = Math.min(a.x,c.x), y = Math.min(a.y,c.y), w = Math.abs(c.x-a.x), h = Math.abs(c.y-a.y);
+  ctx.save();
+  ctx.setTransform((View.dpr||1),0,0,(View.dpr||1),0,0);
+  ctx.fillStyle = "rgba(0,0,0,0.45)";                  // dim the discarded area
+  ctx.beginPath();
+  ctx.rect(0,0,View.width,View.height);
+  ctx.rect(x,y,w,h);
+  ctx.fill("evenodd");
+  ctx.strokeStyle = "#4fd0ff"; ctx.lineWidth = 1.5; ctx.setLineDash([6,4]);
+  ctx.strokeRect(x,y,w,h);
+  ctx.restore();
 }
 
 /* visual pad editor: draw the selected pad's oriented box with square corner handles

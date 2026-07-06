@@ -109,6 +109,7 @@ select:focus,input:focus,textarea:focus{outline:1px solid var(--accent);}
 .side-inner2{background:#42215a; color:#e4bdf5;}
 .layer-row{display:flex; gap:4px; align-items:center; font-size:11px; color:var(--fg-dim);}
 .layer-row select{flex:1; font-size:11px; padding:1px 3px;}
+.layer-row .align2,.layer-row .crop2{font-size:11px; padding:1px 6px; white-space:nowrap;}
 
 /* ---------- net list ---------- */
 #layer-list{flex:0 0 auto; max-height:42%; overflow-y:auto;}
