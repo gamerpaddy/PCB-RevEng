@@ -48,8 +48,8 @@ const KeyActions = [
   { id:"file.bom",       label:"BOM editor",                    def:"",       btn:"#btn-bom",        run:clickBtn("#btn-bom") },
   { id:"layer.add",      label:"Add image layer",               def:"",       btn:"#btn-add-layer",  run:clickBtn("#btn-add-layer") },
   { id:"layer.addurl",   label:"Add image from URL",            def:"",       btn:"#btn-add-url",    run:clickBtn("#btn-add-url") },
-  { id:"edit.undo",      label:"Undo (button)",                 def:"",       btn:"#btn-undo",       run:clickBtn("#btn-undo") },
-  { id:"edit.redo",      label:"Redo (button)",                 def:"",       btn:"#btn-redo",       run:clickBtn("#btn-redo") },
+  // NB: Undo/Redo are intentionally NOT here — they're fixed to Ctrl+Z / Ctrl+Y in
+  // wireKeyboard (main.js) and can't be rebound, so they don't belong in the hotkey editor.
 ];
 
 const RESERVED_KEYS = ["Escape","Enter"," ","Spacebar","Tab","+","=","-","?"];

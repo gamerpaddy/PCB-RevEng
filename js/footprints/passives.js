@@ -5,7 +5,7 @@ Footprints.register({
   id:"chip2", name:"R / C / L chip (SMD)", prefix:"R",
   params:[{key:"size",label:"Size",type:"select",def:"0805",
            options:["0201","0402","0603","0805","1206","1210","2010","2512",
-                    "Tant 2012-12","Tant 3216-18","Tant 3528-15","Tant 3528-21",
+                    "Tant 2012-12","Tant 3216-18","Tant 3528-15",
                     "Tant 6032-28","Tant 7343-31","Tant 7343-43"]},
           {key:"polarized",label:"Polarized (tantalum)",type:"bool",def:false}],
   gen(p){
@@ -14,9 +14,9 @@ Footprints.register({
     if (p.size && p.size.startsWith("Tant ")){
       const code = p.size.slice(5);
       const tdims = { // [body length, body width] mm — the 4-digit part of the code
-        "2012-12":[2.0,1.25], "3216-18":[3.2,1.6], "3528-15":[3.5,2.8], "3528-21":[3.5,2.8],
+        "2012-12":[2.0,1.25], "3216-18":[3.2,1.6], "3528-15":[3.5,2.8],
         "6032-28":[6.0,3.2],  "7343-31":[7.3,4.3], "7343-43":[7.3,4.3] };
-      const kem = { "3216-18":"_Kemet-A", "3528-21":"_Kemet-B", "6032-28":"_Kemet-C",
+      const kem = { "3216-18":"_Kemet-A", "6032-28":"_Kemet-C",
                     "7343-31":"_Kemet-D", "7343-43":"_Kemet-X" };
       const [L,W] = tdims[code] || [3.2,1.6];
       const px = L*0.42, pw = L*0.375, ph = W*0.75;   // pad centre / radial length / tangential width
