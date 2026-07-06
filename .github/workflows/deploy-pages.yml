@@ -14,11 +14,14 @@ permissions:
   pages: write
   id-token: write
 
-# Only one Pages deploy at a time; a newer push supersedes an in-flight one
-# instead of piling up behind it (the failure mode that stalled the old builder).
+# Only one Pages deploy at a time. Do NOT cancel an in-flight run: the
+# github-pages environment holds a backend lock while deploying, and killing
+# the job mid-deploy leaves that lock set, so the next run dies with
+# "Deploy failed, try again later" until the lock clears. Queue instead —
+# newer runs wait for the in-flight deploy to finish.
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   deploy:
