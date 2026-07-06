@@ -13,25 +13,10 @@ function alignDown(w, pt, e){
     return;
   }
 
-  // during a 4+4 point alignment the target is the layer captured when it started,
-  // NOT the currently-active layer (which the user switches to place destination points)
-  if (Tools.alignPts){
-    const target = Tools.alignLayer;
-    if (!target){ Tools.alignPts = null; UI.setHint(TOOL_HINTS.align); return; }
-    Tools.alignPts.push({x:w.x, y:w.y, thumb: captureAlignThumb(pt)});
-    const n = Tools.alignPts.length;
-    if (n < 4){
-      UI.setHint("STEP 1/2 · Layer “" + target.name + "” — feature " + (n+1) + " of 4 (spread them towards the corners)");
-    } else if (n === 4){
-      UI.setHint("STEP 2/2 · Switch to the base layer, then click where those 4 features BELONG (same order) — destination 1 of 4");
-    } else if (n < 8){
-      UI.setHint("STEP 2/2 · destination point " + (n-3) + " of 4");
-    }
-    if (n === 8) applyPointAlign(target);
-    requestRender();
-    return;
-  }
-
+  // The align tool always lets you MOVE the image by dragging. During a 4-point procedure
+  // (Tools.alignPts set) a plain CLICK instead drops the next alignment marker. We start a
+  // move drag now and, if the pointer never actually moves, place the marker on release
+  // (see onPointerUp) — so drag = move and click = marker, both without pressing Esc first.
   const layer = UI.activeLayer();
   if (!layer){ UI.toast("Select an image layer in the Layers panel first"); return; }
   if (layer.locked){ UI.toast("Layer is locked"); return; }
@@ -40,8 +25,19 @@ function alignDown(w, pt, e){
     Tools.drag = { kind:"rot-layer", layer, wx:w.x, wy:w.y, lrot:layer.rot,
                    lwarp0: layer.warp ? {...layer.warp} : null, moved:false };
   } else {
-    Tools.drag = { kind:"move-layer", layer, wx:w.x, wy:w.y, ltx:layer.tx, lty:layer.ty, moved:false };
+    Tools.drag = { kind:"move-layer", layer, wx:w.x, wy:w.y, ltx:layer.tx, lty:layer.ty, moved:false,
+                   alignClick: Tools.alignPts ? { x:w.x, y:w.y, thumb: captureAlignThumb(pt) } : null };
   }
+}
+
+/* place the next 4-point alignment marker (a click that didn't turn into a drag-move) */
+function placeAlignMarker(x, y, thumb){
+  if (!Tools.alignPts) return;
+  const target = Tools.alignLayer;
+  if (!target){ Tools.alignPts = null; return; }
+  Tools.alignPts.push({ x, y, thumb });
+  if (Tools.alignPts.length === 8) applyPointAlign(target);
+  requestRender();
 }
 
 /* count placed annotations sitting on a layer's side — re-warping the image would

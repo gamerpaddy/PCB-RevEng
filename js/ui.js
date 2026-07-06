@@ -239,7 +239,7 @@ UI.refreshLayerList = () => {
         <label title="Mirror image horizontally (back-side photos usually need this so they align with the front)">
           <input type="checkbox" class="mir" ${l.mirror?"checked":""}>⇋</label>
         <label title="Lock layer against accidental dragging"><input type="checkbox" class="lock" ${l.locked?"checked":""}>🔒</label>
-        <button class="align2" title="4-point align: click 4 reference features, then the same 4 features on this layer (corrects offset, rotation, scale and skew)">Align</button>
+        <button class="align2" title="4-point align: click 4 reference features, then the same 4 features on this layer (corrects offset, rotation, scale and skew). To just MOVE the image, pick the Align tool and press Esc, then drag.">Align</button>
         <button class="crop2" title="Crop: drag a box around the part to keep — trims off the rest (do this after aligning)">Crop</button>
       </div>
       <input type="range" class="op" min="0" max="100" value="${Math.round(l.opacity*100)}" title="Opacity">`;
@@ -592,9 +592,18 @@ function setCompPolarized(c, val){
   UI.refreshNets(); requestRender();
 }
 
+/* the Ω value resolver (SMD codes / colour bands → ohms) only makes sense for resistors;
+   a designator starting R / RN / RP indicates one. Other parts get a plain value field. */
+function isResistorRef(ref){
+  const m = /^([A-Za-z]+)/.exec((ref||"").trim());
+  const p = m ? m[1].toUpperCase() : "";
+  return p === "R" || p === "RN" || p === "RP";
+}
+
 UI.inspectComponent = (c, selPin) => {
   const box = $("#inspector");
   const fp = compFootprint(c);
+  const isR = isResistorRef(c.ref);
   const sec = document.createElement("div");
   sec.className = "insp-section";
   sec.innerHTML = `
@@ -605,12 +614,17 @@ UI.inspectComponent = (c, selPin) => {
       <label class="lockok" style="display:flex;align-items:center;gap:3px;width:auto;color:#aab4c2;font-size:11px">
         <input type="checkbox" id="i-lockedit" class="lockok" ${compEditLocked(c)?"checked":""}>edit</label></div>
     ${inspRow("Reference", `<input id="i-ref" value="${escAttr(c.ref)}">`)}
-    ${inspRow("Value", `<span style="display:flex;gap:4px;flex:1;min-width:0"><input id="i-val" value="${escAttr(c.value)}" style="flex:1;min-width:0"><button id="i-resolve" title="Value resolver — SMD codes &amp; color bands" style="padding:1px 7px">Ω</button></span>`)}
+    ${inspRow("Value", isR
+      ? `<span style="display:flex;gap:4px;flex:1;min-width:0"><input id="i-val" value="${escAttr(c.value)}" style="flex:1;min-width:0"><button id="i-resolve" title="Value resolver — SMD codes &amp; color bands" style="padding:1px 7px">Ω</button></span>`
+      : `<input id="i-val" value="${escAttr(c.value)}">`)}
     ${inspRow("Part name", `<input id="i-part" value="${escAttr(c.part)}">`)}
     ${inspRow("KiCad fp", `<input id="i-kicad" value="${escAttr(c.kicad)}" placeholder="lib:footprint">`)}
     ${inspRow("Side", `<select id="i-side"><option value="front">Front</option><option value="back">Back</option></select>`)}
     ${inspRow("Rotation", `<input id="i-rot" type="number" step="any" value="${c.rot.toFixed(1)}"> °`)}
     ${inspRow("Scale ×", `<input id="i-scale" type="number" step="0.05" min="0.1" value="${(c.scale||1).toFixed(2)}">`)}
+    ${c.fpId==="pad1" ? inspRow("Pad type", `<label style="display:flex;align-items:center;gap:6px;width:auto;color:#aab4c2;font-size:11px"><input type="checkbox" id="i-tp-tht" ${c.fpParams.tht?"checked":""}>Through-hole (drilled)</label>`) : ""}
+    ${c.fpId==="pad1" ? inspRow("Pad Ø", `<span style="display:flex;gap:4px;flex:1;min-width:0;align-items:center"><input id="i-tp-dia" type="number" step="0.1" min="0.3" value="${(parseFloat(c.fpParams.dia)||1.5).toFixed(2)}" style="flex:1;min-width:0"><span style="color:#8b96a5;font-size:10px">mm</span></span>`) : ""}
+    ${c.fpId==="pad1" && c.fpParams.tht ? inspRow("Hole Ø", `<span style="display:flex;gap:4px;flex:1;min-width:0;align-items:center"><input id="i-tp-hole" type="number" step="0.1" min="0.1" max="${(parseFloat(c.fpParams.dia)||1.5).toFixed(2)}" value="${(parseFloat(c.fpParams.hole)||0.8).toFixed(2)}" style="flex:1;min-width:0"><span style="color:#8b96a5;font-size:10px">mm</span></span>`) : ""}
     ${compPolarParam(c) ? inspRow("Polarized", `<label style="display:flex;align-items:center;gap:6px;width:auto;color:#aab4c2;font-size:11px"><input type="checkbox" id="i-polar" ${compIsPolarized(c)?"checked":""}>+ marker on pin 1</label>`) : ""}
     <div class="insp-actions">
       <button id="i-fp">Change footprint…</button>
@@ -628,12 +642,14 @@ UI.inspectComponent = (c, selPin) => {
   refEl.addEventListener("change", () => UI.commitRename(c, refEl.value));
   refEl.addEventListener("keydown", e => { if (e.key === "Enter"){ e.preventDefault(); refEl.blur(); } });
   bindLive(sec.querySelector("#i-val"), "edit value", v => { c.value = v; });
-  // on blur/enter, auto-resolve SMD codes (220R etc. stay literal) — no apply click needed
-  sec.querySelector("#i-val").addEventListener("change", e => {
+  // on blur/enter, auto-resolve SMD codes (220R etc. stay literal) — resistors only, so a
+  // capacitor code like "104" isn't misread as ohms; no apply click needed
+  if (isR) sec.querySelector("#i-val").addEventListener("change", e => {
     const resolved = autoResolveValue(e.target.value);
     if (resolved !== e.target.value){ c.value = resolved; e.target.value = resolved; UI.refreshNets(); requestRender(); }
   });
-  sec.querySelector("#i-resolve").addEventListener("click", ()=>{
+  const resolveBtn = sec.querySelector("#i-resolve");
+  if (resolveBtn) resolveBtn.addEventListener("click", ()=>{
     const cur = sec.querySelector("#i-val").value;
     const dec = decodeSMD(cur);
     if (dec){ // value already holds a code → decode in place
@@ -649,6 +665,36 @@ UI.inspectComponent = (c, selPin) => {
   sec.querySelector("#i-side").addEventListener("change", e => commit(()=>{ c.side = e.target.value; }));
   sec.querySelector("#i-rot").addEventListener("change", e => commit(()=>{ c.rot = parseFloat(e.target.value)||0; }));
   sec.querySelector("#i-scale").addEventListener("change", e => commit(()=>{ c.scale = Math.max(0.1, parseFloat(e.target.value)||1); }));
+  // single-pad / test-point geometry: SMD vs THT, pad Ø, and (THT only) hole Ø ≤ pad Ø
+  const tpTht = sec.querySelector("#i-tp-tht");
+  if (tpTht) tpTht.addEventListener("change", e => {
+    pushUndo("pad type"); c.fpParams = {...c.fpParams, tht:e.target.checked}; c._fp = null;
+    UI.refreshInspector(); UI.refreshNets(); requestRender();
+  });
+  const tpDia = sec.querySelector("#i-tp-dia");
+  if (tpDia) tpDia.addEventListener("change", e => {
+    let d = parseFloat(e.target.value); if (!(d > 0)) d = 1.5;
+    const np = {...c.fpParams, dia:d};
+    if (np.hole != null && parseFloat(np.hole) > d) np.hole = d;   // keep hole within the pad
+    // dia is authoritative for a single pad — drop any absolute pad-size override (e.g. from a
+    // prior drag-resize) so the new diameter actually takes effect, not just the body outline
+    if (np.padOv){
+      np.padOv = {...np.padOv};
+      for (const k of Object.keys(np.padOv)){
+        const o = {...np.padOv[k]}; delete o.w; delete o.h;
+        if (Object.keys(o).length) np.padOv[k] = o; else delete np.padOv[k];
+      }
+      if (!Object.keys(np.padOv).length) delete np.padOv;
+    }
+    pushUndo("pad size"); c.fpParams = np; c._fp = null; UI.refreshInspector(); requestRender();
+  });
+  const tpHole = sec.querySelector("#i-tp-hole");
+  if (tpHole) tpHole.addEventListener("change", e => {
+    let hv = parseFloat(e.target.value); if (!(hv > 0)) hv = 0.1;
+    const d = parseFloat(c.fpParams.dia) || 1.5; if (hv > d) hv = d;   // clamp: hole ≤ pad
+    pushUndo("hole size"); c.fpParams = {...c.fpParams, hole:hv}; c._fp = null;
+    UI.refreshInspector(); requestRender();
+  });
   const polCb = sec.querySelector("#i-polar");
   if (polCb) polCb.addEventListener("change", e => setCompPolarized(c, e.target.checked));
   sec.querySelector("#i-del").addEventListener("click", deleteSelection);
@@ -782,7 +828,7 @@ UI.inspectNetObj = (title, obj, setNet) => {
     <div class="insp-title">${title}</div>
     ${inspRow("Net", `<span style="display:flex;gap:4px;flex:1;min-width:0"><input id="i-net" value="${escAttr(netName)}" placeholder="net name" style="flex:1;min-width:0"><button id="i-netgen" title="Generate a new unique net name">⊕</button></span>`)}
     ${isViaObj ? inspRow("Type", `<select id="i-kind"><option value="via">Via</option><option value="pth">PTH (plated hole)</option></select>`) : ""}
-    ${isViaObj ? inspRow("Size", `<input id="i-vr" type="number" min="2" step="1" value="${obj.r||State.viaR}"> px`) : ""}
+    ${isViaObj ? inspRow("Size Ø", UI.viaSizeInputs(obj.r||State.viaR, "i-vr-")) : ""}
     ${isViaObj ? inspRow("Span", `<span style="display:flex;gap:4px;flex:1;min-width:0;align-items:center"><span id="i-vspan" style="flex:1;min-width:0;font-size:11px;color:#aab4c2">${escAttr(viaSpanLabel(obj))}</span><button id="i-vspanedit" title="Set layer span (blind / buried via)">Edit…</button></span>`) : ""}
     <div class="insp-actions"><button id="i-del" class="danger">Delete</button></div>`;
   box.appendChild(sec);
@@ -794,9 +840,9 @@ UI.inspectNetObj = (title, obj, setNet) => {
       if (obj.kind === "pth" && obj.r < State.viaR*1.5) obj.r = Math.round(State.viaR*1.8);
       UI.refreshInspector(); requestRender();
     });
-    sec.querySelector("#i-vr").addEventListener("change", e => {
-      pushUndo("via size"); obj.r = Math.max(2, parseFloat(e.target.value)||State.viaR); requestRender();
-    });
+    const applyVr = (mm) => { if (!(mm > 0)) return; pushUndo("via size"); obj.r = Math.max(1, mm*State.pxPerMm/2); UI.refreshInspector(); requestRender(); };
+    sec.querySelector("#i-vr-mm").addEventListener("change",  e => applyVr(parseFloat(e.target.value)||0));
+    sec.querySelector("#i-vr-mil").addEventListener("change", e => applyVr((parseFloat(e.target.value)||0) * MM_PER_MIL));
   }
   sec.querySelector("#i-netgen").addEventListener("click", ()=>{ sec.querySelector("#i-net").value = uniqueNetName(); sec.querySelector("#i-net").dispatchEvent(new Event("change")); });
   sec.querySelector("#i-net").addEventListener("change", e => {
@@ -910,6 +956,18 @@ UI.traceWidthInputs = (widthPx, idBase, uniform) => {
     <input id="${idBase}mm" type="number" step="0.05" min="0.05" value="${mmV}" placeholder="${ph}" style="flex:1;min-width:0;width:0" title="Trace width in millimetres">
     <span style="color:#8b96a5;font-size:10px">mm</span>
     <input id="${idBase}mil" type="number" step="1" min="0.5" value="${milV}" placeholder="${ph}" style="flex:1;min-width:0;width:0" title="Trace width in mils (thou)">
+    <span style="color:#8b96a5;font-size:10px">mil</span></span>`;
+};
+
+/* via/PTH size as side-by-side mm + mil DIAMETER inputs (stored internally as a px radius).
+   ids: mm = idBase+"mm", mil = idBase+"mil" */
+UI.viaSizeInputs = (rPx, idBase) => {
+  const mm = (rPx * 2) / State.pxPerMm;      // diameter
+  const mil = mm / MM_PER_MIL;
+  return `<span style="display:flex;gap:4px;flex:1;min-width:0;align-items:center">
+    <input id="${idBase}mm" type="number" step="0.05" min="0.1" value="${mm.toFixed(3)}" style="flex:1;min-width:0;width:0" title="Via diameter in millimetres">
+    <span style="color:#8b96a5;font-size:10px">mm</span>
+    <input id="${idBase}mil" type="number" step="1" min="1" value="${mil.toFixed(1)}" style="flex:1;min-width:0;width:0" title="Via diameter in mils (thou)">
     <span style="color:#8b96a5;font-size:10px">mil</span></span>`;
 };
 
@@ -1337,17 +1395,20 @@ UI.openQuickEdit = (c) => {
   $("#quick-title").textContent = c.ref + " — " + compFootprint(c).label;
   const refIn = $("#quick-ref"), valIn = $("#quick-value"), hint = $("#quick-resolve");
   refIn.value = c.ref; valIn.value = c.value;
+  // resolving an SMD code (103 → 10k) is resistor-only, keyed off the (possibly edited) ref
+  const resolveVal = () => isResistorRef(refIn.value.trim() || c.ref) ? autoResolveValue(valIn.value) : valIn.value.trim();
   const updateHint = ()=>{
-    const resolved = autoResolveValue(valIn.value);
+    const resolved = resolveVal();
     hint.textContent = (resolved !== valIn.value.trim()) ? ("→ " + resolved) : "";
   };
   valIn.oninput = updateHint;
+  refIn.oninput = updateHint;   // changing the designator to/from R flips whether it resolves
   updateHint();
   $("#quick-ok").onclick = ()=>{
     dlg.close();
     if (compEditLocked(c)){ UI.toast(c.ref + " is edit-locked"); return; }
     pushUndo("quick edit " + c.ref);
-    c.value = autoResolveValue(valIn.value); // auto-fill on OK (no apply click)
+    c.value = resolveVal(); // auto-fill on OK (no apply click)
     UI.refreshInspector(); requestRender();
     if (refIn.value.trim()) UI.commitRename(c, refIn.value); // may prompt on a duplicate ref
   };

@@ -39,12 +39,25 @@ Footprints.register({
 
 Footprints.register({
   id:"pad1", name:"Single pad / test point", prefix:"TP",
-  params:[{key:"dia",label:"Pad mm",type:"select",def:"1.5",options:["1.0","1.5","2.0","3.0"]}],
+  // free-entry diameters (like a via's size) rather than a fixed size list. SMD by default
+  // (one-sided land, no drill); tick Through-hole to add a drilled, all-layers pad.
+  params:[{key:"tht",label:"Through-hole",type:"bool",def:false,rebuilds:true},
+          {key:"dia",label:"Pad Ø mm",type:"num",def:1.5,min:0.3,max:30,step:0.1},
+          {key:"hole",label:"Hole Ø mm",type:"num",def:0.8,min:0.1,max:30,step:0.1,
+           showIf:p=>!!p.tht}],
   gen(p){
-    const d = parseFloat(p.dia);
-    return { label:"Test point D"+p.dia,
-      pins:[_pin(1,0,0,{shape:"circle",w:d,h:d})], body:{w:d*1.3,h:d*1.3,shape:"circle"},
-      kicad:"TestPoint:TestPoint_Pad_D"+d.toFixed(1)+"mm" };
+    const d = parseFloat(p.dia) || 1.5;
+    const tht = !!p.tht;
+    const opts = { shape:"circle", w:d, h:d, tht };
+    if (tht){
+      let hole = parseFloat(p.hole); if (!isFinite(hole) || hole <= 0) hole = Math.min(0.8, d);
+      if (hole > d) hole = d;                 // a drill can never be wider than its pad
+      opts.hole = hole;
+    }
+    return { label: tht ? "THT pad D"+d.toFixed(1) : "Test point D"+d.toFixed(1),
+      pins:[_pin(1,0,0,opts)], body:{w:d*1.3,h:d*1.3,shape:"circle"},
+      kicad: tht ? "TestPoint:TestPoint_THTPad_D"+d.toFixed(1)+"mm"
+                 : "TestPoint:TestPoint_Pad_D"+d.toFixed(1)+"mm" };
   }
 });
 

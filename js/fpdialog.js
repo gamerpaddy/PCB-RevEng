@@ -107,6 +107,8 @@ function buildFpParams(){
                            : prm.type === "int" ? (parseInt(inp.value,10)||prm.def)
                            : inp.value;
   for (const prm of def.params){
+    // a param may hide itself based on the others (e.g. Hole Ø only when Through-hole is on)
+    if (prm.showIf && !prm.showIf(FPD.params)) continue;
     const label = document.createElement("label");
     let inp;
     if (prm.type === "select"){
@@ -132,15 +134,19 @@ function buildFpParams(){
       inp.value = FPD.params[prm.key] !== undefined ? FPD.params[prm.key] : prm.def;
     }
     const evt = prm.type === "bool" ? "change" : "input";
-    inp.addEventListener(evt, ()=>{ FPD.params[prm.key] = read(prm, inp); drawFpPreview(); });
+    // `rebuilds` params (e.g. the THT toggle) re-render the whole panel so dependent
+    // fields (Hole Ø) appear/disappear; others just redraw the preview
+    inp.addEventListener(evt, ()=>{ FPD.params[prm.key] = read(prm, inp); if (prm.rebuilds) buildFpParams(); else drawFpPreview(); });
     if (prm.type !== "bool") label.appendChild(inp);
     box.appendChild(label);
     FPD.params[prm.key] = read(prm, inp);
   }
   // universal SMD pad tuning — scale every pad, and stretch pads along their length
   // (radially outward). Hidden for THT footprints, where it has no effect.
+  // a single-pad test point sizes itself straight from its diameter field (like a via),
+  // so the scale/length pad-tuning multipliers don't apply to it
   const probe = generateFootprint(FPD.catId, FPD.params);
-  if (isSmdFootprint(probe)){
+  if (isSmdFootprint(probe) && FPD.catId !== "pad1"){
     const grp = document.createElement("div");
     grp.className = "fp-pad-tune";
     grp.innerHTML = `<div class="fp-pad-tune-h">SMD pad tuning</div>`;

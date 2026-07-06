@@ -246,7 +246,7 @@ function wireSettings(){
   $("#set-via").addEventListener("input", e => {
     State.viaR = +e.target.value;
     for (const v of State.vias) v.r = State.viaR;
-    $("#set-via-val").textContent = State.viaR + " px";
+    $("#set-via-val").textContent = (State.viaR*2/State.pxPerMm).toFixed(2) + " mm";
     markDirty(); requestRender();
   });
   $("#set-trace").addEventListener("input", e => {
@@ -347,7 +347,7 @@ function wireSettings(){
 function syncSettings(){
   $("#set-layers").value = String(State.layerCount);
   $("#set-via").value = State.viaR;
-  $("#set-via-val").textContent = State.viaR + " px";
+  $("#set-via-val").textContent = (State.viaR*2/State.pxPerMm).toFixed(2) + " mm";
   $("#set-trace").value = State.traceW;
   $("#set-trace-val").textContent = State.traceW + " px";
   $("#set-compview").value = State.compView;
@@ -666,8 +666,7 @@ function wireKeyboard(){
         else if (Tools.name==="crop"){ Tools.cropLayer=null; Tools.cropA=Tools.cropB=null; setTool("select"); UI.toast("Crop cancelled"); requestRender(); }
         else if (Tools.addPinFor){ Tools.addPinFor=null; UI.setHint(TOOL_HINTS[Tools.name]||""); UI.refreshInspector(); }
         else if (Tools.tracePts) cancelTrace();
-        else if (Tools.deskewPts){ Tools.deskewPts=null; Tools.deskewLayer=null; UI.setHint(TOOL_HINTS.align); requestRender(); }
-        else if (Tools.alignPts){ Tools.alignPts=null; Tools.alignLayer=null; Tools.alignReturnId=null; UI.setHint(TOOL_HINTS.align); requestRender(); }
+        else if (Tools.name==="align"){ setTool("select"); UI.toast("Align mode off"); }   // setTool clears align/deskew markers
         else if (Tools.name==="component"){ setTool("select"); }
         else { UI.select(null); View.hoverNetId=null; requestRender(); }
         break;

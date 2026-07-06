@@ -115,7 +115,8 @@ function drawFootprintShape(ctx, fp, pxPerMm, opts){
       if (pin.tht !== false){                          // through-hole drill; SMD round pads have none
         ctx.globalAlpha = (opts.alpha!==undefined?opts.alpha:1);
         ctx.fillStyle="#0d0f12";
-        ctx.beginPath(); ctx.arc(x,y,w/5,0,Math.PI*2); ctx.fill();
+        const hr = pin.hole ? Math.min(pin.hole, pin.w)*s/2 : w/5;   // explicit hole Ø, else default
+        ctx.beginPath(); ctx.arc(x,y,hr,0,Math.PI*2); ctx.fill();
       }
     } else {
       ctx.fillRect(x-w/2,y-h/2,w,h);

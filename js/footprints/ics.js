@@ -69,7 +69,9 @@ Footprints.register({
     for (let r=0;r<p.rows;r++)
       for (let c=0;c<p.cols;c++){
         const name = (letters[r]||("R"+r)) + (c+1);
-        pins.push(_pin(name,(c-(p.cols-1)/2)*pt,(r-(p.rows-1)/2)*pt,{shape:"circle",w:pt*0.5,h:pt*0.5}));
+        // BGA balls are SMD lands (solder balls), NOT drilled through-holes: tht:false keeps
+        // them one-sided solid dots that only connect on their own layer
+        pins.push(_pin(name,(c-(p.cols-1)/2)*pt,(r-(p.rows-1)/2)*pt,{shape:"circle",w:pt*0.5,h:pt*0.5,tht:false}));
       }
     return { label:"Grid "+p.rows+"×"+p.cols, pins, body:{w:p.cols*pt,h:p.rows*pt}, kicad:"" };
   }

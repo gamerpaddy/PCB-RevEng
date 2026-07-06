@@ -366,8 +366,10 @@ function snapToConductor(wx, wy, traceSide, tightTrace, traceWidth, exclude){
     for (let pi=0; pi<c.pins.length; pi++){
       const fpin = fp.pins[pi];
       if (!fpin) continue;   // comp.pins can outnumber fp.pins (freestyle / regen) — guard
-      // skip pads not reachable from this copper side (SMD pad on a different side)
-      if (filterPads && fpin.shape !== "circle" && c.side !== traceSide) continue;
+      // skip pads not reachable from this copper side. Only a true through-hole pad
+      // (round WITH a drill) reaches every side; a round SMD land (tht:false, e.g. a test
+      // point) lives on its own side just like a rectangular SMD pad.
+      if (filterPads && !(fpin.shape === "circle" && fpin.tht !== false) && c.side !== traceSide) continue;
       let wp = null, d, ptol;
       if (padCenter){
         wp = pinWorldPos(c, fpin); d = Math.hypot(wx-wp.x, wy-wp.y);     // to pad centre
@@ -1061,8 +1063,9 @@ function drawComponent(ctx, c, selNet, padsOnly){
   // pads
   for (let pi=0; pi<fp.pins.length; pi++){
     const fpin = fp.pins[pi];
-    // on the far side only through-hole pads (circles) remain visible
-    if (padsOnly && fpin.shape !== "circle") continue;
+    // on the far side only through-hole pads reach through — a round SMD land (tht:false,
+    // e.g. a test point or BGA ball) lives on ONE side, so it must NOT show on the far side
+    if (padsOnly && !(fpin.shape === "circle" && fpin.tht !== false)) continue;
     const st = c.pins[pi] || {};
     const hasNet = !!st.netId;
     // the single hovered pad glows on its own (the "just this thing" hover cue), so a
@@ -1089,7 +1092,8 @@ function drawComponent(ctx, c, selNet, padsOnly){
       // ball) is a solid dot with no hole
       if (fpin.tht !== false){
         ctx.fillStyle="#0d0f12";
-        ctx.beginPath(); ctx.arc(x,y,w/5,0,Math.PI*2); ctx.fill();
+        const hr = fpin.hole ? Math.min(fpin.hole, fpin.w)*s/2 : w/5;   // explicit hole Ø, else default
+        ctx.beginPath(); ctx.arc(x,y,hr,0,Math.PI*2); ctx.fill();
       }
     } else {
       ctx.fillRect(x-w/2,y-h/2,w,h);
@@ -1108,7 +1112,7 @@ function drawComponent(ctx, c, selNet, padsOnly){
   }
   // pin1 marker (skip on far-side pad-only render)
   const p1 = fp.pins[0];
-  if (p1 && !(padsOnly && p1.shape !== "circle")){
+  if (p1 && !(padsOnly && !(p1.shape === "circle" && p1.tht !== false))){
     ctx.globalAlpha = compFa;
     ctx.fillStyle = "#ff5d5d";
     ctx.beginPath(); ctx.arc(p1.xmm*s, p1.ymm*s, Math.max(2.2/View.zoom, Math.max(p1.w,0.4)*s*0.18), 0, Math.PI*2); ctx.fill();
@@ -1161,10 +1165,38 @@ function captureAlignThumb(pt){
 }
 
 /* numbered markers + click thumbnails for the 4+4 alignment, drawn in screen space */
+function drawAlignBanner(ctx){
+  // top-centre pill making the current align state unmistakable
+  const marker = !!(Tools.alignPts);
+  const deskew = !!(Tools.deskewPts);
+  let txt, bg;
+  if (deskew){ txt = "DESKEW — click the line points · Esc: exit"; bg = "#5a2f7a"; }
+  else if (marker){
+    const n = Tools.alignPts.length;
+    txt = "ALIGN 4-POINT — click: place marker (" + n + "/8) · drag: move image · Esc: exit";
+    bg = "#7a5a24";
+  } else {
+    txt = "ALIGN / MOVE — drag: move image · Shift+drag: rotate · Esc: exit";
+    bg = "#245a4a";
+  }
+  ctx.font = "600 12px Segoe UI, sans-serif";
+  const w = ctx.measureText(txt).width, pad = 12, h = 24;
+  const cx = View.width/2, x = cx - w/2 - pad, y = 8;
+  ctx.fillStyle = bg;
+  ctx.strokeStyle = "rgba(255,255,255,.25)"; ctx.lineWidth = 1;
+  ctx.beginPath();
+  if (ctx.roundRect) ctx.roundRect(x, y, w + pad*2, h, 6); else ctx.rect(x, y, w + pad*2, h, 6);
+  ctx.fill(); ctx.stroke();
+  ctx.fillStyle = "#ffce8a"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText(txt, cx, y + h/2 + 0.5);
+}
+
 function drawAlignOverlay(ctx){
-  if (!Tools.alignPts || !Tools.alignPts.length) return;
+  if (Tools.name !== "align") return;
   ctx.save();
   ctx.setTransform(View.dpr,0,0,View.dpr,0,0);
+  drawAlignBanner(ctx);
+  if (!Tools.alignPts || !Tools.alignPts.length){ ctx.restore(); return; }
   ctx.textAlign = "center"; ctx.textBaseline = "middle";
   Tools.alignPts.forEach((p,i) => {
     const moving = i < 4;

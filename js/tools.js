@@ -51,7 +51,7 @@ const TOOL_HINTS = {
 
 function toolCursor(name){
   return { select:"default", component:"crosshair", trace:"crosshair", via:"crosshair",
-           align:"move", measure:"crosshair", calibrate:"crosshair", cut:"crosshair", note:"crosshair", crop:"crosshair", pan:"grab" }[name] || "default";
+           align:"crosshair", measure:"crosshair", calibrate:"crosshair", cut:"crosshair", note:"crosshair", crop:"crosshair", pan:"grab" }[name] || "default";
 }
 
 function setTool(name){
@@ -66,6 +66,7 @@ function setTool(name){
   Tools.addPinFor = null;
   Tools.padEdit = null;   // leave the visual pad editor when switching tools
   Tools.cropLayer = null; Tools.cropA = Tools.cropB = null;   // leave the crop tool
+  Tools._edgeArmed = false;   // re-arm edge auto-scroll: must leave the margin before it kicks in
   if (name !== "component"){ Tools.ghostFp = null; Tools.pending = null; }
   if (name !== "select"){ View.hoverPin = null; UI.setStatusPad(""); Tools._readout = ""; }   // pad/comp readout is select-mode only
   Tools.name = name;
@@ -84,6 +85,7 @@ function onPointerDown(e){
   updatePane(pt);
   const w = screenToWorld(pt.x, pt.y);
   Tools.cursor = w;
+  Tools._edgeArmed = false;   // each new interaction must leave the margin before auto-scroll arms
 
   // middle button or space = pan, any tool
   if (e.button === 1 || Keys.space){
@@ -205,7 +207,13 @@ function onPointerUp(e){
     UI.refreshInspector();
   }
   if (d.kind === "move-comp" || d.kind === "move-via" || d.kind === "move-layer" || d.kind === "rot-layer" || d.kind === "move-vert"){
-    if (!d.moved) Undo.stack.pop(); // no-op drag, drop the snapshot
+    if (!d.moved){
+      Undo.stack.pop(); // no-op drag, drop the snapshot
+      // a shift-click that never dragged a single-pad part falls back to pin multi-select
+      if (d.shiftPin){ UI.togglePinSel(d.shiftPin.comp, d.shiftPin.pinIdx); requestRender(); }
+      // an align-tool click that never dragged drops the next 4-point marker
+      if (d.alignClick){ placeAlignMarker(d.alignClick.x, d.alignClick.y, d.alignClick.thumb); }
+    }
     // a real drag must not also register as a double-click (which would delete a point
     // or pop open an editor/menu); flag it so the dblclick that may follow is ignored.
     if (d.moved){
@@ -221,7 +229,11 @@ function onPointerUp(e){
     Tools.dragVert = null;
     Tools.snap = null;
     UI.refreshInspector();
-    if (d.kind === "move-comp" && d.moved) checkMoveOverlaps(d.comp); // only after the move ends
+    if (d.kind === "move-comp" && d.moved){
+      if (d.shiftPin) UI.select({type:"comp", comp:d.comp});   // detached shift-move: show it selected
+      autoConnectPins(d.comp);          // pins moved onto copper pick up its net (fills empty pins only)
+      checkMoveOverlaps(d.comp);        // then warn about any different-net pads now touching
+    }
   }
   if (d.kind === "pad-resize" || d.kind === "pad-move"){
     if (!d.moved) Undo.stack.pop();               // a click that didn't drag: keep undo clean
@@ -288,6 +300,8 @@ function handleDrag(pt, w, e){
       d.note.x = w.x - d.offX; d.note.y = w.y - d.offY;
       break;
     case "move-layer":
+      // in the align procedure, ignore sub-4px jitter so a click stays a marker (not a nudge)
+      if (d.alignClick && Math.hypot(w.x-d.wx, w.y-d.wy)*View.zoom < 4) break;
       d.moved = true;
       d.layer.tx = d.ltx + (w.x - d.wx);
       d.layer.ty = d.lty + (w.y - d.wy);
@@ -352,12 +366,23 @@ const EDGE_SCROLL_KINDS = { "move-comp":1, "move-via":1, "move-vert":1, "move-no
 function edgeScrollAllowed(){
   if (!UI.edgeScrollOn()) return false;
   if (Tools.drag) return !!EDGE_SCROLL_KINDS[Tools.drag.kind];
-  return Tools.name === "component" && !!Tools.pending;
+  if (Tools.name === "component") return !!Tools.pending;   // ghost part about to drop
+  if (Tools.name === "trace")     return !!Tools.tracePts;  // mid-route, rubber-band tracks cursor
+  if (Tools.name === "via")       return true;              // via drops wherever the cursor lands
+  return false;
 }
 
 function updateEdgeScroll(pt){
   if (!edgeScrollAllowed()){ stopEdgeScroll(); return; }
   const m = UI.edgeMargin(), speed = UI.edgeSpeed(), W = View.width, H = View.height;
+  // Don't start auto-panning until the pointer has first moved OUT of the edge margin.
+  // Otherwise grabbing an object that already sits near the edge would scroll forever
+  // with no intent to move — you have to leave the margin once to "arm" it.
+  const inMargin = pt.x < m || pt.x > W - m || pt.y < m || pt.y > H - m;
+  if (!Tools._edgeArmed){
+    if (inMargin){ stopEdgeScroll(); return; }
+    Tools._edgeArmed = true;
+  }
   const clamp = t => t < 0 ? 0 : t > 1 ? 1 : t;   // pointer capture can report pts past the edge
   let vx = 0, vy = 0;
   if (pt.x < m)          vx =  clamp((m - pt.x) / m);
@@ -379,6 +404,8 @@ function edgeScrollTick(){
   const w = screenToWorld(pt.x, pt.y);
   Tools.cursor = w;
   if (Tools.drag) handleDrag(pt, w, Tools._lastEvt);   // ghost needs only the updated cursor
+  else if (Tools.name === "trace") Tools.snap = snapToConductor(w.x, w.y, Tools.tracePts ? Tools.traceSide : UI.copperSide(), true, State.traceW);
+  else if (Tools.name === "via")   Tools.snap = (Tools._lastEvt && Tools._lastEvt.shiftKey) ? null : snapToConductor(w.x, w.y, "any");
   UI.setStatusPos(w);
   requestRender();
   Tools._edgeRAF = requestAnimationFrame(edgeScrollTick);
@@ -436,9 +463,20 @@ function selectDown(w, pt, e){
     }
   }
   const h = hitTest(w.x, w.y);
-  // shift-click pins → multi-select for bulk net assignment
+  // shift-click pins → multi-select for bulk net assignment.
+  // BUT for a single-pad part (test point / mounting hole) a shift-DRAG detaches it from
+  // any trace anchored to it — start a detached move now; if it turns out to be a click
+  // with no drag, onPointerUp falls back to the multi-select toggle instead.
   if (e.shiftKey && h && h.type === "pin"){
-    UI.togglePinSel(h.comp, h.pinIdx);
+    const c = h.comp;
+    if (!compMoveLocked(c)){
+      pushUndo();
+      Tools.drag = { kind:"move-comp", comp:c, offX:w.x-c.x, offY:w.y-c.y, moved:false,
+                     anchors:[], detach:true, shiftPin:{comp:c, pinIdx:h.pinIdx} };
+      requestRender();
+      return;
+    }
+    UI.togglePinSel(c, h.pinIdx);
     requestRender();
     return;
   }
@@ -461,25 +499,38 @@ function selectDown(w, pt, e){
     if (compMoveLocked(c)){ UI.setHint(c.ref + " is move-locked — press " + Keymap.keyFor("edit.lock") + " to unlock"); requestRender(); return; }
     pushUndo();
     // grab every trace vertex sitting on one of this component's pads so connected
-    // anchors translate along with the component, preserving their relative position
+    // anchors translate along with the component, preserving their relative position.
+    // Shift-drag detaches: skip the anchors so the trace stays put.
+    const detach = !!(e && e.shiftKey);
     const anchors = [];
-    const fp = compFootprint(c);
-    const ctol = 6 / View.zoom;
-    for (const fpin of fp.pins)
-      for (const t of State.traces)
-        for (let i=0;i<t.points.length;i++)
-          if (pinEdgeDist(c, fpin, t.points[i].x, t.points[i].y) <= ctol)
-            anchors.push({ pts:t.points, i, dx:t.points[i].x-c.x, dy:t.points[i].y-c.y });
-    Tools.drag = { kind:"move-comp", comp:c, offX:w.x-c.x, offY:w.y-c.y, moved:false, anchors };
+    if (!detach){
+      const fp = compFootprint(c);
+      const ctol = 6 / View.zoom;
+      // an SMD pad only touches copper on ITS OWN side, so it must never grab (and drag)
+      // a trace on another layer; only a through-hole pad reaches every side
+      const reachesAll = (fpin) => fpin.shape === "circle" && fpin.tht !== false;
+      for (const fpin of fp.pins)
+        for (const t of State.traces){
+          if (!(reachesAll(fpin) || t.side === c.side)) continue;
+          for (let i=0;i<t.points.length;i++)
+            if (pinEdgeDist(c, fpin, t.points[i].x, t.points[i].y) <= ctol)
+              anchors.push({ pts:t.points, i, dx:t.points[i].x-c.x, dy:t.points[i].y-c.y });
+        }
+    }
+    Tools.drag = { kind:"move-comp", comp:c, offX:w.x-c.x, offY:w.y-c.y, moved:false, anchors, detach };
   } else if (h.type === "via"){
     pushUndo();
-    // grab every trace vertex sitting on the via so connected anchors move along with it
-    const vtol = Math.max(h.via.r || 5, 6/View.zoom);
+    // grab every trace vertex sitting on the via so connected anchors move along with it;
+    // Shift-drag detaches (leaves the trace behind)
+    const detach = !!(e && e.shiftKey);
     const anchors = [];
-    for (const t of State.traces)
-      for (let i=0;i<t.points.length;i++)
-        if (Math.hypot(t.points[i].x-h.via.x, t.points[i].y-h.via.y) <= vtol)
-          anchors.push({ pts:t.points, i, dx:t.points[i].x-h.via.x, dy:t.points[i].y-h.via.y });
+    if (!detach){
+      const vtol = Math.max(h.via.r || 5, 6/View.zoom);
+      for (const t of State.traces)
+        for (let i=0;i<t.points.length;i++)
+          if (Math.hypot(t.points[i].x-h.via.x, t.points[i].y-h.via.y) <= vtol)
+            anchors.push({ pts:t.points, i, dx:t.points[i].x-h.via.x, dy:t.points[i].y-h.via.y });
+    }
     Tools.drag = { kind:"move-via", via:h.via, offX:w.x-h.via.x, offY:w.y-h.via.y, moved:false, anchors };
   } else if (h.type === "note"){
     pushUndo("move note");
@@ -818,6 +869,39 @@ function runChecker(){
   return { unnetted, mismatches, shorts };
 }
 
+/* When a part lands on existing copper, adopt the net of whatever conductor each still-
+   unconnected pin sits on — the same "pick up the net" the via tool does. This is what
+   makes a plated mounting hole / test point placed over a trace inherit that trace's net.
+   Only fills pins that currently have NO net (and aren't no-connect), so it never
+   overwrites an existing assignment or silently merges nets. A through-hole pad (round
+   with a drill, incl. plated mounting holes) reaches every side; an SMD land only sees
+   copper on its own side. Returns true if any pin was connected. */
+function autoConnectPins(comp){
+  const fp = compFootprint(comp);
+  const thru = (pin) => pin.shape === "circle" && pin.tht !== false;
+  let changed = false;
+  for (let pi=0; pi<comp.pins.length; pi++){
+    const st = comp.pins[pi];
+    if (st.netId || st.nc) continue;                 // keep existing / no-connect pins
+    const fpin = fp.pins[pi]; if (!fpin) continue;
+    const myThru = thru(fpin);
+    let net = null;
+    for (const v of State.vias){                     // a via / PTH under the pad
+      if (v.netId && pinEdgeDist(comp, fpin, v.x, v.y) <= (v.r||5) + 1){ net = v.netId; break; }
+    }
+    if (!net) for (const t of State.traces){          // a trace passing under the pad
+      if (!t.netId) continue;
+      if (!(myThru || t.side === comp.side)) continue; // SMD land ignores other-side copper
+      for (let k=0;k<t.points.length-1;k++){
+        if (padHitsSeg(comp, fpin, t.points[k], t.points[k+1], (t.width||3)/2, 0.5)){ net = t.netId; break; }
+      }
+      if (net) break;
+    }
+    if (net){ st.netId = net; changed = true; }
+  }
+  return changed;
+}
+
 /* ---------------- component tool ---------------- */
 function componentDown(w, e){
   if (!Tools.pending){ UI.openFootprintDialog(); return; }
@@ -858,6 +942,7 @@ function componentDown(w, e){
     pins: fp.pins.map(fpin => ({ num:fpin.num, name:fpin.name||"", netId:null })),
   };
   State.components.push(comp);
+  autoConnectPins(comp);   // pins dropped on existing copper inherit its net (e.g. plated mounting hole over a trace)
   p.ref = ""; // subsequent placements auto-number
   UI.select({type:"comp", comp});
   UI.toast("Placed " + ref + " (" + fp.label + ")");
@@ -1408,6 +1493,14 @@ function padSetSize(comp, idx, w, h){
   if (comp.fpId === "free"){
     const pl = ensureFreePin(comp, idx);
     pl.w = +w.toFixed(3); pl.h = +h.toFixed(3); delete pl.size;   // explicit W/H overrides size
+  } else if (comp.fpId === "pad1"){
+    // a single test pad's size IS its diameter — write the param (not a padOv override) so
+    // the inspector's Pad Ø field reflects a drag-resize
+    const p = comp.fpParams || (comp.fpParams = {});
+    p.dia = +Math.max(w, h).toFixed(3);
+    if (p.hole != null && parseFloat(p.hole) > p.dia) p.hole = p.dia;   // keep drill ≤ pad
+    const num = comp.pins[idx].num;
+    if (p.padOv && p.padOv[num]){ delete p.padOv[num].w; delete p.padOv[num].h; }   // param wins
   } else {
     const num = comp.pins[idx].num;
     const p = comp.fpParams || (comp.fpParams = {});
