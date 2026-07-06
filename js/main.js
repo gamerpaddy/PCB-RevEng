@@ -769,7 +769,9 @@ function wireDialogs(){
     UI.toast("Copied to clipboard");
   });
   $("#export-download").addEventListener("click", ()=>{
-    const f = netlistFor($("#export-format").value, $("#export-arrange").value);
+    const fmt = $("#export-format").value;
+    if (fmt === "gerber"){ downloadGerbers(); return; }   // multi-file → zip
+    const f = netlistFor(fmt, $("#export-arrange").value);
     downloadFile((f.base || "netlist") + "." + f.ext, f.text, f.mime);
   });
   $("#bom-close").addEventListener("click", ()=> $("#bom-dialog").close());
