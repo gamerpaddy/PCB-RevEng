@@ -304,14 +304,13 @@ UI.refreshNets = () => {
   const q = UI.netFilter.trim().toLowerCase();
   let shown = 0, total = 0;
   for (const n of State.nets){
-    const members = netMembers(n.id);
-    if (!members.length) continue;
+    const pinCount = (map.get(n.id) || []).length;
+    if (pinCount === 0) continue;         // hide nets with no pads (0p) — not real netlist nets
     total++;
     if (q && !n.name.toLowerCase().includes(q)) continue;
     shown++;
     const item = document.createElement("div");
     item.className = "net-item" + (UI.activeNetId === n.id ? " active" : "");
-    const pinCount = (map.get(n.id) || []).length;
     item.innerHTML = `<input type="color" class="net-color" value="${/^#[0-9a-fA-F]{6}$/.test(n.color)?n.color:"#888888"}" title="Net colour">
       <button class="nprot${n.protected?" on":""}" title="${n.protected?"Protected — locked name, shielded from accidental merges. Click to unprotect.":"Click to protect — lock the name and shield from accidental merges."}">🛡</button>
       <span class="nname" title="${escAttr(n.name)}${n.protected?" (protected)":""}">${escAttr(n.name)}</span>
@@ -1251,15 +1250,51 @@ UI.openNetPopup = (title, current, onPick) => {
 
 /* ask whether a rename should touch the whole net or just the one pad/via.
    cb is called with "all", "one", or null (cancelled). */
-UI.openNetScopeDialog = (oldName, newName, count, cb) => {
+/* Ask how far a net rename should reach. `allCount` = objects on the current named net,
+   `connCount` = objects in the physically-connected node. cb("all"|"connected"|"one"|null).
+   Buttons that wouldn't differ (allCount<=1 / connCount<=1) are hidden. */
+UI.openNetScopeDialog = (oldName, newName, allCount, connCount, cb) => {
   const dlg = $("#netscope-dialog");
-  $("#netscope-msg").innerHTML = `<b>“${escAttr(oldName)}”</b> has ${count} pads/vias/traces on it. What should renaming to <b>“${escAttr(newName)}”</b> affect?`;
-  $("#netscope-all").textContent = "Rename all on “" + oldName + "” → “" + newName + "”";
-  $("#netscope-one").textContent = "Rename just this one → “" + newName + "” (disconnect from “" + oldName + "”)";
+  const clearing = !newName;
+  const verb = clearing ? "Clear" : "Rename";
+  $("#netscope-msg").innerHTML = clearing
+    ? `Clear net <b>“${escAttr(oldName)}”</b> — how far should it reach?`
+    : `Set net to <b>“${escAttr(newName)}”</b> — how far should it reach?`;
+  const allBtn = $("#netscope-all"), connBtn = $("#netscope-connected"), oneBtn = $("#netscope-one");
+  allBtn.textContent  = `${verb} whole net “${oldName}” (${allCount})`;
+  connBtn.textContent = `${verb} only connected (${connCount})`;
+  oneBtn.textContent  = `${verb} only this selected`;
+  allBtn.style.display  = allCount  > 1 ? "" : "none";   // no separate "all" when the net is this object alone
+  connBtn.style.display = connCount > 1 ? "" : "none";   // no "connected" when nothing else is wired to it
   const pick = (scope) => { dlg.close(); cb(scope); };
-  $("#netscope-all").onclick    = () => pick("all");
-  $("#netscope-one").onclick    = () => pick("one");
+  allBtn.onclick  = () => pick("all");
+  connBtn.onclick = () => pick("connected");
+  oneBtn.onclick  = () => pick("one");
   $("#netscope-cancel").onclick = () => pick(null);
+  dlg.showModal();
+};
+
+/* two DIFFERENT named nets (A, B) are being joined — let the user pick which name wins
+   instead of silently choosing one. cb("toB" | "toA" | "ignore" | "undo").
+   opts.msg overrides the prompt text; opts.ignore===false hides the Ignore option (for
+   physical joins like a via landing on a trace, where "keep separate" makes no sense). */
+UI.openNetMergeDialog = (aName, bName, cb, opts) => {
+  opts = opts || {};
+  const dlg = $("#netmerge-dialog");
+  $("#netmerge-msg").innerHTML = opts.msg ||
+    `This trace connects <b>“${escAttr(aName)}”</b> (A) and <b>“${escAttr(bName)}”</b> (B). Which net should the joined copper use?`;
+  $("#netmerge-tob").textContent    = `A → B  (use “${bName}”)`;
+  $("#netmerge-toa").textContent    = `B → A  (use “${aName}”)`;
+  const ignoreBtn = $("#netmerge-ignore");
+  ignoreBtn.textContent = "Ignore — keep the nets separate";
+  ignoreBtn.style.display = opts.ignore === false ? "none" : "";
+  let done = false;
+  const pick = (c) => { if (done) return; done = true; dlg.close(); cb(c); };
+  $("#netmerge-tob").onclick    = () => pick("toB");
+  $("#netmerge-toa").onclick    = () => pick("toA");
+  ignoreBtn.onclick             = () => pick("ignore");
+  $("#netmerge-undo").onclick   = () => pick("undo");
+  dlg.addEventListener("close", () => pick("undo"), { once:true }); // Esc-dismiss = undo
   dlg.showModal();
 };
 

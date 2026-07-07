@@ -471,6 +471,11 @@ function wireCanvas(){
   cv.addEventListener("pointerdown", e => { cv.setPointerCapture(e.pointerId); onPointerDown(e); });
   cv.addEventListener("pointermove", onPointerMove);
   cv.addEventListener("pointerup", onPointerUp);
+  // ghost tools (via/component/trace) hold no pointer capture, so no move events fire once
+  // the cursor leaves the canvas — the auto-pan RAF would otherwise keep scrolling from the
+  // last in-canvas point. Stop it on leave. (A real drag captures the pointer, so leave
+  // doesn't fire and dragging an object off-screen still auto-pans.)
+  cv.addEventListener("pointerleave", () => { if (!Tools.drag) stopEdgeScroll(); });
   cv.addEventListener("dblclick", onDoubleClick);
   let lastPlaceRC = 0; // timestamp of last right-click while placing (double = cancel)
   cv.addEventListener("contextmenu", e => {
@@ -538,7 +543,7 @@ function showCanvasContextMenu(cx, cy, w){
     const c = h.comp, p = c.pins[h.pinIdx];
     UI.select(h);
     items.push({ label:"Set net…", action:()=>promptNetName(h) });
-    if (p.netId) items.push({ label:"Clear net", action:()=>{ pushUndo("clear pin net"); assignNetToObject(h,""); UI.refreshNets(); UI.refreshInspector(); requestRender(); } });
+    if (p.netId) items.push({ label:"Clear net", action:()=>applyNetRename(h, "") });
     items.push({ label: p.nc ? "Unset no-connect" : "Mark no-connect (NC)", action:()=>{ pushUndo("pin NC"); p.nc=!p.nc; if(p.nc)p.netId=null; pruneNets(); UI.refreshNets(); UI.refreshInspector(); requestRender(); } });
     // visual pad editor — drag handles to resize / move this pad (free & generated alike)
     items.push({ sep:true });
@@ -565,6 +570,7 @@ function showCanvasContextMenu(cx, cy, w){
   } else if (h && h.type === "via"){
     UI.select(h);
     items.push({ label:"Set net…", action:()=>promptNetName(h) });
+    if (h.via.netId) items.push({ label:"Clear net", action:()=>applyNetRename(h, "") });
     items.push({ label:"Set blind/buried span…", action:()=>UI.openViaSpanEditor(h.via) });
     items.push({ label: h.via.kind==="pth" ? "Change to via" : "Change to PTH", action:()=>{ pushUndo("via type"); h.via.kind = h.via.kind==="pth"?"via":"pth"; UI.refreshInspector(); requestRender(); } });
     items.push({ sep:true });
@@ -572,8 +578,8 @@ function showCanvasContextMenu(cx, cy, w){
   } else if (h && h.type === "trace"){
     UI.select(h);
     items.push({ label:"Set net…", action:()=>promptNetName(h) });
-    items.push({ label:"Select whole net", action:()=>{ if(h.trace.netId) UI.selectNetTraces(h.trace.netId); requestRender(); } });
     items.push({ label:"Cut here", action:()=>{ setTool("cut"); cutDown(w,{}); } });
+    items.push({ label:"Disconnect / clear net", action:()=>disconnectTrace(h.trace) });
     items.push({ sep:true });
     items.push({ label:"Delete trace", danger:true, action:()=>deleteSelection() });
   } else if (h && h.type === "note"){

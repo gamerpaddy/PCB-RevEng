@@ -403,8 +403,21 @@
     <div class="panel-hint" id="netscope-msg" style="max-width:360px;margin-bottom:10px"></div>
     <div class="dlg-buttons" style="flex-direction:column;align-items:stretch;gap:6px">
       <button id="netscope-all" class="primary"></button>
+      <button id="netscope-connected"></button>
       <button id="netscope-one"></button>
       <button id="netscope-cancel">Cancel</button>
+    </div>
+  </dialog>
+
+  <!-- ======= TRACE JOINS TWO DIFFERENT NETS ======= -->
+  <dialog id="netmerge-dialog">
+    <div class="dlg-title">Trace joins two nets</div>
+    <div class="panel-hint" id="netmerge-msg" style="max-width:360px;margin-bottom:10px"></div>
+    <div class="dlg-buttons" style="flex-direction:column;align-items:stretch;gap:6px">
+      <button id="netmerge-tob" class="primary"></button>
+      <button id="netmerge-toa"></button>
+      <button id="netmerge-ignore"></button>
+      <button id="netmerge-undo">Undo — don't draw the trace</button>
     </div>
   </dialog>
 
@@ -527,7 +540,7 @@
 <script src="js/imagetiles.js?v=1"></script>
 <script src="js/view.js?v=82"></script>
 <script src="js/layerstack.js?v=53"></script>
-<script src="js/tools.js?v=89"></script>
+<script src="js/tools.js?v=97"></script>
 <script src="js/align.js?v=54"></script>
 <script src="js/keymap.js?v=56"></script>
 <script src="js/resolver.js?v=49"></script>
@@ -535,11 +548,11 @@
 <script src="js/eagle.js?v=3"></script>
 <script src="js/gencad.js?v=4"></script>
 <script src="js/gerber.js?v=1"></script>
-<script src="js/ui.js?v=90"></script>
+<script src="js/ui.js?v=94"></script>
 <script src="js/kicadsearch.js?v=51"></script>
 <script src="js/fpdialog.js?v=54"></script>
 <script src="js/autosave.js?v=51"></script>
-<script src="js/main.js?v=90"></script>
+<script src="js/main.js?v=95"></script>
 
 </body>
 </html>

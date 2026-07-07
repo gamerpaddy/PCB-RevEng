@@ -234,6 +234,9 @@ function onPointerUp(e){
       autoConnectPins(d.comp);          // pins moved onto copper pick up its net (fills empty pins only)
       checkMoveOverlaps(d.comp);        // then warn about any different-net pads now touching
     }
+    if (d.kind === "move-via" && d.moved){
+      handleViaDrop(d.via);             // combine stacked vias + connect to landed copper (net prompts)
+    }
   }
   if (d.kind === "pad-resize" || d.kind === "pad-move"){
     if (!d.moved) Undo.stack.pop();               // a click that didn't drag: keep undo clean
@@ -372,8 +375,12 @@ function edgeScrollAllowed(){
   return false;
 }
 
+/* true only while the pointer is actually inside the editor canvas — auto-pan must
+   stop the moment the cursor leaves it (into a side panel or off the window) */
+function ptInCanvas(pt){ return !!pt && pt.x >= 0 && pt.x <= View.width && pt.y >= 0 && pt.y <= View.height; }
+
 function updateEdgeScroll(pt){
-  if (!edgeScrollAllowed()){ stopEdgeScroll(); return; }
+  if (!edgeScrollAllowed() || !ptInCanvas(pt)){ stopEdgeScroll(); return; }
   const m = UI.edgeMargin(), speed = UI.edgeSpeed(), W = View.width, H = View.height;
   // Don't start auto-panning until the pointer has first moved OUT of the edge margin.
   // Otherwise grabbing an object that already sits near the edge would scroll forever
@@ -397,7 +404,7 @@ function updateEdgeScroll(pt){
 function edgeScrollTick(){
   Tools._edgeRAF = 0;
   const v = Tools._edgeVel, pt = Tools._lastPt;
-  if (!edgeScrollAllowed() || !v || !pt) return;
+  if (!edgeScrollAllowed() || !v || !pt || !ptInCanvas(pt)) return;
   View.panX += v.x; View.panY += v.y;
   // re-drive from the last cursor screen point: as the board scrolls under a stationary
   // finger, the object (or ghost) keeps tracking the pointer and moves along with it
@@ -509,13 +516,17 @@ function selectDown(w, pt, e){
       // an SMD pad only touches copper on ITS OWN side, so it must never grab (and drag)
       // a trace on another layer; only a through-hole pad reaches every side
       const reachesAll = (fpin) => fpin.shape === "circle" && fpin.tht !== false;
-      for (const fpin of fp.pins)
+      for (let pi=0; pi<fp.pins.length; pi++){
+        const fpin = fp.pins[pi]; if (!fpin) continue;
+        const pinNet = c.pins[pi] ? c.pins[pi].netId : null;
         for (const t of State.traces){
           if (!(reachesAll(fpin) || t.side === c.side)) continue;
+          if (t.netId !== pinNet) continue;   // a pad on a DIFFERENT net doesn't drag the trace (e.g. after clear / "ignore")
           for (let i=0;i<t.points.length;i++)
             if (pinEdgeDist(c, fpin, t.points[i].x, t.points[i].y) <= ctol)
               anchors.push({ pts:t.points, i, dx:t.points[i].x-c.x, dy:t.points[i].y-c.y });
         }
+      }
     }
     Tools.drag = { kind:"move-comp", comp:c, offX:w.x-c.x, offY:w.y-c.y, moved:false, anchors, detach };
   } else if (h.type === "via"){
@@ -526,10 +537,12 @@ function selectDown(w, pt, e){
     const anchors = [];
     if (!detach){
       const vtol = Math.max(h.via.r || 5, 6/View.zoom);
-      for (const t of State.traces)
+      for (const t of State.traces){
+        if (t.netId !== h.via.netId) continue;   // a via on a DIFFERENT net doesn't drag the trace (e.g. after clear / "ignore")
         for (let i=0;i<t.points.length;i++)
           if (Math.hypot(t.points[i].x-h.via.x, t.points[i].y-h.via.y) <= vtol)
             anchors.push({ pts:t.points, i, dx:t.points[i].x-h.via.x, dy:t.points[i].y-h.via.y });
+      }
     }
     Tools.drag = { kind:"move-via", via:h.via, offX:w.x-h.via.x, offY:w.y-h.via.y, moved:false, anchors };
   } else if (h.type === "note"){
@@ -679,32 +692,60 @@ function assignNetToObject(obj, name, scope){
   return true;
 }
 
-/* Apply a typed net name to a pad/via/trace, asking how far the rename should reach
-   when the current net has several members (rename the whole net vs. peel this one
-   off). Handles undo + refresh itself; runs `done` afterwards. */
+/* Assign the target net to just the physically-connected cluster around `obj` (or clear it
+   when name is empty). scope "connected" — the electrical node, not the whole named net. */
+function assignNetToConnected(obj, name){
+  const net = name ? (findNetByName(name) || findNetByName(name.toUpperCase()) || createNet(name)) : null;
+  const nid = net ? net.id : null;
+  const { traces, vias, pads } = connectedCluster(obj);
+  for (const t of traces) t.netId = nid;
+  for (const v of vias)   v.netId = nid;
+  for (const { comp, pinIdx } of pads) comp.pins[pinIdx].netId = nid;
+  pruneNets();
+}
+
+/* Apply a typed net name to a pad/via/trace, asking HOW FAR the change should reach when
+   there is more than one candidate: the whole named net (all), only the physically
+   connected node (connected), or just this one object (one). Handles undo + refresh. */
 function applyNetRename(obj, name, done){
   name = (name || "").trim();
   const oldId = objNetId(obj);
   const old = oldId ? getNet(oldId) : null;
   const members = oldId ? netMembers(oldId).length : 0;
+  const cl = connectedCluster(obj);
+  const connCount = cl.traces.size + cl.vias.size + cl.pads.length;
   const finish = () => {
     if (obj.type === "via" && name) Tools.lastViaNet = name;  // remember for the next via
     UI.refreshNets(); UI.refreshInspector(); requestRender();
     done && done();
   };
-  // unambiguous: clearing, no current net, unchanged name, or a lone member → no prompt
-  if (!name || !old || old.name === name || members <= 1){
-    pushUndo("name net");
-    if (!assignNetToObject(obj, name, "all")) Undo.stack.pop();
+  const applyScope = (scope) => {
+    pushUndo(name ? (scope==="all"?"rename net":scope==="connected"?"net connected":"split net")
+                  : (scope==="all"?"clear whole net":scope==="connected"?"clear connected":"clear net"));
+    if (scope === "connected"){
+      assignNetToConnected(obj, name);
+    } else if (!name && scope === "all"){                 // clear EVERY object on the current net
+      if (oldId){
+        for (const c of State.components) for (const p of c.pins) if (p.netId === oldId) p.netId = null;
+        for (const v of State.vias)   if (v.netId === oldId) v.netId = null;
+        for (const t of State.traces) if (t.netId === oldId) t.netId = null;
+        pruneNets();
+      }
+    } else if (!assignNetToObject(obj, name, scope)){
+      Undo.stack.pop();
+    }
     finish();
+  };
+  if (!name && !old){ done && done(); return; }           // nothing to clear
+  // unambiguous: unchanged name, or nothing else on the net AND nothing connected
+  if ((old && old.name === name) || (members <= 1 && connCount <= 1)){
+    applyScope("all");   // lone/absent net → just this object (clear or set)
     return;
   }
-  // the net has other members — ask what the rename should affect
-  UI.openNetScopeDialog(old.name, name, members, (scope) => {
-    if (!scope){ done && done(); return; }                 // cancelled — nothing changes
-    pushUndo(scope === "all" ? "rename net " + old.name : "split net " + old.name);
-    if (!assignNetToObject(obj, name, scope)) Undo.stack.pop();
-    finish();
+  // more than one candidate — ask how far the change should reach (all / connected / this)
+  UI.openNetScopeDialog(old ? old.name : "(none)", name, members, connCount, (scope) => {
+    if (!scope){ done && done(); return; }   // cancelled — nothing changes
+    applyScope(scope);
   });
 }
 
@@ -902,6 +943,124 @@ function autoConnectPins(comp){
   return changed;
 }
 
+/* traces currently welded to a via (a vertex sitting on it) */
+function viaAttachedTraces(via){
+  const out = [], vtol = Math.max(via.r || State.viaR, 6/View.zoom);
+  for (const t of State.traces)
+    for (let i=0;i<t.points.length;i++)
+      if (Math.hypot(t.points[i].x-via.x, t.points[i].y-via.y) <= vtol){ out.push(t); break; }
+  return out;
+}
+
+/* net of a pad or (non-attached) trace whose copper the via now overlaps — the net the via
+   just landed on. Ignores the via's own attached traces. Returns a netId or null. */
+function viaLandedNet(via, attached){
+  for (const c of State.components){
+    const fp = compFootprint(c);
+    for (let pi=0; pi<c.pins.length; pi++){
+      const fpin = fp.pins[pi]; if (!fpin) continue;
+      const thru = fpin.shape === "circle" && fpin.tht !== false;
+      if (!thru && !viaOnSide(via, c.side)) continue;                // via must reach the pad's side
+      if (c.pins[pi].netId && pinEdgeDist(c, fpin, via.x, via.y) <= (via.r||State.viaR)+1) return c.pins[pi].netId;
+    }
+  }
+  for (const t of State.traces){
+    if (!t.netId || attached.includes(t) || !viaOnSide(via, t.side)) continue;
+    const reach = (via.r||State.viaR) + (t.width||State.traceW)/2;
+    for (let k=0;k<t.points.length-1;k++)
+      if (distToSeg(via.x, via.y, t.points[k], t.points[k+1]) <= reach) return t.netId;
+  }
+  return null;
+}
+
+/* first via (other than `via`) whose copper overlaps `via` */
+function firstViaOverlap(via){
+  for (const o of State.vias){
+    if (o === via) continue;
+    const rr = Math.max(via.r||State.viaR, o.r||State.viaR);
+    if (Math.hypot(o.x-via.x, o.y-via.y) <= rr*0.9) return o;
+  }
+  return null;
+}
+/* fold via `other` into `via`: pull its coincident trace anchors onto `via`, then drop it */
+function foldViaInto(via, other){
+  const vtol = Math.max(other.r||State.viaR, 6/View.zoom);
+  for (const t of State.traces)
+    for (let i=0;i<t.points.length;i++)
+      if (Math.hypot(t.points[i].x-other.x, t.points[i].y-other.y) <= vtol){ t.points[i].x = via.x; t.points[i].y = via.y; }
+  State.vias = State.vias.filter(v => v !== other);
+}
+
+/* prompt A→B / B→A / Undo for joining two different nets (A=aId, B=bId), then apply.
+   cb(survivingNetId) on merge, cb(null) on Undo. No "Ignore" — via joins are physical. */
+function promptNetMerge(aId, bId, msg, cb){
+  const aName = getNet(aId)?.name || "?", bName = getNet(bId)?.name || "?";
+  UI.openNetMergeDialog(aName, bName, (choice) => {
+    if (choice === "toB" || choice === "toA"){
+      const keep = choice === "toB" ? bId : aId, drop = choice === "toB" ? aId : bId;
+      const survived = mergeNets(keep, drop);           // null only if BOTH protected
+      cb(survived === null ? keep : survived);
+    } else cb(null);                                     // undo / dismissed
+  }, { ignore:false, msg });
+}
+
+/* After a via move ends: fold any stacked vias into it, then wire the via to whatever copper
+   it now sits on. Unnetted via silently adopts the net. Different nets prompt A→B/B→A/Undo
+   (vias that combine, or a via whose traces meet a different net); a bare netted via with no
+   traces just asks Undo/Overwrite. The pre-move snapshot is on the undo stack, so Undo
+   reverts the whole move + any combine. Async because the choices are modal. */
+function handleViaDrop(via){
+  let folded = 0;
+  const refresh = () => { pruneNets(); UI.refreshNets(); UI.refreshInspector(); requestRender(); };
+  const revert  = () => { undo(); UI.select(null); UI.refreshNets(); UI.refreshInspector(); requestRender(); UI.toast("Move undone"); };
+
+  // Phase 2 — connect the via to the copper it landed on
+  const connectPhase = () => {
+    const attached = viaAttachedTraces(via);
+    const target = viaLandedNet(via, attached);
+    let groupNet = via.netId;
+    if (!groupNet) for (const t of attached) if (t.netId){ groupNet = t.netId; break; }
+
+    if (target == null){ refresh(); if (folded) UI.toast("Vias combined"); return; }
+    const tName = getNet(target)?.name || "net";
+    if (!groupNet){                                       // unnetted via → adopt the landed net
+      via.netId = target;
+      for (const t of attached) if (!t.netId) t.netId = target;
+      refresh(); UI.toast("Via connected → “" + tName + "”"); return;
+    }
+    if (groupNet === target){ via.netId = target; refresh(); if (folded) UI.toast("Vias combined"); return; }
+
+    // conflict: the via (or a trace on it) already carries a DIFFERENT net
+    if (attached.length){
+      promptNetMerge(groupNet, target, "This via’s trace meets a different net where it now sits. Which net should the joined copper use?", (survived) => {
+        if (survived === null){ revert(); return; }
+        via.netId = survived; refresh(); UI.toast("Merged → “" + (getNet(survived)?.name || tName) + "”");
+      });
+    } else {
+      const gName = getNet(groupNet)?.name || "net";
+      if (!confirm("Overwrite this via’s net “" + gName + "” with “" + tName + "”?\n\nOK = overwrite.   Cancel = undo the move.")){ revert(); return; }
+      via.netId = target; refresh(); UI.toast("Via net → “" + tName + "”");
+    }
+  };
+
+  // Phase 1 — fold overlapping vias into this one (chained: a net conflict prompts A→B/B→A)
+  const combineStep = () => {
+    const other = firstViaOverlap(via);
+    if (!other){ connectPhase(); return; }
+    if (via.netId && other.netId && via.netId !== other.netId){
+      promptNetMerge(via.netId, other.netId, "Two vias overlap and combine into one, but carry different nets. Which net should the combined via use?", (survived) => {
+        if (survived === null){ revert(); return; }
+        via.netId = survived; foldViaInto(via, other); folded++; combineStep();
+      });
+      return;
+    }
+    if (!via.netId && other.netId) via.netId = other.netId;
+    foldViaInto(via, other); folded++; combineStep();
+  };
+
+  combineStep();
+}
+
 /* ---------------- component tool ---------------- */
 function componentDown(w, e){
   if (!Tools.pending){ UI.openFootprintDialog(); return; }
@@ -976,42 +1135,55 @@ function finishTrace(endSnap){
   endSnap = endSnap || snapToConductor(pts[pts.length-1].x, pts[pts.length-1].y, Tools.traceSide, true, State.traceW);
 
   // determine / create net
-  let netId = null;
   const sSnap = Tools.traceStartSnap;
   const nets = [];
   if (sSnap && sSnap.netId) nets.push(sSnap.netId);
   if (endSnap && endSnap.netId) nets.push(endSnap.netId);
-  if (nets.length === 2 && nets[0] !== nets[1]){
-    // ask BEFORE creating anything; "No" abandons the trace entirely
-    netId = mergeNetsChecked(nets[0], nets[1]);
-    if (netId === MERGE_DECLINED){
-      UI.toast("Cancelled — trace not drawn");
-      cancelTrace();
-      return;
-    }
-    pushUndo();
-    if (netId === null){
-      netId = nets[0];
-      UI.toast("⚠ " + (getNet(nets[0])?.name) + " and " + (getNet(nets[1])?.name) +
-               " are protected nets — NOT merged (trace joined to " + getNet(nets[0]).name + ")");
-    } else {
-      UI.toast("Merged nets → " + getNet(netId).name);
-    }
-  } else if (nets.length){
-    pushUndo();
-    netId = nets[0];
-  } else {
-    pushUndo();
-    netId = createNet().id;
-  }
-  // attach endpoints
-  applyAttach(sSnap, netId);
-  applyAttach(endSnap, netId);
 
-  // if an endpoint started/ended on the END of an existing same-side trace, weld
-  // the two into a single continuous polyline instead of leaving two objects
+  // both endpoints already carry a DIFFERENT named net → don't silently pick one.
+  // Ask which name wins (or leave them apart) BEFORE mutating any state.
+  if (nets.length === 2 && nets[0] !== nets[1]){
+    const aId = nets[0], bId = nets[1];   // A = where the trace started, B = where it ended
+    const aName = getNet(aId)?.name || "?", bName = getNet(bId)?.name || "?";
+    UI.openNetMergeDialog(aName, bName, (choice) => {
+      if (choice !== "undo" && Tools.tracePts !== pts){ return; } // stale (cancelled meanwhile)
+      if (choice === "undo" || !choice){ UI.toast("Cancelled — trace not drawn"); cancelTrace(); return; }
+      if (choice === "ignore"){
+        // draw the trace but keep the two nets apart: it gets its own fresh net and
+        // neither pad is reassigned (the checker will flag the deliberate short)
+        pushUndo();
+        completeTrace(pts, sSnap, endSnap, createNet().id, { skipAttach:true });
+        return;
+      }
+      // "toB" keeps B (A→B); "toA" keeps A (B→A)
+      const keepId = choice === "toB" ? bId : aId, dropId = choice === "toB" ? aId : bId;
+      pushUndo();                                  // snapshot BEFORE the merge mutates nets
+      const merged = mergeNets(keepId, dropId);    // null only if BOTH are protected
+      const netId = (merged === null) ? keepId : merged;
+      if (merged === null) UI.toast("⚠ " + getNet(keepId).name + " / " + getNet(dropId).name + " are protected — NOT merged");
+      else UI.toast("Merged nets → " + getNet(netId).name);
+      completeTrace(pts, sSnap, endSnap, netId, {});
+    });
+    return;   // async — the trace is finalized inside the callback
+  }
+
+  pushUndo();
+  const netId = nets.length ? nets[0] : createNet().id;
+  completeTrace(pts, sSnap, endSnap, netId, {});
+}
+
+/* Finalize a drawn trace once its net is decided (pushUndo already fired):
+   attach the endpoints to their pads/vias, weld into any touching same-side trace,
+   and join crossings. `opts.skipAttach` (the "Ignore" merge choice) leaves both
+   endpoint pads on their own nets — only the trace itself takes `netId`. */
+function completeTrace(pts, sSnap, endSnap, netId, opts){
+  opts = opts || {};
+  if (!opts.skipAttach){
+    applyAttach(sSnap, netId);
+    applyAttach(endSnap, netId);
+  }
   const trace = weldOrCreateTrace(pts, Tools.traceSide, netId, sSnap, endSnap);
-  mergeIntersectingTraces(trace);
+  if (!opts.skipAttach) mergeIntersectingTraces(trace);
   Tools.tracePts = null; Tools.traceStartSnap = null;
   UI.setHint(TOOL_HINTS.trace);
   UI.refreshNets(); requestRender();
@@ -1107,6 +1279,152 @@ function mergeIntersectingTraces(trace){
     merged++;
   }
   if (merged) UI.toast("Joined " + merged + " crossing trace" + (merged>1?"s":"") + " → net “" + (getNet(trace.netId)?.name || "?") + "”");
+}
+
+/* is world point (px,py) sitting on a same-side pad's copper (within halfW)? Used by
+   disconnectTrace to know when a trimmed end has physically cleared the pads. */
+function padTouchingPoint(px, py, side, halfW){
+  for (const c of State.components){
+    if (Math.hypot(px - c.x, py - c.y) > compRadius(c) + halfW) continue;   // quick reject
+    const fp = compFootprint(c);
+    for (let pi=0; pi<c.pins.length; pi++){
+      const fpin = fp.pins[pi];
+      if (!fpin) continue;
+      const thru = fpin.shape === "circle" && fpin.tht !== false;   // only THT pads reach every side
+      if (!thru && c.side !== side) continue;
+      if (pinEdgeDist(c, fpin, px, py) <= halfW) return true;
+    }
+  }
+  return false;
+}
+
+/* does via v's copper touch trace t (on a side v reaches)? */
+function viaTouchesTrace(v, t){
+  if (!viaOnSide(v, t.side)) return false;
+  const reach = (t.width || State.traceW) / 2 + (v.r || State.viaR);
+  for (let k=0; k<t.points.length-1; k++)
+    if (distToSeg(v.x, v.y, t.points[k], t.points[k+1]) <= reach) return true;
+  return false;
+}
+
+/* the whole galvanically-connected copper cluster reachable from `startTrace` through
+   trace↔trace junctions and vias (and any traces those vias reach on other layers, and so
+   on). Pads are the boundary — they are never traversed into. Returns {traces:Set, vias:Set}. */
+function traceConnectedCluster(startTrace){
+  const traces = new Set([startTrace]), vias = new Set(), queue = [startTrace];
+  while (queue.length){
+    const t = queue.pop();
+    // vias sitting on this trace
+    for (const v of State.vias){
+      if (vias.has(v) || !viaTouchesTrace(v, t)) continue;
+      vias.add(v);
+      // every trace that via reaches (this side and, if through, other sides)
+      for (const o of State.traces)
+        if (!traces.has(o) && viaTouchesTrace(v, o)){ traces.add(o); queue.push(o); }
+    }
+    // same-side traces physically touching this one (shared junction / T / crossing)
+    for (const o of State.traces)
+      if (!traces.has(o) && o.side === t.side && tracesTouch(t, o)){ traces.add(o); queue.push(o); }
+  }
+  return { traces, vias };
+}
+
+/* Context-menu "Disconnect / clear net": strip the net from the whole connected copper
+   cluster (this trace, the vias on it, and every other trace/via reachable through those
+   vias and junctions) WITHOUT touching the pads it reaches, then pull each trace's end
+   anchors off the pads so the cluster is physically disconnected. Removes end vertices that
+   sit on a pad; for a bare 2-point trace it retracts the endpoint until its copper clears. */
+function disconnectTrace(trace){
+  pushUndo("disconnect trace");
+  const { traces, vias } = traceConnectedCluster(trace);
+  for (const t of traces){
+    const halfW = (t.width || State.traceW) / 2;
+    const clearEnd = (end) => {
+      // drop end anchors that sit on a pad while an interior vertex still remains
+      while (t.points.length > 2){
+        const idx = end === 0 ? 0 : t.points.length - 1;
+        const p = t.points[idx];
+        if (!padTouchingPoint(p.x, p.y, t.side, halfW)) return;
+        t.points.splice(idx, 1);
+      }
+      // only the two endpoints left — if this end still overlaps a pad, retract it inward
+      const idx = end === 0 ? 0 : t.points.length - 1;
+      const other = end === 0 ? t.points[1] : t.points[t.points.length - 2];
+      const p = t.points[idx];
+      if (!padTouchingPoint(p.x, p.y, t.side, halfW)) return;
+      const dx = other.x - p.x, dy = other.y - p.y, len = Math.hypot(dx, dy) || 1;
+      const step = Math.max(halfW, 2);
+      for (let s = step; s < len; s += step){
+        const nx = p.x + dx/len*s, ny = p.y + dy/len*s;
+        if (!padTouchingPoint(nx, ny, t.side, halfW)){ p.x = nx; p.y = ny; return; }
+      }
+      p.x = other.x - dx/len*step; p.y = other.y - dy/len*step;   // whole span under pads — leave a stub
+    };
+    clearEnd(0);
+    clearEnd(1);
+    t.netId = null;
+  }
+  for (const v of vias) v.netId = null;   // pads keep their nets; only cluster copper is cleared
+  pruneNets();
+  UI.refreshNets(); UI.refreshInspector(); requestRender();
+  UI.toast("Disconnected — cleared " + traces.size + " trace" + (traces.size>1?"s":"") +
+           (vias.size ? " + " + vias.size + " via" + (vias.size>1?"s":"") : "") + ", ends pulled off pads");
+}
+
+/* does pad (comp,fpin) physically touch trace t's copper (on a side the pad reaches)? */
+function padTouchesTrace(comp, fpin, t){
+  const thru = fpin.shape === "circle" && fpin.tht !== false;
+  if (!thru && comp.side !== t.side) return false;
+  const s = State.pxPerMm * (comp.scale || 1);
+  const wp = pinWorldPos(comp, fpin);
+  const reach = (t.width || State.traceW)/2 + Math.min(fpin.w, fpin.h) * s / 2;
+  for (let k=0; k<t.points.length-1; k++)
+    if (distToSeg(wp.x, wp.y, t.points[k], t.points[k+1]) <= reach) return true;
+  return false;
+}
+/* does pad (comp,fpin) sit on via v (on a side the via reaches)? */
+function padTouchesVia(comp, fpin, v){
+  const thru = fpin.shape === "circle" && fpin.tht !== false;
+  if (!thru && !viaOnSide(v, comp.side)) return false;
+  return pinEdgeDist(comp, fpin, v.x, v.y) <= (v.r || State.viaR) + 1;
+}
+
+/* The full electrical node physically reachable from a seed pad/via/trace — flood-fills
+   through trace↔trace junctions, vias, AND pads (a pad shared by two traces bridges them).
+   Unlike traceConnectedCluster (used by disconnect, which stops AT pads), this traverses
+   through pads. Returns {traces:Set, vias:Set, pads:[{comp,pinIdx}]}. */
+function connectedCluster(seed){
+  const traces = new Set(), vias = new Set(), padKeys = new Set(), pads = [], queue = [];
+  const addTrace = t => { if (!traces.has(t)){ traces.add(t); queue.push({k:"trace",o:t}); } };
+  const addVia   = v => { if (!vias.has(v)){ vias.add(v); queue.push({k:"via",o:v}); } };
+  const addPad   = (c,pi) => { const key=c.id+":"+pi; if (!padKeys.has(key)){ padKeys.add(key); const rec={comp:c,pinIdx:pi}; pads.push(rec); queue.push({k:"pad",o:rec}); } };
+  if (seed.type === "trace") addTrace(seed.trace);
+  else if (seed.type === "via") addVia(seed.via);
+  else if (seed.type === "pin") addPad(seed.comp, seed.pinIdx);
+
+  const eachPad = (fn) => { for (const c of State.components){ const fp = compFootprint(c);
+    for (let pi=0; pi<c.pins.length; pi++){ const fpin = fp.pins[pi]; if (fpin && !padKeys.has(c.id+":"+pi)) fn(c, pi, fpin); } } };
+
+  while (queue.length){
+    const n = queue.pop();
+    if (n.k === "trace"){
+      const t = n.o;
+      for (const v of State.vias) if (!vias.has(v) && viaTouchesTrace(v, t)) addVia(v);
+      for (const o of State.traces) if (!traces.has(o) && o !== t && o.side === t.side && tracesTouch(t, o)) addTrace(o);
+      eachPad((c,pi,fpin) => { if (padTouchesTrace(c, fpin, t)) addPad(c, pi); });
+    } else if (n.k === "via"){
+      const v = n.o;
+      for (const t of State.traces) if (!traces.has(t) && viaTouchesTrace(v, t)) addTrace(t);
+      for (const o of State.vias){ if (o===v || vias.has(o)) continue; const rr = Math.max(v.r||State.viaR, o.r||State.viaR); if (Math.hypot(o.x-v.x, o.y-v.y) <= rr*0.9) addVia(o); }
+      eachPad((c,pi,fpin) => { if (padTouchesVia(c, fpin, v)) addPad(c, pi); });
+    } else {
+      const { comp:c, pinIdx:pi } = n.o;
+      const fpin = compFootprint(c).pins[pi]; if (!fpin) continue;
+      for (const t of State.traces) if (!traces.has(t) && padTouchesTrace(c, fpin, t)) addTrace(t);
+      for (const v of State.vias) if (!vias.has(v) && padTouchesVia(c, fpin, v)) addVia(v);
+    }
+  }
+  return { traces, vias, pads };
 }
 
 function applyAttach(snap, netId){
