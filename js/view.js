@@ -299,7 +299,7 @@ function hitTest(wx, wy){
   for (let i=State.vias.length-1; i>=0; i--){
     const v = State.vias[i];
     if (!viaVisible(v)) continue;   // a buried via you can't see here can't be grabbed here
-    if (Math.hypot(wx-v.x, wy-v.y) <= (v.r||5) + tol*0.5)
+    if (Math.hypot(wx-v.x, wy-v.y) <= (v.r||State.viaR) + tol*0.5)
       return { type:"via", via:v };
   }
   // pins next — only pads that are actually drawn on the current layer are grabbable:
@@ -313,7 +313,10 @@ function hitTest(wx, wy){
     const smdShown = compBodyVisible(c);
     for (let pi=0; pi<c.pins.length; pi++){
       const fpin = fp.pins[pi]; if (!fpin) continue;
-      if (fpin.shape !== "circle" && !smdShown) continue;   // SMD pad not on this layer
+      // when the body isn't shown here, only a true through-hole pad (round WITH a
+      // drill) stays grabbable — a round SMD land (tht:false, e.g. a BGA ball) isn't
+      // drawn on the far side (see drawComponent), so it must not catch clicks either
+      if (!smdShown && !(fpin.shape === "circle" && fpin.tht !== false)) continue;
       if (pinEdgeDist(c, fpin, wx, wy) <= tol*0.9)
         return { type:"pin", comp:c, pinIdx:pi };
     }
@@ -1049,7 +1052,7 @@ function pathTrace(ctx, t){
 
 function drawVia(ctx, v, selNet){
   const pth = v.kind === "pth";
-  const r = v.r || 5;
+  const r = v.r || State.viaR;
   const isHover = View.hoverObj === v;   // single hovered via glows on its own
   const hl = (selNet && selNet !== -1 && v.netId === selNet) || isHover;
   const fa = isHover ? 1 : focusAlpha(v.netId, selNet);
@@ -1542,7 +1545,7 @@ function renderMask(ctx){
     m.restore();
   }
   for (const v of State.vias){
-    m.beginPath(); m.arc(v.x, v.y, (v.r||5) + margin*0.6, 0, Math.PI*2); m.fill();
+    m.beginPath(); m.arc(v.x, v.y, (v.r||State.viaR) + margin*0.6, 0, Math.PI*2); m.fill();
   }
   // composite onto the main canvas in device space
   ctx.save();

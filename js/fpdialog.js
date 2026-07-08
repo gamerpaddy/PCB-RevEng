@@ -239,18 +239,20 @@ UI.confirmFootprint = () => {
     pushUndo();
     const c = FPD.editComp;
     c.fpId = vals.fpId; c.fpParams = vals.fpParams; c._fp = null;
-    if (vals.ref) { c.ref = vals.ref; registerRef(c.ref); }
     c.value = vals.value; c.part = vals.part; c.kicad = vals.kicad;
-    // rebuild pin states, keep nets by pin number where possible
+    // rebuild pin states, keep nets + no-connect flags by pin number where possible
     const old = c.pins;
     const nfp = compFootprint(c);
     c.pins = nfp.pins.map(fpin => {
       const prev = old.find(p => p.num === fpin.num);
-      return { num: fpin.num, name: prev?prev.name:(fpin.name||""), netId: prev?prev.netId:null };
+      return { num: fpin.num, name: prev?prev.name:(fpin.name||""), netId: prev?prev.netId:null,
+               nc: prev ? prev.nc : undefined };
     });
     pruneNets();
     UI.select({type:"comp", comp:c});
     UI.refreshNets(); requestRender();
+    // rename goes through the central path so a duplicate reference prompts (abort/swap)
+    if (vals.ref && vals.ref !== c.ref) UI.commitRename(c, vals.ref);
   } else {
     Tools.pending = vals;
     Tools.ghostFp = fp;

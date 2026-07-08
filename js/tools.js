@@ -24,8 +24,6 @@ const Tools = {
   addPinFor: null,     // component receiving clicked pins
   // via net memory (reused for non-shift placements)
   lastViaNet: null,
-  // last real copper side, used when drawing while the X-ray view is active
-  lastCopperSide: "front",
   // drag state
   drag: null,
   dragVert: null,      // {trace,i} currently-dragged trace vertex (for render)
@@ -46,12 +44,11 @@ const TOOL_HINTS = {
   measure:   "Drag to measure a distance (px and mm)",
   calibrate: "Drag along a KNOWN distance, then enter its real length in mm",
   crop:      "Drag a box around the part of the image to KEEP · Esc to cancel",
-  pan:       "Drag to pan",
 };
 
 function toolCursor(name){
   return { select:"default", component:"crosshair", trace:"crosshair", via:"crosshair",
-           align:"crosshair", measure:"crosshair", calibrate:"crosshair", cut:"crosshair", note:"crosshair", crop:"crosshair", pan:"grab" }[name] || "default";
+           align:"crosshair", measure:"crosshair", calibrate:"crosshair", cut:"crosshair", note:"crosshair", crop:"crosshair" }[name] || "default";
 }
 
 function setTool(name){
@@ -194,6 +191,10 @@ function onPointerMove(e){
     }
     if (labelText){ View.cursorLabel = { text: labelText, color: labelCol, x: pt.x, y: pt.y }; requestRender(); }
     else if (View.cursorLabel){ View.cursorLabel = null; requestRender(); }
+    // status-bar readout of the hovered pad/component (richer than the cursor chip:
+    // ref.pin, pin name, net, [value · part])
+    const readout = hoverReadout(h);
+    if (readout !== Tools._readout){ Tools._readout = readout; UI.setStatusPad(readout); }
     View.canvas.style.cursor = h ? "pointer" : "default";
   }
 
@@ -547,7 +548,7 @@ function selectDown(w, pt, e){
     const detach = !!(e && e.shiftKey);
     const anchors = [];
     if (!detach){
-      const vtol = Math.max(h.via.r || 5, 6/View.zoom);
+      const vtol = Math.max(h.via.r || State.viaR, 6/View.zoom);
       for (const t of State.traces){
         if (t.netId !== h.via.netId) continue;   // a via on a DIFFERENT net doesn't drag the trace (e.g. after clear / "ignore")
         for (let i=0;i<t.points.length;i++)
@@ -828,7 +829,7 @@ function checkMoveOverlaps(comp){
       }
     }
     for (const v of State.vias)
-      if (pinEdgeDist(comp, fpin, v.x, v.y) <= (v.r||5) + 1) hitNet(v.netId, "via");
+      if (pinEdgeDist(comp, fpin, v.x, v.y) <= (v.r||State.viaR) + 1) hitNet(v.netId, "via");
     for (const t of State.traces){
       // a trace is copper on a single side — ignore unless the pad reaches that side
       if (!(myThru || t.side === comp.side)) continue;
@@ -950,7 +951,7 @@ function autoConnectPins(comp){
     const myThru = thru(fpin);
     let net = null;
     for (const v of State.vias){                     // a via / PTH under the pad
-      if (v.netId && pinEdgeDist(comp, fpin, v.x, v.y) <= (v.r||5) + 1){ net = v.netId; break; }
+      if (v.netId && pinEdgeDist(comp, fpin, v.x, v.y) <= (v.r||State.viaR) + 1){ net = v.netId; break; }
     }
     if (!net) for (const t of State.traces){          // a trace passing under the pad
       if (!t.netId) continue;
@@ -1671,7 +1672,7 @@ function viaDown(w, e){
   const pth = e.altKey;          // Alt-click = plated through hole (mounting/component hole)
   // no stacked vias/PTH on the same spot
   for (const v of State.vias){
-    if (Math.hypot(w.x-v.x, w.y-v.y) < Math.max(v.r||5, State.viaR)){
+    if (Math.hypot(w.x-v.x, w.y-v.y) < Math.max(v.r||0, State.viaR)){
       UI.toast("There is already a " + (v.kind==="pth"?"PTH":"via") + " here"); return;
     }
   }
@@ -1752,7 +1753,17 @@ function noteDown(w, e){
 /* ---------------- shared ops ---------------- */
 function deleteSelection(){
   const sel = UI.sel;
-  if (!sel) return;
+  if (!sel){
+    // Delete on a ctrl/shift multi-trace selection = the inspector's "Delete all"
+    if (UI.traceSel.length){
+      pushUndo("delete " + UI.traceSel.length + " traces");
+      State.traces = State.traces.filter(t => !UI.traceSel.includes(t));
+      UI.traceSel = [];
+      pruneNets();
+      UI.select(null); UI.refreshNets(); requestRender();
+    }
+    return;
+  }
   if (sel.comp && compEditLocked(sel.comp)){ UI.toast(sel.comp.ref + " is edit-locked"); return; }
   // Delete on a selected PAD clears just that pad's net — nuking the whole part needs the
   // component BODY selected (so editing a pin's net can't wipe the component by mistake).
@@ -1857,14 +1868,15 @@ function splitNetByConnectivity(netId){
       const fpin = fp.pins[pi]; if (!fpin) continue;
       const wp = pinWorldPos(c, fpin);
       const s = State.pxPerMm * (c.scale||1);
-      // a through-hole (round) pad reaches every copper layer; an SMD (rect) pad
-      // is copper on its component side only. fpin lets us test the real pad shape.
+      // a through-hole pad (round WITH a drill) reaches every copper layer; an SMD pad
+      // — rect, or a round land with tht:false (BGA ball / test point) — is copper on
+      // its component side only. fpin lets us test the real pad shape.
       items.push({ kind:"pin", comp:c, pi, fpin, x:wp.x, y:wp.y, r: Math.max(fpin.w, fpin.h)*s/2,
-                   thru: fpin.shape === "circle", side: c.side });
+                   thru: fpin.shape === "circle" && fpin.tht !== false, side: c.side });
     }
   }
   for (const v of State.vias)
-    if (v.netId === netId) items.push({ kind:"via", via:v, x:v.x, y:v.y, r:(v.r||5), thru:true, side:null });
+    if (v.netId === netId) items.push({ kind:"via", via:v, x:v.x, y:v.y, r:(v.r||State.viaR), thru:true, side:null });
   for (const t of State.traces)
     if (t.netId === netId) items.push({ kind:"trace", trace:t, side:t.side });
 

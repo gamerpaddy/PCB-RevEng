@@ -71,7 +71,6 @@ function wireToolbar(){
     if (inp) inp.focus();
   });
   $("#draw-side").addEventListener("change", e => {
-    Tools.lastCopperSide = e.target.value;
     // in split view, the draw side controls the focused pane's trace/copper side
     if (View.split){
       const which = View.cursorPane || "left";
@@ -264,38 +263,45 @@ function wireSettings(){
     $("#set-trace-val").textContent = State.traceW + " px";
     requestRender();
   });
+  // these settings are persisted project state (diffSnapshots reports them), so they
+  // get an undo entry too — otherwise their change is misattributed to the NEXT
+  // action's history diff (pushUndo also marks the project dirty via autosave)
   $("#set-compview").addEventListener("change", e => {
+    pushUndo("component view");
     State.compView = e.target.value;
-    markDirty(); requestRender();
+    requestRender();
   });
   $("#set-traceview").addEventListener("change", e => {
+    pushUndo("trace view");
     State.traceView = e.target.value;
-    markDirty(); requestRender();
+    requestRender();
   });
+  $("#set-reftext").addEventListener("change", e => { e.target._sliderArmed = false; });
   $("#set-reftext").addEventListener("input", e => {
+    armSliderUndo(e.target, "label size");
     State.refTextSize = +e.target.value;
     $("#set-reftext-val").textContent = State.refTextSize + " px";
-    markDirty(); requestRender();
+    requestRender();
   });
   $("#set-copper").addEventListener("change", e => {
+    pushUndo("copper weight");
     State.copperOz = parseFloat(e.target.value) || 1;
-    markDirty(); UI.refreshInspector();
+    UI.refreshInspector();
   });
   $("#set-copper-inner").addEventListener("change", e => {
+    pushUndo("inner copper weight");
     State.copperOzInner = parseFloat(e.target.value) || 0.5;
-    markDirty(); UI.refreshInspector();
+    UI.refreshInspector();
   });
+  $("#set-focusdim").addEventListener("change", e => { e.target._sliderArmed = false; });
   $("#set-focusdim").addEventListener("input", e => {
+    armSliderUndo(e.target, "focus dim");
     State.focusDim = (+e.target.value) / 100;
     $("#set-focusdim-val").textContent = Math.round(State.focusDim*100) + "%";
-    markDirty(); requestRender();
+    requestRender();
   });
   $("#set-overlap").addEventListener("change", e => {
     State.overlapCheck = e.target.value === "on";
-    markDirty();
-  });
-  $("#set-bigmerge").addEventListener("change", e => {
-    State.bigMergeWarn = e.target.value === "on";
     markDirty();
   });
   $("#set-histlen").addEventListener("input", e => {
@@ -347,8 +353,8 @@ function wireSettings(){
   kmode.addEventListener("change", ()=>{
     try { localStorage.setItem("pcbreveng.layerKeyMode", kmode.value); } catch(e){}
     UI.toast(kmode.value === "switch"
-      ? "Keys 1…0 now switch the view to that layer (Shift = +10)"
-      : "Keys 1…0 now toggle layer visibility (Shift = +10)");
+      ? "Keys 1…0 now switch the view to that layer"
+      : "Keys 1…0 now toggle layer visibility");
   });
   syncSettings();
 }
@@ -369,7 +375,6 @@ function syncSettings(){
     if (fd){ fd.value = Math.round((State.focusDim!=null?State.focusDim:0.16)*100); }
     if (fdv){ fdv.textContent = Math.round((State.focusDim!=null?State.focusDim:0.16)*100) + "%"; } }
   $("#set-overlap").value = State.overlapCheck ? "on" : "off";
-  $("#set-bigmerge").value = State.bigMergeWarn ? "on" : "off";
   $("#set-histlen").value = Undo.max;
   $("#set-histlen-val").textContent = Undo.max;
   { const zs = UI.zoomSens(); $("#set-zoomsens").value = zs; $("#set-zoomsens-val").textContent = zs + "%"; }
@@ -673,6 +678,20 @@ function wireKeyboard(){
     const act = Keymap.actionForKey(normKey(e));
     if (act){ act.run(e); return; }
 
+    // arrow keys pan the view (Shift = half a screen per press). Handled AFTER the
+    // rebindable actions so a user-assigned arrow binding wins over panning.
+    if (e.key.startsWith("Arrow")){
+      e.preventDefault();
+      const stepX = e.shiftKey ? View.width/2  : 60;   // Shift = half a screen on that axis
+      const stepY = e.shiftKey ? View.height/2 : 60;
+      if (e.key === "ArrowLeft")  View.panX += stepX;   // look left → content shifts right
+      else if (e.key === "ArrowRight") View.panX -= stepX;
+      else if (e.key === "ArrowUp")    View.panY += stepY;
+      else if (e.key === "ArrowDown")  View.panY -= stepY;
+      requestRender();
+      return;
+    }
+
     // fixed keys
     switch (e.key){
       case "Backspace": deleteSelection(); break;
@@ -721,7 +740,6 @@ function cycleDrawSide(withImage){
   }
   const sel = $("#draw-side");
   sel.value = order[(order.indexOf(sel.value)+1) % order.length];
-  Tools.lastCopperSide = sel.value;
   if (withImage) viewSideImage(sel.value);   // Shift+D: also swap the displayed image
   UI.toast("Drawing on " + SIDE_LABELS[sel.value] +
            (withImage && !State.layers.some(l=>l.side===sel.value) ? " (no image — black)" : ""));
@@ -989,8 +1007,15 @@ function importOptions(file){
   reader.readAsText(file);
 }
 
+/* anything on the board worth a "this replaces your work" confirm? */
+function boardHasContent(){
+  return !!(State.components.length || State.traces.length || State.vias.length ||
+            State.layers.length || State.notes.length);
+}
+
 function openProjectFile(file){
   if (/\.(brd|cad)$/i.test(file.name)){ importBoardFile(file); return; }
+  if (boardHasContent() && !confirm("Open “" + file.name + "”? This replaces the current board. Unsaved work will be lost.")) return;
   const reader = new FileReader();
   reader.onload = () => {
     try {
@@ -1013,7 +1038,7 @@ function openProjectFile(file){
 /* import a boardview file — EAGLE .brd or GENCAD .cad — replacing the current board
    (there are no image layers to keep). The parser is chosen by extension. */
 function importBoardFile(file){
-  if (State.components.length && !confirm("Import “" + file.name + "”? This replaces the current board. Unsaved work will be lost.")) return;
+  if (boardHasContent() && !confirm("Import “" + file.name + "”? This replaces the current board. Unsaved work will be lost.")) return;
   const isCad = /\.cad$/i.test(file.name);
   const reader = new FileReader();
   reader.onload = () => {

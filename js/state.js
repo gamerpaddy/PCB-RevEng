@@ -39,7 +39,6 @@ const State = {
   compView: "side",     // "side" = only viewed side fully drawn (other side: THT pads/vias only) | "both"
   traceView: "active",  // "active" = only active draw side's traces shown | "all"
   overlapCheck: true,   // warn when a moved pad overlaps another net
-  bigMergeWarn: true,   // warn when joining two nets that each have >3 pads
   refTextSize: 13,      // component reference label size in px
   copperOz: 1,          // outer-layer copper weight (oz/ft²) — trace current estimator
   copperOzInner: 0.5,   // inner-layer copper weight (oz/ft²) — usually lighter than outer
@@ -106,6 +105,10 @@ const PROTECTED_COLORS = { GND:"#000000", AGND:"#1a1a1a", DGND:"#333333",
                            VCC:"#ff2b2b", VDD:"#ff4d4d", VSS:"#000000", VEE:"#3a3a3a",
                            "+3V3":"#ff6e2b", "+5V":"#ff2b2b", "+12V":"#ff5da0", "-12V":"#b04dff", VBAT:"#ff8a3b" };
 
+/* rolling palette index so auto-net colours don't repeat unpredictably after
+   merges/prunes shrink State.nets (session-local; each net persists its colour) */
+let _netColorIdx = 0;
+
 function createNet(name){
   const id = nextId();
   const auto = !name;
@@ -113,7 +116,7 @@ function createNet(name){
   const prot = PROTECTED_NET_NAMES.includes(name.toUpperCase());
   if (prot) name = name.toUpperCase();
   const color = prot ? (PROTECTED_COLORS[name] || "#66d96f")
-                     : NET_COLORS[(State.nets.length) % NET_COLORS.length];
+                     : NET_COLORS[(_netColorIdx++) % NET_COLORS.length];
   const net = { id, name, color, auto, protected: prot };
   State.nets.push(net);
   return net;
@@ -190,24 +193,6 @@ function mergeNets(aId, bId){
   for (const t of State.traces) if (t.netId === drop.id) t.netId = keep.id;
   State.nets = State.nets.filter(n => n.id !== drop.id);
   return keep.id;
-}
-
-/* returns true on success, false if blocked by protection */
-/* merge with a confirmation when both nets are large (>3 pads each).
-   Returns the surviving net id, null if protection blocks it, or the sentinel
-   MERGE_DECLINED if the user chose to keep them separate. */
-const MERGE_DECLINED = "__declined__";
-function mergeNetsChecked(aId, bId){
-  if (aId === bId) return aId;
-  if (State.bigMergeWarn && netPinCount(aId) > 3 && netPinCount(bId) > 3){
-    const a = getNet(aId), b = getNet(bId);
-    if (!confirm("Connect “" + (a?.name||"?") + "” (" + netPinCount(aId) + " pads) and “" +
-                 (b?.name||"?") + "” (" + netPinCount(bId) + " pads)?\n\n" +
-                 "Both are large nets — joining them by mistake is easy to miss.\n(Disable this warning in Options.)")){
-      return MERGE_DECLINED;
-    }
-  }
-  return mergeNets(aId, bId);
 }
 
 function renameNet(id, newName){
@@ -290,7 +275,6 @@ function snapshot(){
     compView: State.compView,
     traceView: State.traceView,
     overlapCheck: State.overlapCheck,
-    bigMergeWarn: State.bigMergeWarn,
     refTextSize: State.refTextSize,
     copperOz: State.copperOz,
     copperOzInner: State.copperOzInner,
@@ -340,7 +324,6 @@ function applySnapshot(json){
   State.compView = s.compView || "side";
   State.traceView = s.traceView || "active";
   State.overlapCheck = s.overlapCheck !== false;
-  State.bigMergeWarn = s.bigMergeWarn !== false;
   State.refTextSize = s.refTextSize || 13;
   State.copperOz = s.copperOz || 1;
   State.copperOzInner = s.copperOzInner || 0.5;
@@ -524,7 +507,6 @@ function serializeProject(){
     compView: State.compView,
     traceView: State.traceView,
     overlapCheck: State.overlapCheck,
-    bigMergeWarn: State.bigMergeWarn,
     refTextSize: State.refTextSize,
     copperOz: State.copperOz,
     copperOzInner: State.copperOzInner,
@@ -559,7 +541,6 @@ function loadProject(json, done){
   State.compView = s.compView || "side";
   State.traceView = s.traceView || "active";
   State.overlapCheck = s.overlapCheck !== false;
-  State.bigMergeWarn = s.bigMergeWarn !== false;
   State.refTextSize = s.refTextSize || 13;
   State.copperOz = s.copperOz || 1;
   State.copperOzInner = s.copperOzInner || 0.5;
@@ -617,7 +598,6 @@ function resetProject(){
   State.compView = "side";
   State.traceView = "active";
   State.overlapCheck = true;
-  State.bigMergeWarn = true;
   State.refTextSize = 13;
   State.copperOz = 1;
   State.copperOzInner = 0.5;

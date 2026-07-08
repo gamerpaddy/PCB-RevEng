@@ -201,7 +201,6 @@ UI.setDrawSide = (side) => {
   if (!availableSides().includes(side)) return;
   if ($("#draw-side").value === side) return;
   $("#draw-side").value = side;
-  Tools.lastCopperSide = side;
   UI.toast("Drawing on " + SIDE_LABELS[side]);
   requestRender(); // trace/component visibility follows the draw side
 };
@@ -492,7 +491,7 @@ UI.refreshInspector = () => {
   if (sel.type === "comp" || sel.type === "pin"){
     UI.inspectComponent(sel.comp, sel.type === "pin" ? sel.pinIdx : -1);
   } else if (sel.type === "via"){
-    UI.inspectNetObj(sel.via.kind === "pth" ? "PTH" : "Via", sel.via, (netId)=>{ sel.via.netId = netId; });
+    UI.inspectNetObj(sel.via.kind === "pth" ? "PTH" : "Via", sel.via);
   } else if (sel.type === "trace"){
     UI.inspectTrace(sel.trace);
   } else if (sel.type === "note"){
@@ -825,7 +824,7 @@ UI.inspectComponent = (c, selPin) => {
   if (compEditLocked(c)) pinSec.querySelectorAll("input,button").forEach(el => el.disabled = true);
 };
 
-UI.inspectNetObj = (title, obj, setNet) => {
+UI.inspectNetObj = (title, obj) => {
   const box = $("#inspector");
   const netName = obj.netId ? (getNet(obj.netId)?.name || "") : "";
   const sec = document.createElement("div");
@@ -853,7 +852,7 @@ UI.inspectNetObj = (title, obj, setNet) => {
   }
   sec.querySelector("#i-netgen").addEventListener("click", ()=>{ sec.querySelector("#i-net").value = uniqueNetName(); sec.querySelector("#i-net").dispatchEvent(new Event("change")); });
   sec.querySelector("#i-net").addEventListener("change", e => {
-    applyNetRename({type:"via", via:UI.sel.via}, e.target.value);
+    applyNetRename({type:"via", via:obj}, e.target.value);
   });
   sec.querySelector("#i-del").addEventListener("click", deleteSelection);
 };
@@ -1460,7 +1459,7 @@ UI.openOverlapDialog = (conflicts) => {
     clearMarks(); pruneNets();
     if (merged || blocked)
       UI.toast(merged + " net pair(s) merged" + (blocked ? " — " + blocked + " blocked (both protected)" : ""));
-    else Undo.stack.pop();   // nothing merged → no history entry
+    else cancelUndo();       // nothing merged → no history entry (and redo survives)
     UI.refreshNets(); UI.refreshInspector(); requestRender();
   };
   // for each conflicting pair, use the merge dialog directly (A→B / B→A / keep separate),
@@ -1474,7 +1473,7 @@ UI.openOverlapDialog = (conflicts) => {
       if (choice === "toB"){ if (mergeNets(c.b, c.a) === null) blocked++; else merged++; }   // keep B
       else if (choice === "toA"){ if (mergeNets(c.a, c.b) === null) blocked++; else merged++; } // keep A
       else if (choice === "undo"){                              // revert the move entirely
-        Undo.stack.pop(); clearMarks();
+        cancelUndo(); clearMarks();
         if (undo()) afterHistory();
         UI.toast("Move undone"); return;
       }
@@ -1545,6 +1544,7 @@ UI.buildHelp = () => {
     ]],
     ["View", [
       ["Mouse wheel","Zoom at cursor"],["Space + drag / middle drag","Pan"],
+      ["Arrow keys","Pan the view (Shift = half a screen per press)"],
       [k("view.flip"),"Flip view (look from back)"],["Home / " + k("view.fit"),"Zoom to fit"],
       [k("view.mask"),"Coverage mask — tint areas without components"],
       ["1 … 9, 0","Switch view to image layer 1–10 (or toggle visibility — see Board/display panel)"],

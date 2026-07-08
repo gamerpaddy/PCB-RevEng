@@ -357,9 +357,12 @@ function applyLineDeskew(layer){
   // the source changed, so any old LOD pyramid is stale; rebuild it for big bakes
   layer.tiles = (typeof ImageTiles !== "undefined" && ImageTiles.shouldTile(baked))
     ? ImageTiles.build(baked) : null;
-  // straighten the layer transform (deskew supersedes prior rotation/skew)
+  // straighten the layer transform (deskew supersedes prior rotation/skew).
+  // capture the warp's effective scale BEFORE clearing it, or a previously
+  // warped/aligned layer would snap back to its raw scale
+  const effScale = layerEffScale(layer);
   layer.warp = null; layer.rot = 0;
-  layer.scale = layerEffScale(layer);
+  layer.scale = effScale;
   if (typeof markImagesDirty === "function") markImagesDirty();
   UI.refreshLayerList();
   UI.toast("Layer deskewed & straightened (" + (horizontal?"horizontal":"vertical") + " lines)");

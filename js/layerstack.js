@@ -377,7 +377,7 @@ Stack3D.render = function(){
     }
     const top = this._project(v.x, v.y, lo);              // topmost copper it reaches (after clip)
     const bot = this._project(v.x, v.y, hi);              // bottommost copper it reaches (after clip)
-    const r = Math.max(2.5, (v.r||5) * this.scale);
+    const r = Math.max(2.5, (v.r||State.viaR) * this.scale);
     const col = v.netId ? netColor(v.netId) : "#b8a06a";
     prims.push({ depth: (top.depth + bot.depth)/2, draw: () => {
       // cylinder body as a thick round-capped segment between the two ends

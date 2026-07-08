@@ -96,7 +96,7 @@ function bomGroups(){
     const footprint = c.kicad || fp.kicad || fp.label || "";
     const value = (c.value || "").trim();
     const part  = (c.part  || "").trim();
-    const key = [value, part, footprint].join("");   // unambiguous group key
+    const key = [value, part, footprint].join("\x1f");   // separator keeps the key unambiguous
     if (!groups.has(key)) groups.set(key, { value, part, footprint, comps: [] });
     groups.get(key).comps.push(c);
   }
