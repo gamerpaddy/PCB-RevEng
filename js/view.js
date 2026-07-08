@@ -18,6 +18,9 @@ const View = {
   hideTraces: false,      // hide all drawn traces (also makes them non-interactive) to read the bare photo/pads
   hideLabels: false,      // hide component reference-designator + value text (declutter dense boards)
   hideVias: false,        // hide all vias (also makes them non-interactive)
+  labViaHi: false,        // EXPERIMENTAL: ring under-connected vias
+  labViaMax: 1,           // EXPERIMENTAL: highlight vias touching ≤ this many copper features
+  _labViaSet: null,       // per-frame set of vias to ring (built in render when labViaHi)
   xrayAuto: false,        // true when X-ray was auto-enabled by viewing the X-ray layer (so leaving it turns X-ray back off)
   split: false,           // synced split view — left & right panes share one camera
   paneLayer: { left:null, right:null }, // image-layer id shown in each split pane
@@ -698,6 +701,8 @@ function drawWorld(ctx){
   // --- vias (drawn AFTER components so a via inside a pad stays visible) ---
   // "hide vias" is a hard override — like "hide traces" it also suppresses the focused-net
   // "show across all layers" exception below, so every via really disappears
+  // EXPERIMENTAL: mark under-connected vias once per frame (opt-in; off = no cost, no effect)
+  View._labViaSet = View.labViaHi ? computeLabViaSet() : null;
   if (!View.hideVias) for (const v of State.vias){
     // a focused net keeps its vias visible across every layer (matches traces above);
     // otherwise a blind/buried via is hidden on layers it doesn't reach
@@ -1022,7 +1027,57 @@ function drawVia(ctx, v, selNet){
     ctx.beginPath(); ctx.arc(v.x, v.y, r + 2.6/View.zoom, 0, Math.PI*2); ctx.stroke();
     ctx.setLineDash([]);
   }
+  // EXPERIMENTAL: bright magenta ring on under-connected vias (independent of net colour)
+  if (View._labViaSet && View._labViaSet.has(v)){
+    ctx.globalAlpha = 1;
+    ctx.setLineDash([]);
+    ctx.strokeStyle = "#ff2d78";
+    ctx.lineWidth = 2.4/View.zoom;
+    ctx.beginPath(); ctx.arc(v.x, v.y, r + 4.5/View.zoom, 0, Math.PI*2); ctx.stroke();
+  }
   ctx.restore();
+}
+
+/* EXPERIMENTAL: set of vias with ≤ View.labViaMax copper "arms" — dangling vias that connect
+   little or nothing. An arm is a piece of copper leaving the via: a trace END on the via = 1
+   arm, a trace passing THROUGH it (interior vertex, or a segment crossing it) = 2 arms, each
+   touching pad = 1 arm. So a via with one trace through it reads as 2 (not flagged), while a
+   via at the dead end of a single trace reads as 1. Early-breaks once a via clears the max. */
+function computeLabViaSet(){
+  const set = new Set();
+  const max = Math.max(0, View.labViaMax|0);
+  for (const v of State.vias) if (viaArmCount(v, max) <= max) set.add(v);
+  return set;
+}
+function viaArmCount(v, cap){
+  let arms = 0;
+  const r = v.r || State.viaR;
+  for (const t of State.traces){
+    if (!viaOnSide(v, t.side)) continue;
+    const tol = r + (t.width || State.traceW) / 2;
+    let vArms = 0, vertexOn = false;
+    for (let i=0; i<t.points.length; i++){
+      if (Math.hypot(t.points[i].x - v.x, t.points[i].y - v.y) <= tol){
+        vertexOn = true;
+        if (i > 0) vArms++;                       // segment coming in
+        if (i < t.points.length - 1) vArms++;     // segment going out
+      }
+    }
+    if (!vertexOn){                                // no vertex on the via — a segment passing over it?
+      for (let k=0; k<t.points.length-1; k++)
+        if (distToSeg(v.x, v.y, t.points[k], t.points[k+1]) <= tol){ vArms = 2; break; }
+    }
+    arms += vArms;
+    if (arms > cap) return arms;                  // early out — this via is well enough connected
+  }
+  for (const c of State.components){
+    const fp = compFootprint(c);
+    for (let pi=0; pi<c.pins.length; pi++){
+      const fpin = fp.pins[pi]; if (!fpin) continue;
+      if (padTouchesVia(c, fpin, v) && ++arms > cap) return arms;
+    }
+  }
+  return arms;
 }
 
 function drawComponent(ctx, c, selNet, padsOnly){

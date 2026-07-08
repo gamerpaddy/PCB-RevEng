@@ -49,6 +49,7 @@ function wireToolbar(){
   $("#btn-undo").addEventListener("click", ()=>{ if (undo()) afterHistory(); });
   $("#btn-redo").addEventListener("click", ()=>{ if (redo()) afterHistory(); });
   $("#btn-help").addEventListener("click", ()=> $("#help-dialog").showModal());
+  wireLab();
 
   $("#btn-new").addEventListener("click", ()=>{
     if (!confirm("Start a new project? Unsaved work will be lost.")) return;
@@ -579,7 +580,8 @@ function showCanvasContextMenu(cx, cy, w){
     UI.select(h);
     items.push({ label:"Set net…", action:()=>promptNetName(h) });
     items.push({ label:"Cut here", action:()=>{ setTool("cut"); cutDown(w,{}); } });
-    items.push({ label:"Disconnect / clear net", action:()=>disconnectTrace(h.trace) });
+    items.push({ label:"Disconnect this trace", action:()=>disconnectTrace(h.trace, "one") });
+    items.push({ label:"Disconnect all traces", action:()=>disconnectTrace(h.trace) });
     items.push({ sep:true });
     items.push({ label:"Delete trace", danger:true, action:()=>deleteSelection() });
   } else if (h && h.type === "note"){
@@ -802,6 +804,21 @@ function wireDialogs(){
     UI.buildHelp();
     UI.toast("Hotkeys reset to defaults");
   });
+}
+
+/* Experimental features dialog. Every option here is off by default and only mutates its own
+   View flags, so leaving it untouched changes nothing. */
+function wireLab(){
+  const chk = $("#lab-viaconn"), maxIn = $("#lab-viaconn-max");
+  const apply = () => {
+    View.labViaHi  = chk.checked;
+    View.labViaMax = Math.max(0, Math.min(9, parseInt(maxIn.value, 10) || 0));
+    requestRender();
+  };
+  $("#btn-lab").addEventListener("click", ()=>{ chk.checked = !!View.labViaHi; $("#lab-dialog").showModal(); });
+  $("#lab-close").addEventListener("click", ()=> $("#lab-dialog").close());
+  chk.addEventListener("change", apply);
+  maxIn.addEventListener("input", apply);
 }
 
 /* ---------------- file I/O ---------------- */

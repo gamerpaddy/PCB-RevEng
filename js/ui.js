@@ -1281,19 +1281,31 @@ UI.openNetScopeDialog = (oldName, newName, allCount, connCount, cb) => {
 UI.openNetMergeDialog = (aName, bName, cb, opts) => {
   opts = opts || {};
   const dlg = $("#netmerge-dialog");
+  dlg.querySelector(".dlg-title").innerHTML = opts.title || "Trace joins two nets";
+  $("#netmerge-undo").textContent = opts.undoText || "Undo — don't draw the trace";
   $("#netmerge-msg").innerHTML = opts.msg ||
     `This trace connects <b>“${escAttr(aName)}”</b> (A) and <b>“${escAttr(bName)}”</b> (B). Which net should the joined copper use?`;
-  $("#netmerge-tob").textContent    = `A → B  (use “${bName}”)`;
-  $("#netmerge-toa").textContent    = `B → A  (use “${aName}”)`;
+  $("#netmerge-tob").textContent    = `1.  A → B  (use “${bName}”)`;
+  $("#netmerge-toa").textContent    = `2.  B → A  (use “${aName}”)`;
   const ignoreBtn = $("#netmerge-ignore");
-  ignoreBtn.textContent = "Ignore — keep the nets separate";
-  ignoreBtn.style.display = opts.ignore === false ? "none" : "";
+  const hasIgnore = opts.ignore !== false;
+  ignoreBtn.textContent = "3.  Ignore — keep the nets separate";
+  ignoreBtn.style.display = hasIgnore ? "" : "none";
+  $("#netmerge-undo").textContent = (hasIgnore ? "4.  " : "3.  ") + ($("#netmerge-undo").textContent || "");
   let done = false;
-  const pick = (c) => { if (done) return; done = true; dlg.close(); cb(c); };
+  const pick = (c) => { if (done) return; done = true; dlg.removeEventListener("keydown", onKey); dlg.close(); cb(c); };
   $("#netmerge-tob").onclick    = () => pick("toB");
   $("#netmerge-toa").onclick    = () => pick("toA");
   ignoreBtn.onclick             = () => pick("ignore");
   $("#netmerge-undo").onclick   = () => pick("undo");
+  // quick-select hotkeys: 1=A→B, 2=B→A, 3=Ignore, 4=Undo (3=Undo when Ignore is hidden)
+  const onKey = (e) => {
+    const k = { "1":"toB", "2":"toA", "3":hasIgnore?"ignore":"undo", "4":"undo" }[e.key];
+    if (!k) return;
+    e.preventDefault(); e.stopPropagation();
+    pick(k);
+  };
+  dlg.addEventListener("keydown", onKey);
   dlg.addEventListener("close", () => pick("undo"), { once:true }); // Esc-dismiss = undo
   dlg.showModal();
 };
@@ -1398,30 +1410,37 @@ UI.buildHistory = () => {
 
 /* ---------------- overlap-after-move dialog ---------------- */
 UI.openOverlapDialog = (conflicts) => {
-  const box = $("#overlap-list");
-  box.innerHTML = conflicts.map(c => `<div class="hk"><span>${c.text}</span></div>`).join("");
-  const dlg = $("#overlap-dialog");
   const clearMarks = ()=>{ View.overlapMarks = null; requestRender(); };
-  dlg.addEventListener("close", clearMarks, { once:true }); // also covers Esc-dismiss
-  $("#overlap-merge").onclick = ()=>{
-    dlg.close(); clearMarks();
-    pushUndo("merge overlapping nets");
-    let merged = 0, blocked = 0;
-    for (const c of conflicts){
-      const m = mergeNets(c.a, c.b);
-      if (m === null) blocked++; else merged++;
-    }
-    pruneNets();
-    UI.toast(merged + " net pair(s) merged" + (blocked ? " — " + blocked + " blocked (both protected)" : ""));
+  pushUndo("merge overlapping nets");
+  let merged = 0, blocked = 0, idx = 0;
+  const finish = ()=>{
+    clearMarks(); pruneNets();
+    if (merged || blocked)
+      UI.toast(merged + " net pair(s) merged" + (blocked ? " — " + blocked + " blocked (both protected)" : ""));
+    else Undo.stack.pop();   // nothing merged → no history entry
     UI.refreshNets(); UI.refreshInspector(); requestRender();
   };
-  $("#overlap-undo").onclick = ()=>{
-    dlg.close(); clearMarks();
-    if (undo()) afterHistory();
-    UI.toast("Move undone");
+  // for each conflicting pair, use the merge dialog directly (A→B / B→A / keep separate),
+  // titled for a pad move; "Undo move" reverts the whole move and stops the chain
+  const step = ()=>{
+    if (idx >= conflicts.length){ finish(); return; }
+    const c = conflicts[idx++];
+    const aName = getNet(c.a)?.name, bName = getNet(c.b)?.name;
+    if (!aName || !bName || c.a === c.b){ step(); return; }   // already merged away / gone
+    UI.openNetMergeDialog(aName, bName, (choice)=>{
+      if (choice === "toB"){ if (mergeNets(c.b, c.a) === null) blocked++; else merged++; }   // keep B
+      else if (choice === "toA"){ if (mergeNets(c.a, c.b) === null) blocked++; else merged++; } // keep A
+      else if (choice === "undo"){                              // revert the move entirely
+        Undo.stack.pop(); clearMarks();
+        if (undo()) afterHistory();
+        UI.toast("Move undone"); return;
+      }
+      step();                                                  // ignore → keep separate, next pair
+    }, { ignore:true, title:"&#9888; Pad overlaps another net",
+         undoText:"Undo move",
+         msg:`Moved pad puts <b>“${escAttr(aName)}”</b> (A) and <b>“${escAttr(bName)}”</b> (B) on the same copper. Which net should the joined copper use?` });
   };
-  $("#overlap-keep").onclick = ()=>{ dlg.close(); clearMarks(); };
-  dlg.showModal();
+  step();
 };
 
 /* ---------------- quick edit (double-click a component) ---------------- */

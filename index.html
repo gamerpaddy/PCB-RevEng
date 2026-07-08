@@ -60,6 +60,7 @@
       <button id="btn-history" title="Undo timeline — revert single actions selectively">&#128338;</button>
       <button id="btn-options" title="Options — board &amp; display settings">&#9881; Options</button>
       <button id="btn-keys" title="Hotkey editor">&#9000;</button>
+      <button id="btn-lab" title="Experimental features">&#128300;</button>
       <button id="btn-help" title="Help / hotkeys  [?]">?</button>
     </div>
 
@@ -340,15 +341,24 @@
     <div class="dlg-buttons"><button id="history-close" class="primary">Close</button></div>
   </dialog>
 
-  <!-- ======= OVERLAP AFTER MOVE ======= -->
-  <dialog id="overlap-dialog">
-    <div class="dlg-title">&#9888; Pad overlaps another net</div>
-    <div id="overlap-list" style="margin-bottom:10px"></div>
-    <div class="dlg-buttons">
-      <button id="overlap-undo">Undo move</button>
-      <button id="overlap-keep">Keep as is</button>
-      <button id="overlap-merge" class="primary">Merge nets</button>
+  <!-- ======= EXPERIMENTAL (LAB) ======= -->
+  <dialog id="lab-dialog">
+    <div class="dlg-title">&#128300; Experimental features</div>
+    <div class="panel-hint" style="max-width:380px;margin-bottom:10px">Work-in-progress tools. Each is off unless you switch it on and changes nothing else.</div>
+
+    <div style="border:1px solid #2a3038;border-radius:6px;padding:10px;margin-bottom:10px">
+      <label style="display:flex;align-items:center;gap:8px;font-weight:600">
+        <input type="checkbox" id="lab-viaconn"> Highlight under-connected vias
+      </label>
+      <div class="panel-hint" style="margin:6px 0 8px">Rings vias that touch few copper features — dangling or single-layer vias that connect nothing.</div>
+      <div class="dlg-row" style="gap:6px">
+        <label style="width:auto">Highlight vias with &#8804;</label>
+        <input type="number" id="lab-viaconn-max" min="0" max="9" step="1" value="1" style="width:56px">
+        <label style="width:auto">connection(s)</label>
+      </div>
     </div>
+
+    <div class="dlg-buttons"><button id="lab-close" class="primary">Close</button></div>
   </dialog>
 
   <!-- ======= QUICK EDIT ======= -->
@@ -538,9 +548,9 @@
 <script src="js/footprints/ics.js?v=50"></script>
 <script src="js/footprints/misc.js?v=54"></script>
 <script src="js/imagetiles.js?v=1"></script>
-<script src="js/view.js?v=82"></script>
+<script src="js/view.js?v=84"></script>
 <script src="js/layerstack.js?v=53"></script>
-<script src="js/tools.js?v=97"></script>
+<script src="js/tools.js?v=102"></script>
 <script src="js/align.js?v=54"></script>
 <script src="js/keymap.js?v=56"></script>
 <script src="js/resolver.js?v=49"></script>
@@ -548,11 +558,11 @@
 <script src="js/eagle.js?v=3"></script>
 <script src="js/gencad.js?v=4"></script>
 <script src="js/gerber.js?v=1"></script>
-<script src="js/ui.js?v=94"></script>
+<script src="js/ui.js?v=97"></script>
 <script src="js/kicadsearch.js?v=51"></script>
 <script src="js/fpdialog.js?v=54"></script>
 <script src="js/autosave.js?v=51"></script>
-<script src="js/main.js?v=95"></script>
+<script src="js/main.js?v=98"></script>
 
 </body>
 </html>

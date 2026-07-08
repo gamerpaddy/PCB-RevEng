@@ -235,6 +235,8 @@ function onPointerUp(e){
       checkMoveOverlaps(d.comp);        // then warn about any different-net pads now touching
     }
     if (d.kind === "move-via" && d.moved){
+      // shift-detach: straighten the trace by dropping the anchor left behind, if it's now redundant
+      if (d.detach) pruneCollinearAnchors(d.ox, d.oy);
       handleViaDrop(d.via);             // combine stacked vias + connect to landed copper (net prompts)
     }
   }
@@ -544,7 +546,7 @@ function selectDown(w, pt, e){
             anchors.push({ pts:t.points, i, dx:t.points[i].x-h.via.x, dy:t.points[i].y-h.via.y });
       }
     }
-    Tools.drag = { kind:"move-via", via:h.via, offX:w.x-h.via.x, offY:w.y-h.via.y, moved:false, anchors };
+    Tools.drag = { kind:"move-via", via:h.via, offX:w.x-h.via.x, offY:w.y-h.via.y, moved:false, anchors, detach, ox:h.via.x, oy:h.via.y };
   } else if (h.type === "note"){
     pushUndo("move note");
     Tools.drag = { kind:"move-note", note:h.note, offX:w.x-h.note.x, offY:w.y-h.note.y, moved:false };
@@ -952,6 +954,43 @@ function viaAttachedTraces(via){
   return out;
 }
 
+/* When a via sits on top of a trace SEGMENT (not already on one of its vertices), split the
+   segment at the via centre so the trace gains an anchor there and moves with the via after. */
+function anchorTracesUnderVia(via){
+  const r = via.r || State.viaR, vtol = Math.max(r, 6/View.zoom);
+  for (const t of State.traces){
+    if (!viaOnSide(via, t.side)) continue;
+    let onVertex = false;
+    for (const p of t.points) if (Math.hypot(p.x-via.x, p.y-via.y) <= vtol){ onVertex = true; break; }
+    if (onVertex) continue;                                  // already anchored to a vertex here
+    const reach = r + (t.width||State.traceW)/2;
+    let bk = -1, bd = Infinity;
+    for (let k=0;k<t.points.length-1;k++){
+      const d = distToSeg(via.x, via.y, t.points[k], t.points[k+1]);
+      if (d <= reach && d < bd){ bd = d; bk = k; }
+    }
+    if (bk >= 0) t.points.splice(bk+1, 0, { x: via.x, y: via.y });  // coincident vertex = anchor
+  }
+}
+
+/* Remove a now-redundant trace vertex left where a via was shift-detached: an interior vertex
+   near (x,y) whose two segments are nearly collinear (parallel enough) is dropped to straighten
+   the trace — so detaching an unmoved via undoes the anchor it added. */
+function pruneCollinearAnchors(x, y){
+  const tol = Math.max(6/View.zoom, State.viaR);
+  for (const t of State.traces){
+    for (let i=t.points.length-2; i>=1; i--){                // interior vertices only
+      const p = t.points[i];
+      if (Math.hypot(p.x-x, p.y-y) > tol) continue;
+      const a = t.points[i-1], b = t.points[i+1];
+      const v1x = p.x-a.x, v1y = p.y-a.y, v2x = b.x-p.x, v2y = b.y-p.y;
+      const l1 = Math.hypot(v1x, v1y), l2 = Math.hypot(v2x, v2y);
+      if (!l1 || !l2){ t.points.splice(i, 1); continue; }     // zero-length step → redundant
+      if (Math.abs(v1x*v2y - v1y*v2x)/(l1*l2) < 0.12) t.points.splice(i, 1);  // ~7° → straight enough
+    }
+  }
+}
+
 /* net of a pad or (non-attached) trace whose copper the via now overlaps — the net the via
    just landed on. Ignores the via's own attached traces. Returns a netId or null. */
 function viaLandedNet(via, attached){
@@ -1021,7 +1060,11 @@ function handleViaDrop(via){
     let groupNet = via.netId;
     if (!groupNet) for (const t of attached) if (t.netId){ groupNet = t.netId; break; }
 
-    if (target == null){ refresh(); if (folded) UI.toast("Vias combined"); return; }
+    if (target == null){
+      // no separate landed net, but the via sits on netted traces of its own → adopt their net
+      if (!via.netId && groupNet){ via.netId = groupNet; refresh(); UI.toast("Via connected → “" + (getNet(groupNet)?.name || "net") + "”"); return; }
+      refresh(); if (folded) UI.toast("Vias combined"); return;
+    }
     const tName = getNet(target)?.name || "net";
     if (!groupNet){                                       // unnetted via → adopt the landed net
       via.netId = target;
@@ -1058,6 +1101,7 @@ function handleViaDrop(via){
     foldViaInto(via, other); folded++; combineStep();
   };
 
+  anchorTracesUnderVia(via);   // via dropped on a trace mid-segment gains an anchor there
   combineStep();
 }
 
@@ -1307,6 +1351,23 @@ function viaTouchesTrace(v, t){
   return false;
 }
 
+/* physical connectivity for the disconnect cluster: tracesTouch (crossings, coincident
+   endpoints, endpoint-on-interior) PLUS a plain any-vertex-on-copper test, so a junction that
+   lands on an INTERIOR vertex — e.g. one trace passing through a 3-way junction, or two vertices
+   coinciding — is caught too (tracesTouch's mid-segment guard misses those). Half-width tolerance
+   keeps parallel traces (centre-lines ~a full width apart) from being joined. */
+function tracesJoined(t1, t2){
+  if (tracesTouch(t1, t2)) return true;
+  const tol = Math.max(2, Math.min((t1.width||State.traceW), (t2.width||State.traceW)) * 0.6);
+  const near = (pts, other) => {
+    for (const p of pts)
+      for (let k=0; k<other.points.length-1; k++)
+        if (distToSeg(p.x, p.y, other.points[k], other.points[k+1]) <= tol) return true;
+    return false;
+  };
+  return near(t1.points, t2) || near(t2.points, t1);
+}
+
 /* the whole galvanically-connected copper cluster reachable from `startTrace` through
    trace↔trace junctions and vias (and any traces those vias reach on other layers, and so
    on). Pads are the boundary — they are never traversed into. Returns {traces:Set, vias:Set}. */
@@ -1322,9 +1383,9 @@ function traceConnectedCluster(startTrace){
       for (const o of State.traces)
         if (!traces.has(o) && viaTouchesTrace(v, o)){ traces.add(o); queue.push(o); }
     }
-    // same-side traces physically touching this one (shared junction / T / crossing)
+    // same-side traces physically touching this one (shared junction / T / crossing / vertex)
     for (const o of State.traces)
-      if (!traces.has(o) && o.side === t.side && tracesTouch(t, o)){ traces.add(o); queue.push(o); }
+      if (!traces.has(o) && o.side === t.side && tracesJoined(t, o)){ traces.add(o); queue.push(o); }
   }
   return { traces, vias };
 }
@@ -1334,9 +1395,11 @@ function traceConnectedCluster(startTrace){
    vias and junctions) WITHOUT touching the pads it reaches, then pull each trace's end
    anchors off the pads so the cluster is physically disconnected. Removes end vertices that
    sit on a pad; for a bare 2-point trace it retracts the endpoint until its copper clears. */
-function disconnectTrace(trace){
+function disconnectTrace(trace, scope){   // scope "one" = just this trace; else the whole cluster
   pushUndo("disconnect trace");
-  const { traces, vias } = traceConnectedCluster(trace);
+  const { traces, vias } = scope === "one"
+    ? { traces: new Set([trace]), vias: new Set() }
+    : traceConnectedCluster(trace);
   for (const t of traces){
     const halfW = (t.width || State.traceW) / 2;
     const clearEnd = (end) => {
@@ -1551,6 +1614,7 @@ function viaDown(w, e){
     kind: pth ? "pth" : "via",
   };
   State.vias.push(via);
+  anchorTracesUnderVia(via);   // placed on a trace mid-segment → split it so the trace adheres
   if (netId && !pth) Tools.lastViaNet = getNet(netId)?.name || Tools.lastViaNet; // remember
   UI.select({type:"via", via});
   pruneNets();
