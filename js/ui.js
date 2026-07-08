@@ -115,6 +115,14 @@ function sideOptionsHtml(current){
   return sides.map(s => `<option value="${s}">${SIDE_LABELS[s] || s}</option>`).join("");
 }
 
+/* copper-only side options (NO X-ray) — for a trace's side, which must be a real copper
+   layer; X-ray is a view overlay, not a side a trace can live on */
+function copperSideOptionsHtml(current){
+  const sides = availableSides().slice();
+  if (current && !sides.includes(current)) sides.push(current);
+  return sides.map(s => `<option value="${s}">${SIDE_LABELS[s] || s}</option>`).join("");
+}
+
 /* rebuild the toolbar draw-side selector for the current layer count
    (X-ray is a separate overlay toggle, not a draw side) */
 UI.rebuildSideSelect = () => {
@@ -231,7 +239,7 @@ UI.refreshLayerList = () => {
     card.innerHTML = `
       <div class="layer-head">
         <button class="vis" title="Show / hide">${l.visible ? "👁" : "—"}</button>
-        <div class="name" title="${l.url ? "Hosted image — loaded live from "+escAttr(l.url)+" and NOT saved in the project" : l.name}">${l.url ? "🔗 " : ""}${l.name}</div>
+        <div class="name" title="${l.url ? "Hosted image — loaded live from "+escAttr(l.url)+" and NOT saved in the project" : escAttr(l.name)}">${l.url ? "🔗 " : ""}${escAttr(l.name)}</div>
         <button class="del" title="Remove layer">✕</button>
       </div>
       <div class="layer-row">
@@ -978,7 +986,7 @@ UI.inspectTrace = (t) => {
   sec.innerHTML = `
     <div class="insp-title">Trace <span style="color:${SIDE_COLORS[t.side]};font-size:11px">● ${SIDE_LABELS[t.side]}</span></div>
     ${inspRow("Net", `<span style="display:flex;gap:4px;flex:1;min-width:0"><input id="i-net" value="${escAttr(netName)}" style="flex:1;min-width:0"><button id="i-netgen" title="Generate a new unique net name">⊕</button></span>`)}
-    ${inspRow("Side", `<select id="i-tside">${sideOptionsHtml(t.side)}</select>`)}
+    ${inspRow("Side", `<select id="i-tside">${copperSideOptionsHtml(t.side)}</select>`)}
     ${inspRow("Width", UI.traceWidthInputs(t.width||3, "i-w"))}
     ${UI.traceCurrentRow(t, {showLength:true})}
     <div class="insp-actions"><button id="i-selnet">Select whole net</button><button id="i-del" class="danger">Delete</button></div>`;

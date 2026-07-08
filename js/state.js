@@ -311,10 +311,24 @@ function snapshot(){
   });
 }
 
+/* the redo stack most recently cleared by pushUndo — kept so a pushUndo that turns out
+   to be a no-op (a click that never dragged) can be rolled back WITHOUT destroying redo */
+let _clearedRedo = null;
 function pushUndo(label){
   Undo.stack.push({ json: snapshot(), label: label || "edit", time: Date.now() });
   if (Undo.stack.length > Undo.max) Undo.stack.shift();
-  Undo.redo.length = 0;
+  _clearedRedo = Undo.redo;   // remember what we're about to clear
+  Undo.redo = [];
+}
+
+/* discard the most recent pushUndo when the action it guarded changed nothing (e.g. a
+   click that never became a drag). Restores the redo stack that pushUndo cleared, so a
+   no-op click no longer wipes redo history. Only valid immediately after that pushUndo,
+   before any further pushUndo — which is exactly how the drag no-op paths use it. */
+function cancelUndo(){
+  if (!Undo.stack.length) return;
+  Undo.stack.pop();
+  if (_clearedRedo){ Undo.redo = _clearedRedo; _clearedRedo = null; }
 }
 
 function applySnapshot(json){

@@ -202,13 +202,13 @@ function onPointerUp(e){
     View.canvas.style.cursor = toolCursor(Tools.name); // restore the tool's cursor (e.g. crosshair for via)
   }
   if (d.kind === "move-note"){
-    if (!d.moved) Undo.stack.pop(); // a click (no drag) keeps undo clean; dblclick edits
+    if (!d.moved) cancelUndo(); // a click (no drag) keeps undo clean; dblclick edits
     else Tools._dragEndedAt = Date.now();
     UI.refreshInspector();
   }
   if (d.kind === "move-comp" || d.kind === "move-via" || d.kind === "move-layer" || d.kind === "rot-layer" || d.kind === "move-vert"){
     if (!d.moved){
-      Undo.stack.pop(); // no-op drag, drop the snapshot
+      cancelUndo(); // no-op drag, drop the snapshot (restores redo — a click mustn't wipe it)
       // a shift-click that never dragged a single-pad part falls back to pin multi-select
       if (d.shiftPin){ UI.togglePinSel(d.shiftPin.comp, d.shiftPin.pinIdx); requestRender(); }
       // an align-tool click that never dragged drops the next 4-point marker
@@ -241,7 +241,7 @@ function onPointerUp(e){
     }
   }
   if (d.kind === "pad-resize" || d.kind === "pad-move"){
-    if (!d.moved) Undo.stack.pop();               // a click that didn't drag: keep undo clean
+    if (!d.moved) cancelUndo();                    // a click that didn't drag: keep undo clean
     else Tools._dragEndedAt = Date.now();          // don't let the drag double as a dblclick
     UI.refreshInspector();
   }
@@ -1031,15 +1031,21 @@ function foldViaInto(via, other){
 }
 
 /* prompt A→B / B→A / Undo for joining two different nets (A=aId, B=bId), then apply.
-   cb(survivingNetId) on merge, cb(null) on Undo. No "Ignore" — via joins are physical. */
+   cb(survivingNetId, blocked): blocked=true when BOTH nets are protected so the merge was
+   refused (a warning is already toasted, and the nets stay separate — the caller must NOT
+   claim a merge happened). cb(null,false) on Undo/dismiss. No "Ignore" — via joins are
+   physical. */
 function promptNetMerge(aId, bId, msg, cb){
   const aName = getNet(aId)?.name || "?", bName = getNet(bId)?.name || "?";
   UI.openNetMergeDialog(aName, bName, (choice) => {
     if (choice === "toB" || choice === "toA"){
       const keep = choice === "toB" ? bId : aId, drop = choice === "toB" ? aId : bId;
       const survived = mergeNets(keep, drop);           // null only if BOTH protected
-      cb(survived === null ? keep : survived);
-    } else cb(null);                                     // undo / dismissed
+      if (survived === null){
+        UI.toast("⚠ " + aName + " / " + bName + " are protected — NOT merged");
+        cb(null, true);
+      } else cb(survived, false);
+    } else cb(null, false);                              // undo / dismissed
   }, { ignore:false, msg });
 }
 
@@ -1053,37 +1059,49 @@ function handleViaDrop(via){
   const refresh = () => { pruneNets(); UI.refreshNets(); UI.refreshInspector(); requestRender(); };
   const revert  = () => { undo(); UI.select(null); UI.refreshNets(); UI.refreshInspector(); requestRender(); UI.toast("Move undone"); };
 
-  // Phase 2 — connect the via to the copper it landed on
+  // Phase 2 — reconcile the via's net with EVERY net it now physically joins: its own, any
+  // trace anchored to it (anchorTracesUnderVia may have just anchored the trace it landed on),
+  // and any pad/trace it overlaps. One net → adopt it; several distinct nets → prompt A→B/B→A.
   const connectPhase = () => {
     const attached = viaAttachedTraces(via);
-    const target = viaLandedNet(via, attached);
-    let groupNet = via.netId;
-    if (!groupNet) for (const t of attached) if (t.netId){ groupNet = t.netId; break; }
+    const landed = viaLandedNet(via, attached);
+    const nets = [];
+    const addNet = (id) => { if (id && !nets.includes(id)) nets.push(id); };
+    addNet(via.netId);
+    for (const t of attached) addNet(t.netId);   // a trace sitting on the via shares its copper
+    addNet(landed);                              // a pad/trace the via overlaps but isn't anchored to
 
-    if (target == null){
-      // no separate landed net, but the via sits on netted traces of its own → adopt their net
-      if (!via.netId && groupNet){ via.netId = groupNet; refresh(); UI.toast("Via connected → “" + (getNet(groupNet)?.name || "net") + "”"); return; }
-      refresh(); if (folded) UI.toast("Vias combined"); return;
-    }
-    const tName = getNet(target)?.name || "net";
-    if (!groupNet){                                       // unnetted via → adopt the landed net
-      via.netId = target;
-      for (const t of attached) if (!t.netId) t.netId = target;
-      refresh(); UI.toast("Via connected → “" + tName + "”"); return;
-    }
-    if (groupNet === target){ via.netId = target; refresh(); if (folded) UI.toast("Vias combined"); return; }
+    if (!nets.length){ refresh(); if (folded) UI.toast("Vias combined"); return; }
 
-    // conflict: the via (or a trace on it) already carries a DIFFERENT net
-    if (attached.length){
-      promptNetMerge(groupNet, target, "This via’s trace meets a different net where it now sits. Which net should the joined copper use?", (survived) => {
-        if (survived === null){ revert(); return; }
-        via.netId = survived; refresh(); UI.toast("Merged → “" + (getNet(survived)?.name || tName) + "”");
-      });
-    } else {
-      const gName = getNet(groupNet)?.name || "net";
-      if (!confirm("Overwrite this via’s net “" + gName + "” with “" + tName + "”?\n\nOK = overwrite.   Cancel = undo the move.")){ revert(); return; }
-      via.netId = target; refresh(); UI.toast("Via net → “" + tName + "”");
+    if (nets.length === 1){                      // one net everywhere → adopt it, no conflict
+      const only = nets[0];
+      const adopting = via.netId !== only;
+      via.netId = only;
+      for (const t of attached) if (!t.netId) t.netId = only;
+      refresh();
+      if (adopting) UI.toast("Via connected → “" + (getNet(only)?.name || "net") + "”");
+      else if (folded) UI.toast("Vias combined");
+      return;
     }
+
+    // 2+ distinct nets meet at the via → merge them pairwise (chained prompts)
+    const reconcile = (list) => {
+      promptNetMerge(list[0], list[1],
+        "This via now joins different nets where it sits. Which net should the joined copper use?",
+        (survived, blocked) => {
+          if (!blocked && survived === null){ revert(); return; }   // Undo → revert the move
+          if (blocked){                                             // protected pair — can't merge
+            if (!via.netId) via.netId = list[0];
+            refresh(); return;
+          }
+          const rest = [...new Set([survived, ...list.slice(2)])];  // fold the merged net back in
+          if (rest.length >= 2){ reconcile(rest); return; }
+          via.netId = rest[0];
+          for (const t of attached) if (!t.netId) t.netId = rest[0];
+          refresh(); UI.toast("Merged → “" + (getNet(rest[0])?.name || "net") + "”");
+        });
+    };
+    reconcile(nets);
   };
 
   // Phase 1 — fold overlapping vias into this one (chained: a net conflict prompts A→B/B→A)
@@ -1091,7 +1109,8 @@ function handleViaDrop(via){
     const other = firstViaOverlap(via);
     if (!other){ connectPhase(); return; }
     if (via.netId && other.netId && via.netId !== other.netId){
-      promptNetMerge(via.netId, other.netId, "Two vias overlap and combine into one, but carry different nets. Which net should the combined via use?", (survived) => {
+      promptNetMerge(via.netId, other.netId, "Two vias overlap and combine into one, but carry different nets. Which net should the combined via use?", (survived, blocked) => {
+        if (blocked){ connectPhase(); return; }   // protected — don't fold (would join protected nets); leave them
         if (survived === null){ revert(); return; }
         via.netId = survived; foldViaInto(via, other); folded++; combineStep();
       });
@@ -1519,46 +1538,52 @@ function detachAnchor(d){
    Joins nets (with the usual protected-net checks) so the anchor really wires up. */
 function connectVertToSnap(trace, snap, vi){
   const tNet = trace.netId, sNet = snap.netId;
-  let net = tNet;
-  let quietMerge = null;  // {a,b,keep} when two different nets were joined without a confirm
-  if (tNet && sNet && tNet !== sNet){
-    const aName = getNet(tNet)?.name || "?", bName = getNet(sNet)?.name || "?";
-    // did the big-merge confirm dialog fire? if not, this merge happens silently
-    const willPrompt = State.bigMergeWarn && netPinCount(tNet) > 3 && netPinCount(sNet) > 3;
-    const merged = mergeNetsChecked(tNet, sNet);
-    if (merged === MERGE_DECLINED) { UI.toast("Anchor moved — nets not merged"); pruneNets(); UI.refreshNets(); requestRender(); return; }
-    net = merged === null ? tNet : merged; // null = both protected, keep trace's net
-    if (merged === null) UI.toast("⚠ Protected nets not merged");
-    else if (!willPrompt) quietMerge = { a:aName, b:bName, keep:getNet(net)?.name || "?" };
-  } else {
-    net = tNet || sNet || createNet().id;
-  }
-  trace.netId = net;
-  applyAttach(snap, net);
-  // dragging an endpoint anchor onto the END of another same-side trace welds them into one
-  if (vi != null && weldTraceAnchor(trace, vi, snap)){
+
+  // wire the anchor up once the winning net is known: weld endpoint-onto-endpoint, or drop a
+  // coincident T-junction vertex when it landed mid-trace
+  const finish = (net, note) => {
+    trace.netId = net;
+    applyAttach(snap, net);
+    // dragging an endpoint anchor onto the END of another same-side trace welds them into one
+    if (vi != null && weldTraceAnchor(trace, vi, snap)){
+      pruneNets(); UI.refreshNets();
+      UI.select({ type:"trace", trace });
+      UI.toast(note || ("Traces merged → " + (getNet(net)?.name || "net")));
+      requestRender();
+      return;
+    }
+    // landed mid-trace (not an endpoint weld) → drop a coincident vertex on the target so it
+    // becomes a real T-junction that holds, and moves with the target if dragged
+    if (snap.attach.type === "trace" && snap.attach.seg != null){
+      const B = snap.attach.trace, k = snap.attach.seg;
+      const a = B.points[k], b = B.points[k+1], near = 1.5 / View.zoom;
+      if (a && b && Math.hypot(snap.x-a.x, snap.y-a.y) > near && Math.hypot(snap.x-b.x, snap.y-b.y) > near)
+        B.points.splice(k+1, 0, { x:snap.x, y:snap.y });
+    }
     pruneNets(); UI.refreshNets();
-    UI.select({ type:"trace", trace });
-    if (quietMerge) UI.warn("Connected nets “" + quietMerge.a + "” + “" + quietMerge.b + "” → “" + quietMerge.keep + "” (Ctrl+Z to undo)");
-    else UI.toast("Traces merged → " + (getNet(net)?.name || "net"));
+    const where = snap.attach.type === "pin"
+      ? snap.attach.comp.ref + "." + snap.attach.comp.pins[snap.attach.pinIdx].num
+      : snap.attach.type === "via" ? "via" : "trace";
+    UI.toast(note || ("Anchor connected to " + where + " → " + (getNet(net)?.name || "net")));
     requestRender();
+  };
+
+  // two DIFFERENT nets meet at the dropped anchor → ask which name wins with the same
+  // A→B/B→A dialog as drawing a trace between two nets (not the old big-merge confirm)
+  if (tNet && sNet && tNet !== sNet){
+    promptNetMerge(tNet, sNet,
+      "This trace anchor now sits on a different net. Which net should the joined copper use?",
+      (survived, blocked) => {
+        if (!blocked && survived === null){       // Undo → revert the whole anchor move
+          undo(); UI.select(null); UI.refreshNets(); UI.refreshInspector(); requestRender();
+          UI.toast("Move undone"); return;
+        }
+        // protected pair: keep the trace's own net, nets stay separate (warned already)
+        finish(blocked ? tNet : survived, blocked ? "Anchor moved — protected nets not merged" : null);
+      });
     return;
   }
-  // landed mid-trace (not an endpoint weld) → drop a coincident vertex on the target
-  // so it becomes a real T-junction that holds, and moves with the target if dragged
-  if (snap.attach.type === "trace" && snap.attach.seg != null){
-    const B = snap.attach.trace, k = snap.attach.seg;
-    const a = B.points[k], b = B.points[k+1], near = 1.5 / View.zoom;
-    if (a && b && Math.hypot(snap.x-a.x, snap.y-a.y) > near && Math.hypot(snap.x-b.x, snap.y-b.y) > near)
-      B.points.splice(k+1, 0, { x:snap.x, y:snap.y });
-  }
-  pruneNets(); UI.refreshNets();
-  const where = snap.attach.type === "pin"
-    ? snap.attach.comp.ref + "." + snap.attach.comp.pins[snap.attach.pinIdx].num
-    : snap.attach.type === "via" ? "via" : "trace";
-  if (quietMerge) UI.warn("Connected nets “" + quietMerge.a + "” + “" + quietMerge.b + "” → “" + quietMerge.keep + "” (Ctrl+Z to undo)");
-  else UI.toast("Anchor connected to " + where + " → " + (getNet(net)?.name || "net"));
-  requestRender();
+  finish(tNet || sNet || createNet().id);
 }
 
 /* Dragging an ENDPOINT vertex of `trace` (index `vi`) onto the END of another
@@ -1673,8 +1698,19 @@ function deleteSelection(){
   const sel = UI.sel;
   if (!sel) return;
   if (sel.comp && compEditLocked(sel.comp)){ UI.toast(sel.comp.ref + " is edit-locked"); return; }
+  // Delete on a selected PAD clears just that pad's net — nuking the whole part needs the
+  // component BODY selected (so editing a pin's net can't wipe the component by mistake).
+  if (sel.type === "pin"){
+    const p = sel.comp.pins[sel.pinIdx];
+    if (!p || !p.netId){ UI.toast("Pad has no net — select the component body to delete the whole part"); return; }
+    pushUndo("clear pad net");
+    p.netId = null;
+    pruneNets();
+    UI.refreshNets(); UI.refreshInspector(); requestRender();
+    return;
+  }
   pushUndo();
-  if (sel.type === "comp" || sel.type === "pin"){
+  if (sel.type === "comp"){
     State.components = State.components.filter(c => c !== sel.comp);
   } else if (sel.type === "via"){
     State.vias = State.vias.filter(v => v !== sel.via);

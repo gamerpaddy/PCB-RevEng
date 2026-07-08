@@ -109,7 +109,15 @@ function zoomToFit(){
     minY=Math.min(minY,l.ty-r); maxY=Math.max(maxY,l.ty+r);
     any=true;
   }
-  for (const c of State.components){ minX=Math.min(minX,c.x-50);maxX=Math.max(maxX,c.x+50);minY=Math.min(minY,c.y-50);maxY=Math.max(maxY,c.y+50); any=true; }
+  // include every conductor so an import whose copper extends past the outermost parts
+  // (or a trace-only board) still fits fully in view
+  const acc = (x, y, r) => { r = r || 0;
+    minX=Math.min(minX,x-r); maxX=Math.max(maxX,x+r);
+    minY=Math.min(minY,y-r); maxY=Math.max(maxY,y+r); any=true; };
+  for (const c of State.components) acc(c.x, c.y, compRadius(c));
+  for (const v of State.vias) acc(v.x, v.y, v.r || State.viaR);
+  for (const t of State.traces) for (const p of t.points) acc(p.x, p.y, (t.width||3)/2);
+  for (const n of State.notes) acc(n.x, n.y, 0);
   if (!any){ View.panX=View.width/2; View.panY=View.height/2; View.zoom=1; requestRender(); return; }
   const w=maxX-minX, h=maxY-minY;
   View.zoom = Math.min(View.width/(w||1), View.height/(h||1)) * 0.92;
@@ -385,7 +393,11 @@ function snapToConductor(wx, wy, traceSide, tightTrace, traceWidth, exclude){
   for (const v of State.vias){
     if (filterPads && !viaOnSide(v, traceSide)) continue;  // blind via doesn't reach this copper side
     const d = Math.hypot(wx-v.x, wy-v.y);
-    if (d <= tol && d < bestD){ bestD=d; best={x:v.x,y:v.y,attach:{type:"via",via:v},netId:v.netId}; }
+    // when NOT tightly drawing (dragging an anchor, or the via tool), a via grabs anywhere
+    // within its own copper radius — so an anchor that OVERLAPS a large via connects even if
+    // the cursor isn't right at its centre. Tight trace-drawing keeps the small fixed tol.
+    const vtol = tightTrace ? tol : Math.max(tol, (v.r || State.viaR || 0));
+    if (d <= vtol && d < bestD){ bestD=d; best={x:v.x,y:v.y,attach:{type:"via",via:v},netId:v.netId}; }
   }
   if (traceSide){
     // when drawing (tightTrace) only snap within the nearby trace's own width, so a far

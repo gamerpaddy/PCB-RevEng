@@ -35,10 +35,15 @@ function autosaveTick(){
     try {
       await idbPut("autosave", serializeLight());
       await idbPut("autosave_undo", JSON.stringify({ stack: Undo.stack, redo: Undo.redo }));
-      if (Autosave.imagesDirty){ Autosave.imagesDirty = false; await idbPut("autosave_imgs", serializeImages()); }
+      // clear imagesDirty only AFTER the image write succeeds, so a failure re-tries it
+      if (Autosave.imagesDirty){ await idbPut("autosave_imgs", serializeImages()); Autosave.imagesDirty = false; }
       Autosave.lastSaved = Date.now();
       await idbPut("autosave_meta", JSON.stringify({ savedAt: Autosave.lastSaved }));
-    } catch (e){ /* quota — keep working without autosave */ }
+    } catch (e){
+      // quota / write error — the change is NOT saved, so keep it pending for the next tick
+      // (we optimistically cleared dirty above; put it back so we don't report a false save)
+      Autosave.dirty = true;
+    }
     Autosave.saving = false;
     updateSaveStatus();
   });

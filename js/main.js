@@ -244,17 +244,25 @@ function wireSettings(){
   lsel.innerHTML = LAYER_COUNTS.map(n => `<option value="${n}">${n} layer${n>1?"s":""}</option>`).join("");
   lsel.addEventListener("change", ()=> setLayerCount(parseInt(lsel.value,10)));
 
+  // These sliders overwrite EVERY via's r / EVERY trace's width (including sizes carried in
+  // from an import). Snapshot once per drag so one undo restores the original geometry: arm
+  // on the first `input` of a drag, disarm on `change` (pointer release).
+  const armSliderUndo = (el, label) => { if (!el._sliderArmed){ pushUndo(label); el._sliderArmed = true; } };
+  $("#set-via").addEventListener("change", e => { e.target._sliderArmed = false; });
   $("#set-via").addEventListener("input", e => {
+    armSliderUndo(e.target, "via size (all vias)");
     State.viaR = +e.target.value;
     for (const v of State.vias) v.r = State.viaR;
     $("#set-via-val").textContent = (State.viaR*2/State.pxPerMm).toFixed(2) + " mm";
-    markDirty(); requestRender();
+    requestRender();
   });
+  $("#set-trace").addEventListener("change", e => { e.target._sliderArmed = false; });
   $("#set-trace").addEventListener("input", e => {
+    armSliderUndo(e.target, "trace width (all traces)");
     State.traceW = +e.target.value;
     for (const t of State.traces) t.width = State.traceW;
     $("#set-trace-val").textContent = State.traceW + " px";
-    markDirty(); requestRender();
+    requestRender();
   });
   $("#set-compview").addEventListener("change", e => {
     State.compView = e.target.value;
