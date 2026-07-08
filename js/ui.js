@@ -1318,6 +1318,41 @@ UI.openNetMergeDialog = (aName, bName, cb, opts) => {
   dlg.showModal();
 };
 
+/* a drawn trace physically touches SEVERAL different named nets — list them all and let
+   the user merge with one of them, with all of them, or keep them separate. `overlap` is
+   an array of net objects {id,name,…}. cb(netId | "all" | null). Built dynamically since
+   the button count varies; styled by the app's shared <dialog> CSS. */
+UI.openMultiMergeDialog = (baseName, overlap, cb) => {
+  const dlg = document.createElement("dialog");
+  dlg.id = "multimerge-dialog";
+  let done = false;
+  const pick = (v) => { if (done) return; done = true; dlg.close(); dlg.remove(); cb(v); };
+  const listTxt = overlap.map(n => "“" + escAttr(n.name) + "”").join(", ");
+  const netBtns = overlap.map((n, i) =>
+    `<button data-net="${n.id}">${i < 9 ? '<b style="color:var(--accent)">' + (i+1) + '</b>  ' : ""}Merge with “${escAttr(n.name)}”${n.protected ? " 🛡" : ""}</button>`
+  ).join("");
+  dlg.innerHTML = `
+    <div class="dlg-title">Trace crosses ${overlap.length} nets</div>
+    <div class="panel-hint" style="max-width:380px;margin-bottom:10px">The drawn trace (net <b>“${escAttr(baseName)}”</b>) physically touches ${overlap.length} other nets: ${listTxt}.<br>Merge it with one of them, all of them, or keep them separate.</div>
+    <div class="dlg-buttons" style="flex-direction:column;align-items:stretch;gap:6px">
+      ${netBtns}
+      <button class="primary" data-all="1">Merge with ALL (${overlap.length})</button>
+      <button data-keep="1">Keep separate — don't merge</button>
+    </div>`;
+  document.body.appendChild(dlg);
+  dlg.querySelectorAll("button[data-net]").forEach(b => b.onclick = () => pick(+b.dataset.net));
+  dlg.querySelector("button[data-all]").onclick  = () => pick("all");
+  dlg.querySelector("button[data-keep]").onclick = () => pick(null);
+  // hotkeys: 1-9 pick a net, 0 = merge all
+  const onKey = (e) => {
+    if (/^[1-9]$/.test(e.key) && overlap[+e.key - 1]){ e.preventDefault(); e.stopPropagation(); pick(overlap[+e.key - 1].id); }
+    else if (e.key === "0"){ e.preventDefault(); e.stopPropagation(); pick("all"); }
+  };
+  dlg.addEventListener("keydown", onKey);
+  dlg.addEventListener("close", () => pick(null), { once:true });  // Esc = keep separate
+  dlg.showModal();
+};
+
 /* ---------------- checker ---------------- */
 UI.openChecker = () => {
   const res = runChecker();

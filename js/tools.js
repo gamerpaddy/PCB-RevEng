@@ -68,7 +68,7 @@ function setTool(name){
   Tools.cropLayer = null; Tools.cropA = Tools.cropB = null;   // leave the crop tool
   Tools._edgeArmed = false;   // re-arm edge auto-scroll: must leave the margin before it kicks in
   if (name !== "component"){ Tools.ghostFp = null; Tools.pending = null; }
-  if (name !== "select"){ View.hoverPin = null; UI.setStatusPad(""); Tools._readout = ""; }   // pad/comp readout is select-mode only
+  if (name !== "select"){ View.hoverPin = null; View.cursorLabel = null; UI.setStatusPad(""); Tools._readout = ""; }   // pad/comp readout is select-mode only
   Tools.name = name;
   document.querySelectorAll("#toolbar .tool").forEach(b =>
     b.classList.toggle("active", b.dataset.tool === name));
@@ -86,6 +86,7 @@ function onPointerDown(e){
   const w = screenToWorld(pt.x, pt.y);
   Tools.cursor = w;
   Tools._edgeArmed = false;   // each new interaction must leave the margin before auto-scroll arms
+  View.cursorLabel = null;    // hide the hover net-chip while interacting
 
   // middle button or space = pan, any tool
   if (e.button === 1 || Keys.space){
@@ -182,9 +183,17 @@ function onPointerMove(e){
     // the single-object / single-pad hover cue changes even when the net doesn't (moving
     // between two traces of the same net), so redraw on any hovered-object change too
     if (objChanged || pinChanged) requestRender();
-    // bottom-bar readout: hovered pad (ref.pin · net) or component (ref), plus value/part
-    const readout = hoverReadout(h);
-    if (readout !== Tools._readout){ Tools._readout = readout; UI.setStatusPad(readout); }
+    // discreet floating net-name label pinned next to the cursor (for a pad/via/trace).
+    // Follows the pointer and shows the net colour as a small dot; replaces the old
+    // bottom-bar readout so the info sits where the eye already is.
+    let labelText = null, labelCol = null;
+    if (h && (h.type==="pin" || h.type==="via" || h.type==="trace")){
+      const nid = net, ncPin = h.type==="pin" && h.comp.pins[h.pinIdx].nc;
+      labelText = ncPin ? "no-connect" : (nid ? (getNet(nid)?.name || "?") : "(no net)");
+      labelCol  = nid ? netColor(nid) : null;
+    }
+    if (labelText){ View.cursorLabel = { text: labelText, color: labelCol, x: pt.x, y: pt.y }; requestRender(); }
+    else if (View.cursorLabel){ View.cursorLabel = null; requestRender(); }
     View.canvas.style.cursor = h ? "pointer" : "default";
   }
 
@@ -882,6 +891,17 @@ function runChecker(){
       if (tracesOverlap(a, b)) shorts.push({ a, b, pos: traceContactPoint(a, b) });
     }
   }
+  // via-to-trace shorts: a via whose copper (full radius, ring included — not just its
+  // hole) overlaps a trace on a side it reaches, but carries a DIFFERENT net. This is the
+  // via-side mirror of the pad/trace mismatch check below, so a trace dragged onto a via's
+  // ring is flagged even when no vertex snapped to its centre.
+  for (const v of State.vias){
+    if (!v.netId) continue;
+    for (const t of State.traces){
+      if (!t.netId || t.netId === v.netId) continue;
+      if (viaTouchesTrace(v, t)) shorts.push({ a: t, b: v, pos: { x:v.x, y:v.y } });
+    }
+  }
   for (const c of State.components){
     const fp = compFootprint(c);
     const s = State.pxPerMm * (c.scale||1);
@@ -1246,10 +1266,11 @@ function completeTrace(pts, sSnap, endSnap, netId, opts){
     applyAttach(endSnap, netId);
   }
   const trace = weldOrCreateTrace(pts, Tools.traceSide, netId, sSnap, endSnap);
-  if (!opts.skipAttach) mergeIntersectingTraces(trace);
   Tools.tracePts = null; Tools.traceStartSnap = null;
   UI.setHint(TOOL_HINTS.trace);
   UI.refreshNets(); requestRender();
+  // join any touching same-side trace; different-net crossings prompt A→B/B→A (async)
+  if (!opts.skipAttach) mergeIntersectingTraces(trace);
 }
 
 /* If a snap landed on (or very near) one END of an existing trace on `side`,
@@ -1317,31 +1338,66 @@ function weldOrCreateTrace(pts, side, netId, sSnap, endSnap){
   return host;
 }
 
-/* any same-side trace that genuinely connects to the new one joins its net.
-   Crossings with a DIFFERENT existing net ask for confirmation first. */
+/* any same-side trace that genuinely connects to the new one joins its net. Unnamed
+   crossings are absorbed silently. When the trace touches other NAMED nets it lists them
+   all in one prompt: a single crossing keeps the A→B / B→A name-direction dialog; several
+   distinct nets show a multi-net dialog (merge with one of them, all, or keep separate). */
 function mergeIntersectingTraces(trace){
-  let merged = 0;
-  for (const other of State.traces){
-    if (other === trace || other.side !== trace.side) continue;
-    if (other.netId === trace.netId) continue;
-    if (!tracesTouch(trace, other)) continue;
-    if (!other.netId){ other.netId = trace.netId; merged++; continue; }
-    // both have nets — confirm before joining two different nets
-    const tn = getNet(trace.netId)?.name || "?";
-    const on = getNet(other.netId)?.name || "?";
-    if (!confirm("This trace overlaps a trace on net “" + on + "”.\nConnect them (merge “" + tn + "” and “" + on + "”)?")){
-      continue; // leave them separate
-    }
-    const m = mergeNetsChecked(trace.netId, other.netId);
-    if (m === MERGE_DECLINED) continue;
-    if (m === null){
-      UI.toast("⚠ Crossing protected nets " + tn + " / " + on + " — NOT merged");
-      continue;
-    }
-    trace.netId = m;
-    merged++;
+  // snapshot the touching same-side traces up front (net ids may change as we merge)
+  const touching = State.traces.filter(other =>
+    other !== trace && other.side === trace.side && other.netId !== trace.netId && tracesTouch(trace, other));
+  if (!touching.length) return;
+  // unnamed crossings just adopt the trace's net; collect the DISTINCT named nets it hits
+  let absorbed = 0;
+  const netIds = new Set();
+  for (const other of touching){
+    if (!other.netId){ other.netId = trace.netId; absorbed++; }
+    else netIds.add(other.netId);
   }
-  if (merged) UI.toast("Joined " + merged + " crossing trace" + (merged>1?"s":"") + " → net “" + (getNet(trace.netId)?.name || "?") + "”");
+  const overlap = [...netIds].map(id => getNet(id)).filter(Boolean);
+  const done = (msg) => {
+    UI.refreshNets(); requestRender();
+    if (msg) UI.toast(msg);
+    else if (absorbed) UI.toast("Joined " + absorbed + " crossing trace" + (absorbed>1?"s":""));
+  };
+  if (!overlap.length){ done(); return; }
+
+  // merge the trace's net with one named net; returns the survivor id (or null if blocked)
+  const mergeWith = (netId) => {
+    const m = mergeNets(trace.netId, netId);
+    if (m !== null) trace.netId = m;
+    return m;
+  };
+
+  if (overlap.length === 1){
+    const aId = trace.netId, bId = overlap[0].id;
+    const aName = getNet(aId)?.name || "?", bName = overlap[0].name;
+    UI.openNetMergeDialog(aName, bName, (choice) => {
+      if (choice === "toB" || choice === "toA"){
+        const keep = choice === "toB" ? bId : aId, drop = choice === "toB" ? aId : bId;
+        const m = mergeNets(keep, drop);
+        if (m === null){ done("⚠ Crossing protected nets " + aName + " / " + bName + " — NOT merged"); return; }
+        trace.netId = m; done("Merged → “" + (getNet(m)?.name || "?") + "”"); return;
+      }
+      done();   // keep separate
+    }, { ignore:false, title:"Trace crosses another net", undoText:"Keep them separate",
+         msg:`This trace touches a trace on <b>“${escAttr(bName)}”</b> (B); the drawn trace is <b>“${escAttr(aName)}”</b> (A). Which net should the joined copper use?` });
+    return;
+  }
+
+  // several distinct nets → list them all, let the user pick one / all / keep separate
+  UI.openMultiMergeDialog(getNet(trace.netId)?.name || "?", overlap, (sel) => {
+    if (sel == null){ done(); return; }                    // keep separate
+    if (sel === "all"){
+      let ok = 0;
+      for (const n of overlap) if (mergeWith(n.id) !== null) ok++;
+      done(ok ? ("Merged " + ok + " net" + (ok>1?"s":"") + " → “" + (getNet(trace.netId)?.name || "?") + "”")
+              : "Protected nets — nothing merged");
+      return;
+    }
+    const m = mergeWith(sel);                              // sel = a specific net id
+    done(m === null ? "⚠ Protected nets — NOT merged" : ("Merged → “" + (getNet(trace.netId)?.name || "?") + "”"));
+  });
 }
 
 /* is world point (px,py) sitting on a same-side pad's copper (within halfW)? Used by

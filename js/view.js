@@ -11,6 +11,7 @@ const View = {
   hoverObj: null,         // trace/via under cursor → highlighted on its own (the "just this thing" hover cue)
   hoverNote: null,        // sticky note under cursor → show its text
   hoverPin: null,         // {comp,pinIdx} pad under cursor → anchors the "star" ratsnest on hover + single-pad hover cue
+  cursorLabel: null,      // {text,color,x,y} discreet net-name chip drawn next to the pointer (screen px) when hovering a pad/via/trace
   blinkNet: null,         // net flashing after a net-list click
   blinkOn: false,
   ratsnest: false,        // draw straight "airwire" connections between same-net pads/vias
@@ -393,10 +394,11 @@ function snapToConductor(wx, wy, traceSide, tightTrace, traceWidth, exclude){
   for (const v of State.vias){
     if (filterPads && !viaOnSide(v, traceSide)) continue;  // blind via doesn't reach this copper side
     const d = Math.hypot(wx-v.x, wy-v.y);
-    // when NOT tightly drawing (dragging an anchor, or the via tool), a via grabs anywhere
-    // within its own copper radius — so an anchor that OVERLAPS a large via connects even if
-    // the cursor isn't right at its centre. Tight trace-drawing keeps the small fixed tol.
-    const vtol = tightTrace ? tol : Math.max(tol, (v.r || State.viaR || 0));
+    // a via is a small, discrete target: if the cursor is anywhere on its copper ring it
+    // should snap — whether DRAWING a trace onto it or dragging an anchor over it. So the
+    // reach is the via's own radius (plus the small fixed tol), even in tight-draw mode.
+    // Otherwise a large via/PTH would only connect on its tiny inner hole, not its ring.
+    const vtol = Math.max(tol, (v.r || State.viaR || 0));
     if (d <= vtol && d < bestD){ bestD=d; best={x:v.x,y:v.y,attach:{type:"via",via:v},netId:v.netId}; }
   }
   if (traceSide){
@@ -574,6 +576,42 @@ function render(){
   }
   // leave the pane offset cleared so pointer-side transforms are correct between frames
   View._paneDX = 0; View._paneSide = null; View._paneLayerId = null; View._paneXray = null;
+  drawCursorLabel(ctx);
+}
+
+/* discreet net-name chip pinned next to the pointer while hovering a pad/via/trace in
+   Select mode (set in tools.js onPointerMove). Screen space, semi-transparent so it never
+   obscures the board; a small dot shows the net colour. */
+function drawCursorLabel(ctx){
+  const L = View.cursorLabel;
+  if (!L || !L.text) return;
+  ctx.save();
+  ctx.setTransform((View.dpr||1),0,0,(View.dpr||1),0,0);
+  ctx.font = "12px system-ui, sans-serif";
+  ctx.textBaseline = "top";
+  const dot = L.color ? 12 : 0;
+  const padX = 7, padY = 3;
+  const tw = ctx.measureText(L.text).width;
+  const bw = tw + dot + padX*2, bh = 19;
+  // sit just below-right of the cursor; flip to the other side near a viewport edge
+  let x = L.x + 15, y = L.y + 16;
+  if (x + bw > View.width - 4)  x = L.x - bw - 10;
+  if (y + bh > View.height - 4) y = L.y - bh - 10;
+  if (x < 4) x = 4;
+  if (y < 4) y = 4;
+  roundRect(ctx, x, y, bw, bh, 4);
+  ctx.fillStyle = "rgba(18,22,28,.82)"; ctx.fill();
+  ctx.strokeStyle = "rgba(120,132,148,.45)"; ctx.lineWidth = 1; ctx.stroke();
+  let tx = x + padX;
+  if (L.color){
+    ctx.fillStyle = L.color;
+    ctx.beginPath(); ctx.arc(x + padX + 3.5, y + bh/2, 3.5, 0, Math.PI*2); ctx.fill();
+    if (isDarkHex(L.color)){ ctx.strokeStyle = "rgba(154,163,173,.8)"; ctx.lineWidth = 1; ctx.stroke(); }
+    tx += dot;
+  }
+  ctx.fillStyle = "#e6ebf1";
+  ctx.fillText(L.text, tx, y + padY);
+  ctx.restore();
 }
 
 /* draw one synced split pane (which = "left"/"right"): a clipped half-canvas showing
