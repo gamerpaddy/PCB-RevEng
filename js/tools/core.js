@@ -17,6 +17,7 @@ const Tools = {
   tracePts: null,
   traceSide: "front",
   traceStartSnap: null,
+  angleSnap: localStorage.getItem("pcbreveng.traceAngleSnap") === "on",   // constrain new segments to 45° increments
   // component tool
   ghostFp: null, ghostRot: 0, ghostSide: "front",
   pending: null,       // {fpId,fpParams,ref,value,part,kicad}

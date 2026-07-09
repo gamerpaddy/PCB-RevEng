@@ -11,6 +11,8 @@ UI.refreshInspector = () => {
   if (!sel){
     // via tool active → show the retained defaults for newly placed vias (size + drill)
     if (typeof Tools !== "undefined" && Tools.name === "via"){ UI.inspectViaTool(); return; }
+    // trace tool active → show placement mode (free vs 45° angle snap)
+    if (typeof Tools !== "undefined" && Tools.name === "trace"){ UI.inspectTraceTool(); return; }
     const k = (id)=>Keymap.keyFor(id) || "—";
     box.innerHTML = '<div class="panel-hint">Nothing selected.<br><br>Tips:<br>· ' +
       k("tool.select") + ' select · ' + k("tool.component") + ' component · ' + k("tool.trace") + ' trace · ' + k("tool.via") + ' via<br>' +
@@ -378,6 +380,31 @@ UI.inspectViaTool = () => {
   sec.querySelector("#i-dvr-mil").addEventListener("change", e => applySize((parseFloat(e.target.value)||0) * MM_PER_MIL));
   sec.querySelector("#i-dvh-mm").addEventListener("change",  e => applyDrill(parseFloat(e.target.value)||0));
   sec.querySelector("#i-dvh-mil").addEventListener("change", e => applyDrill((parseFloat(e.target.value)||0) * MM_PER_MIL));
+};
+
+/* Trace-tool defaults panel (shown by refreshInspector when the trace tool is active and
+   nothing is selected): choose free placement or constrain new segments to 45° increments.
+   The choice rides on Tools.angleSnap and is remembered in localStorage. */
+UI.inspectTraceTool = () => {
+  const box = $("#inspector");
+  const sec = document.createElement("div");
+  sec.className = "insp-section";
+  const on = !!Tools.angleSnap;
+  sec.innerHTML = `
+    <div class="insp-title">Trace tool</div>
+    ${inspRow("Placement", `<select id="i-tanglesnap">
+       <option value="free">Free (any angle)</option>
+       <option value="snap">Snap to 45°</option>
+     </select>`)}
+    <div class="panel-hint">Angle snap constrains each new segment to 45° steps from the previous point. Pads/vias still snap normally. Click to add points, Enter/double-click to finish.</div>`;
+  box.appendChild(sec);
+  const selEl = sec.querySelector("#i-tanglesnap");
+  selEl.value = on ? "snap" : "free";
+  selEl.addEventListener("change", e => {
+    Tools.angleSnap = e.target.value === "snap";
+    localStorage.setItem("pcbreveng.traceAngleSnap", Tools.angleSnap ? "on" : "off");
+    requestRender();
+  });
 };
 
 UI.inspectNetObj = (title, obj) => {

@@ -1,9 +1,32 @@
 /* ===== tools-trace.js — trace tool, welding, connectivity clusters, disconnect ===== */
 "use strict";
 
+/* Constrain (x,y) so the segment from `prev` runs at the nearest multiple of 45°.
+   Uses perpendicular projection onto that ray so the point stays close to the cursor. */
+function traceAngleSnap(prev, x, y){
+  const dx = x - prev.x, dy = y - prev.y;
+  if (Math.hypot(dx, dy) < 1e-6) return { x, y };
+  const step = Math.PI / 4;
+  const ang = Math.round(Math.atan2(dy, dx) / step) * step;
+  const proj = Math.max(0, dx * Math.cos(ang) + dy * Math.sin(ang));   // length along the ray
+  return { x: prev.x + Math.cos(ang) * proj, y: prev.y + Math.sin(ang) * proj };
+}
+
+/* The point a trace click/preview should land on: a conductor snap always wins;
+   otherwise, when angle-snap is on and a segment is in progress, constrain to 45°. */
+function tracePointAt(w, snap){
+  if (snap) return { x:snap.x, y:snap.y };
+  if (Tools.angleSnap && Tools.tracePts && Tools.tracePts.length)
+    return traceAngleSnap(Tools.tracePts[Tools.tracePts.length-1], w.x, w.y);
+  return { x:w.x, y:w.y };
+}
+
+/* Where the live rubber-band endpoint should be drawn (uses the hover snap in Tools.snap). */
+function traceCursorPoint(){ return tracePointAt(Tools.cursor, Tools.snap); }
+
 function traceDown(w, e){
   const snap = snapToConductor(w.x, w.y, Tools.tracePts ? Tools.traceSide : UI.copperSide(), true, State.traceW);
-  const p = snap ? {x:snap.x, y:snap.y} : {x:w.x, y:w.y};
+  const p = tracePointAt(w, snap);
   if (!Tools.tracePts){
     Tools.tracePts = [p];
     Tools.traceStartSnap = snap;

@@ -241,7 +241,7 @@ function drawWorld(ctx){
     ctx.beginPath();
     ctx.moveTo(Tools.tracePts[0].x, Tools.tracePts[0].y);
     for (let i=1;i<Tools.tracePts.length;i++) ctx.lineTo(Tools.tracePts[i].x, Tools.tracePts[i].y);
-    if (Tools.cursor) ctx.lineTo(Tools.cursor.x, Tools.cursor.y);
+    if (Tools.cursor){ const cp = traceCursorPoint(); ctx.lineTo(cp.x, cp.y); }
     ctx.stroke();
     ctx.restore();
   }
