@@ -13,3 +13,5 @@ Arduino_MEGA2560_ref.brd
 *.brd
 *.cad
 sample.cad
+SCH_neuralizer_2026-07-09.json
+PCB_PCB_neuralizer_2026-07-09.json
