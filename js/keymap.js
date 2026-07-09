@@ -18,6 +18,7 @@ const KeyActions = [
   { id:"tool.align",     label:"Align image layer tool",        def:"G",      run:()=>setTool("align") },
   { id:"tool.measure",   label:"Measure tool",                  def:"M",      btn:"#btn-measure",   run:()=>setTool("measure") },
   { id:"tool.calibrate", label:"Calibrate scale tool",          def:"",       btn:"#btn-calibrate", run:clickBtn("#btn-calibrate") },
+  { id:"tool.rotate",    label:"Rotate layer tool",             def:"",       btn:"#btn-rotate",    run:clickBtn("#btn-rotate") },
   { id:"tool.deskew",    label:"Deskew layer",                  def:"",       btn:"#btn-deskew",    run:clickBtn("#btn-deskew") },
   { id:"view.flip",      label:"Flip board view (front/back)",  def:"F",      btn:"#btn-flip",      run:()=>toggleFlip() },
   { id:"view.fit",       label:"Zoom to fit",                   def:"Z",      run:()=>zoomToFit() },

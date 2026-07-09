@@ -9,6 +9,8 @@ UI.refreshInspector = () => {
   if (UI.pinSel.length){ UI.inspectMultiPins(); return; }
   if (UI.traceSel.length){ UI.inspectMultiTraces(); return; }
   if (!sel){
+    // via tool active → show the retained defaults for newly placed vias (size + drill)
+    if (typeof Tools !== "undefined" && Tools.name === "via"){ UI.inspectViaTool(); return; }
     const k = (id)=>Keymap.keyFor(id) || "—";
     box.innerHTML = '<div class="panel-hint">Nothing selected.<br><br>Tips:<br>· ' +
       k("tool.select") + ' select · ' + k("tool.component") + ' component · ' + k("tool.trace") + ' trace · ' + k("tool.via") + ' via<br>' +
@@ -357,6 +359,27 @@ UI.inspectComponent = (c, selPin) => {
   if (compEditLocked(c)) pinSec.querySelectorAll("input,button").forEach(el => el.disabled = true);
 };
 
+/* Via tool defaults panel (shown when the via tool is active and nothing is selected).
+   Edits the retained board-wide defaults State.viaR (size) and State.viaHole (drill), both
+   stored as world-px RADII; every newly placed via inherits them (PTH scales them ×1.8). */
+UI.inspectViaTool = () => {
+  const box = $("#inspector");
+  const sec = document.createElement("div");
+  sec.className = "insp-section";
+  sec.innerHTML = `
+    <div class="insp-title">Via tool</div>
+    ${inspRow("Size Ø", UI.viaSizeInputs(State.viaR, "i-dvr-"))}
+    ${inspRow("Drill Ø", UI.viaSizeInputs(State.viaHole, "i-dvh-"))}
+    <div class="panel-hint">Defaults for new vias · Alt-click = PTH · Shift-click = free (no net). Values are retained.</div>`;
+  box.appendChild(sec);
+  const applySize = (mm) => { if (!(mm > 0)) return; pushUndo("via size"); State.viaR = Math.max(1, mm*State.pxPerMm/2); UI.refreshInspector(); requestRender(); };
+  const applyDrill = (mm) => { if (!(mm > 0)) return; pushUndo("via drill"); State.viaHole = Math.max(0.5, mm*State.pxPerMm/2); UI.refreshInspector(); requestRender(); };
+  sec.querySelector("#i-dvr-mm").addEventListener("change",  e => applySize(parseFloat(e.target.value)||0));
+  sec.querySelector("#i-dvr-mil").addEventListener("change", e => applySize((parseFloat(e.target.value)||0) * MM_PER_MIL));
+  sec.querySelector("#i-dvh-mm").addEventListener("change",  e => applyDrill(parseFloat(e.target.value)||0));
+  sec.querySelector("#i-dvh-mil").addEventListener("change", e => applyDrill((parseFloat(e.target.value)||0) * MM_PER_MIL));
+};
+
 UI.inspectNetObj = (title, obj) => {
   const box = $("#inspector");
   const netName = obj.netId ? (getNet(obj.netId)?.name || "") : "";
@@ -368,6 +391,7 @@ UI.inspectNetObj = (title, obj) => {
     ${inspRow("Net", `<span style="display:flex;gap:4px;flex:1;min-width:0"><input id="i-net" value="${escAttr(netName)}" placeholder="net name" style="flex:1;min-width:0"><button id="i-netgen" title="Generate a new unique net name">⊕</button></span>`)}
     ${isViaObj ? inspRow("Type", `<select id="i-kind"><option value="via">Via</option><option value="pth">PTH (plated hole)</option></select>`) : ""}
     ${isViaObj ? inspRow("Size Ø", UI.viaSizeInputs(obj.r||State.viaR, "i-vr-")) : ""}
+    ${isViaObj ? inspRow("Drill Ø", UI.viaSizeInputs(obj.hole != null ? obj.hole : State.viaHole, "i-vh-")) : ""}
     ${isViaObj ? inspRow("Span", `<span style="display:flex;gap:4px;flex:1;min-width:0;align-items:center"><span id="i-vspan" style="flex:1;min-width:0;font-size:11px;color:#aab4c2">${escAttr(viaSpanLabel(obj))}</span><button id="i-vspanedit" title="Set layer span (blind / buried via)">Edit…</button></span>`) : ""}
     <div class="insp-actions"><button id="i-del" class="danger">Delete</button></div>`;
   box.appendChild(sec);
@@ -382,6 +406,9 @@ UI.inspectNetObj = (title, obj) => {
     const applyVr = (mm) => { if (!(mm > 0)) return; pushUndo("via size"); obj.r = Math.max(1, mm*State.pxPerMm/2); UI.refreshInspector(); requestRender(); };
     sec.querySelector("#i-vr-mm").addEventListener("change",  e => applyVr(parseFloat(e.target.value)||0));
     sec.querySelector("#i-vr-mil").addEventListener("change", e => applyVr((parseFloat(e.target.value)||0) * MM_PER_MIL));
+    const applyVh = (mm) => { if (!(mm > 0)) return; pushUndo("via drill"); obj.hole = Math.max(0.5, mm*State.pxPerMm/2); UI.refreshInspector(); requestRender(); };
+    sec.querySelector("#i-vh-mm").addEventListener("change",  e => applyVh(parseFloat(e.target.value)||0));
+    sec.querySelector("#i-vh-mil").addEventListener("change", e => applyVh((parseFloat(e.target.value)||0) * MM_PER_MIL));
   }
   sec.querySelector("#i-netgen").addEventListener("click", ()=>{ sec.querySelector("#i-net").value = uniqueNetName(); sec.querySelector("#i-net").dispatchEvent(new Event("change")); });
   sec.querySelector("#i-net").addEventListener("change", e => {

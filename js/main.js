@@ -89,7 +89,11 @@ function wireToolbar(){
   $("#btn-stack3d").addEventListener("click", ()=> Stack3D.open());
   $("#btn-measure").addEventListener("click", ()=> setTool("measure"));
   $("#btn-calibrate").addEventListener("click", ()=> setTool("calibrate"));
+  $("#btn-rotate").addEventListener("click", ()=> startRotate());
+  $("#btn-align").addEventListener("click", ()=> startPointAlign());
+  $("#btn-crop").addEventListener("click", ()=> startCrop());
   $("#btn-deskew").addEventListener("click", ()=> startLineDeskew());
+  $("#btn-resizexy").addEventListener("click", ()=> startResizeXY());
   $("#btn-history").addEventListener("click", ()=> UI.openHistory());
   $("#btn-check").addEventListener("click", ()=> UI.openChecker());
 }
@@ -702,6 +706,8 @@ function wireKeyboard(){
         else if (Tools.addPinFor){ Tools.addPinFor=null; UI.setHint(TOOL_HINTS[Tools.name]||""); UI.refreshInspector(); }
         else if (Tools.tracePts) cancelTrace();
         else if (Tools.name==="align"){ setTool("select"); UI.toast("Align mode off"); }   // setTool clears align/deskew markers
+        else if (Tools.name==="rotate"){ setTool("select"); UI.toast("Rotate mode off"); }   // setTool clears the gizmo
+        else if (Tools.name==="resizexy"){ setTool("select"); UI.toast("Resize cancelled"); }   // setTool clears the resize state
         else if (Tools.name==="component"){ setTool("select"); }
         else { UI.select(null); View.hoverNetId=null; requestRender(); }
         break;

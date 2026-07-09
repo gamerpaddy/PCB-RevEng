@@ -34,7 +34,8 @@ function estimateTraceAmps(widthMm, thickMm, internal, dT){
 const State = {
   pxPerMm: 10,          // world px per millimetre (set with Measure tool)
   layerCount: 2,        // copper layers on the board (1,2,4,…,12)
-  viaR: 8,              // via radius in world px (display/visibility, applies to all vias)
+  viaR: 5,              // via radius in world px — default 1 mm Ø (at pxPerMm 10); applies to all vias
+  viaHole: 2.5,         // via drill RADIUS in world px — default 0.5 mm Ø bore for new vias (retained)
   traceW: 5,            // trace width in world px (applies to all traces)
   compView: "side",     // "side" = only viewed side fully drawn (other side: THT pads/vias only) | "both"
   traceView: "active",  // "active" = only active draw side's traces shown | "all"
@@ -266,11 +267,28 @@ function getNote(id){ return State.notes.find(n => n.id === id) || null; }
 const Undo = { stack: [], redo: [], max: 25 };
 try { Undo.max = Math.max(5, Math.min(200, parseInt(localStorage.getItem("pcbreveng.histLen"),10) || 25)); } catch(e){}
 
+/* Image-pixel history for undo. Snapshots are JSON, so they can't hold a layer's
+   bitmap — they store a small `imgId` instead. Pixel-baking ops (crop, deskew) call
+   commitLayerImage() to register the NEW bitmap under a fresh id; the previous bitmap
+   stays cached under its old id, so undo/redo just swap layer.img/dataURL/tiles back by
+   id. Non-baking edits (move, 4-point align warp) never change the id and are unaffected. */
+const _imgVault = new Map();   // imgId -> {img, dataURL, tiles}
+let _imgVaultSeq = 1;
+function commitLayerImage(l){   // call AFTER assigning the new img/dataURL/tiles
+  l.imgId = _imgVaultSeq++;
+  _imgVault.set(l.imgId, { img:l.img, dataURL:l.dataURL, tiles:l.tiles || null });
+}
+function ensureLayerImgId(l){   // lazily register a layer's current pixels (first snapshot)
+  if (l.imgId == null || !_imgVault.has(l.imgId)) commitLayerImage(l);
+  return l.imgId;
+}
+
 function snapshot(){
   return JSON.stringify({
     pxPerMm: State.pxPerMm,
     layerCount: State.layerCount,
     viaR: State.viaR,
+    viaHole: State.viaHole,
     traceW: State.traceW,
     compView: State.compView,
     traceView: State.traceView,
@@ -290,7 +308,7 @@ function snapshot(){
     layersMeta: State.layers.map(l => ({
       id:l.id, name:l.name, side:l.side, visible:l.visible, opacity:l.opacity,
       tx:l.tx, ty:l.ty, scale:l.scale, rot:l.rot, mirror:l.mirror, locked:l.locked,
-      warp:l.warp || null
+      warp:l.warp || null, imgId: ensureLayerImgId(l)
     })),
   });
 }
@@ -320,6 +338,7 @@ function applySnapshot(json){
   State.pxPerMm = s.pxPerMm;
   State.layerCount = s.layerCount || 2;
   State.viaR = s.viaR || 8;
+  State.viaHole = s.viaHole || 3.6;
   State.traceW = s.traceW || 5;
   State.compView = s.compView || "side";
   State.traceView = s.traceView || "active";
@@ -338,7 +357,13 @@ function applySnapshot(json){
   State.refCounters = s.refCounters;
   for (const m of s.layersMeta){
     const l = getLayer(m.id);
-    if (l) Object.assign(l, m);
+    if (!l) continue;
+    Object.assign(l, m);
+    // swap the bitmap back to the version this snapshot captured (undo of crop/deskew)
+    if (m.imgId != null && _imgVault.has(m.imgId)){
+      const v = _imgVault.get(m.imgId);
+      l.img = v.img; l.dataURL = v.dataURL; l.tiles = v.tiles;
+    }
   }
 }
 
@@ -365,7 +390,12 @@ function selectiveUndo(i){
   const entry = Undo.stack[i];
   const before = JSON.parse(entry.json);
   const after  = JSON.parse(i + 1 < Undo.stack.length ? Undo.stack[i+1].json : snapshot());
-  pushUndo("revert: " + entry.label); // make the selective revert itself undoable (may shift indices)
+  // Make the selective revert itself undoable (Ctrl+Z restores the reverted action), but tag it
+  // so the history dialog does NOT offer to revert the revert — that recursion ("revert: revert:
+  // …") just re-applies/re-reverts the same edit endlessly. Strip any existing prefix so the label
+  // stays a single clean "revert: <action>".
+  pushUndo("revert: " + entry.label.replace(/^revert:\s*/, ""));
+  Undo.stack[Undo.stack.length - 1].isRevert = true;
   for (const col of ["components","vias","traces","notes","nets"]){
     const bm = new Map(before[col].map(o => [o.id, o]));
     const am = new Map(after[col].map(o => [o.id, o]));
@@ -395,7 +425,7 @@ function selectiveUndo(i){
     if (l) Object.assign(l, bo);
   }
   // board-wide scalar settings (mirror the list diffSnapshots reports)
-  for (const k of ["pxPerMm","layerCount","viaR","traceW","compView","traceView",
+  for (const k of ["pxPerMm","layerCount","viaR","viaHole","traceW","compView","traceView",
                    "overlapCheck","refTextSize","copperOz","copperOzInner","focusDim"]){
     if (JSON.stringify(before[k]) !== JSON.stringify(after[k])) State[k] = before[k];
   }
@@ -494,7 +524,7 @@ function diffSnapshots(beforeJson, afterJson){
   if (layerNames.length) parts.push("adjusted " + layerNames.length + " layer" + (layerNames.length>1?"s":"") + list(layerNames));
 
   // board-wide scalar settings
-  [ ["pxPerMm","scale"], ["layerCount","layer count"], ["viaR","via size"], ["traceW","trace width"],
+  [ ["pxPerMm","scale"], ["layerCount","layer count"], ["viaR","via size"], ["viaHole","via drill"], ["traceW","trace width"],
     ["refTextSize","label size"], ["compView","component view"], ["traceView","trace view"],
     ["copperOz","copper weight"], ["copperOzInner","inner copper weight"], ["focusDim","focus dim"],
   ].forEach(([k, lbl]) => { if (b[k] !== a[k]) parts.push(lbl + " changed"); });
@@ -509,6 +539,7 @@ function serializeProject(){
     pxPerMm: State.pxPerMm,
     layerCount: State.layerCount,
     viaR: State.viaR,
+    viaHole: State.viaHole,
     traceW: State.traceW,
     compView: State.compView,
     traceView: State.traceView,
@@ -543,6 +574,7 @@ function loadProject(json, done){
   State.pxPerMm = s.pxPerMm || 10;
   State.layerCount = s.layerCount || 2;
   State.viaR = s.viaR || 8;
+  State.viaHole = s.viaHole || 3.6;
   State.traceW = s.traceW || 5;
   State.compView = s.compView || "side";
   State.traceView = s.traceView || "active";
@@ -561,6 +593,7 @@ function loadProject(json, done){
   State.notes = s.notes || [];
   State.layers = [];
   Undo.stack.length = 0; Undo.redo.length = 0;
+  _imgVault.clear(); _imgVaultSeq = 1;   // fresh project → drop any cached bitmaps
   const metas = s.layers || [];
   let pending = metas.length;
   if (!pending){ done && done(); return; }
@@ -599,7 +632,8 @@ function loadProject(json, done){
 function resetProject(){
   State.pxPerMm = 10;
   State.layerCount = 2;
-  State.viaR = 8;
+  State.viaR = 5;      // 1 mm Ø
+  State.viaHole = 2.5; // 0.5 mm Ø
   State.traceW = 5;
   State.compView = "side";
   State.traceView = "active";
@@ -618,4 +652,5 @@ function resetProject(){
   State._id = 1;
   State.refCounters = {};
   Undo.stack.length = 0; Undo.redo.length = 0;
+  _imgVault.clear(); _imgVaultSeq = 1;   // no undo history → cached bitmaps are unreachable
 }

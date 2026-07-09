@@ -17,17 +17,13 @@ function alignDown(w, pt, e){
   // (Tools.alignPts set) a plain CLICK instead drops the next alignment marker. We start a
   // move drag now and, if the pointer never actually moves, place the marker on release
   // (see onPointerUp) — so drag = move and click = marker, both without pressing Esc first.
+  // (Rotation lives in the dedicated Rotate tool now, not Shift+drag here.)
   const layer = UI.activeLayer();
   if (!layer){ UI.toast("Select an image layer in the Layers panel first"); return; }
   if (layer.locked){ UI.toast("Layer is locked"); return; }
   pushUndo();
-  if (e.shiftKey){
-    Tools.drag = { kind:"rot-layer", layer, wx:w.x, wy:w.y, lrot:layer.rot,
-                   lwarp0: layer.warp ? {...layer.warp} : null, moved:false };
-  } else {
-    Tools.drag = { kind:"move-layer", layer, wx:w.x, wy:w.y, ltx:layer.tx, lty:layer.ty, moved:false,
-                   alignClick: Tools.alignPts ? { x:w.x, y:w.y, thumb: captureAlignThumb(pt) } : null };
-  }
+  Tools.drag = { kind:"move-layer", layer, wx:w.x, wy:w.y, ltx:layer.tx, lty:layer.ty, moved:false,
+                 alignClick: Tools.alignPts ? { x:w.x, y:w.y, thumb: captureAlignThumb(pt) } : null };
 }
 
 /* place the next 4-point alignment marker (a click that didn't turn into a drag-move) */
@@ -144,6 +140,7 @@ function startCrop(){
   const layer = UI.activeLayer();
   if (!layer || !layer.img){ UI.toast("Select an image layer in the Layers panel first"); return; }
   if (layer.locked){ UI.toast("Layer is locked"); return; }
+  if (!confirmRewarpIfPopulated(layer, "Cropping")) return;
   setTool("crop");
   Tools.cropLayer = layer;                 // capture now; setTool cleared it first
   Tools.cropA = Tools.cropB = null;
@@ -195,6 +192,7 @@ function applyCrop(){
   layer.tx = x0 + Wworld/2; layer.ty = y0 + Hworld/2;        // centred on the crop box
   layer.scale = 1 / k;                      // world px per output px → sits exactly where the box was
   layer.tiles = (typeof ImageTiles !== "undefined" && ImageTiles.shouldTile(cnv)) ? ImageTiles.build(cnv) : null;
+  commitLayerImage(layer);   // register new pixels so undo can swap back to the pre-crop bitmap
   if (typeof markImagesDirty === "function") markImagesDirty();
   Tools.cropLayer = null;
   setTool("select");
@@ -279,15 +277,193 @@ function warpImageMesh(srcImg, H, outW, outH){
   return out;
 }
 
+/* ============ rotate tool — non-destructive layer rotation ============
+   Two ways to rotate the ACTIVE image layer (only its transform changes, no pixels
+   are baked — unlike Deskew):
+     • drag the on-screen gizmo knob → free rotation about the image centre
+       (hold Shift to snap to 15° steps)
+     • drag a line ALONG a feature that should be level (a board edge, a chip row) and
+       release → the layer rotates so that line becomes horizontal or vertical,
+       whichever is nearer. Works on any layer, at any zoom. */
+function startRotate(){
+  const layer = UI.activeLayer();
+  if (!layer || !layer.img){ UI.toast("Select an image layer in the Layers panel first"); return; }
+  if (layer.locked){ UI.toast("Layer is locked"); return; }
+  if (!confirmRewarpIfPopulated(layer, "Rotating")) return;
+  setTool("rotate");
+  Tools.rotateLayer = layer;   // capture now; setTool cleared it first
+  Tools.rotLine = null;
+  UI.setHint(TOOL_HINTS.rotate);
+}
+
+/* screen-space geometry of the rotate gizmo for the given layer: centre, ring radius
+   (half the layer's on-screen size, so it scales with the picture), and the knob
+   position (along the image's own +x axis so the handle visibly turns with the image) */
+const ROT_GIZMO_R = 78, ROT_KNOB_R = 11;
+function rotateGizmo(layer){
+  const c = worldToScreen(layer.tx, layer.ty);
+  const L = layerLinear(layer);
+  const fx = View.flip ? -1 : 1;
+  let dx = L.a * fx, dy = L.b;                 // image local +x, in screen space
+  const m = Math.hypot(dx, dy) || 1; dx /= m; dy /= m;
+  // ring diameter = half the layer's smaller on-screen dimension (floored so it stays grabbable)
+  let r = ROT_GIZMO_R;
+  if (layer.img && layer.img.width){
+    const es = layerEffScale(layer);
+    const scr = Math.min(layer.img.width, layer.img.height) * es * View.zoom;
+    r = Math.max(30, scr / 4);
+  }
+  return { cx:c.x, cy:c.y, r, handleR:ROT_KNOB_R, hx: c.x + dx*r, hy: c.y + dy*r };
+}
+
+/* apply a rotation of `delta` radians (world space) to a layer, composed onto its
+   pre-drag orientation (lrot degrees / lwarp0 matrix). Shared by gizmo drag + line-level. */
+function applyLayerRotation(layer, delta, lrot, lwarp0){
+  if (lwarp0){
+    const ca = Math.cos(delta), sa = Math.sin(delta), W = lwarp0;
+    layer.warp = { a: ca*W.a - sa*W.b, b: sa*W.a + ca*W.b,
+                   c: ca*W.c - sa*W.d, d: sa*W.c + ca*W.d };
+  } else {
+    layer.rot = lrot + delta * 180/Math.PI;
+  }
+}
+
+function rotateDown(w, pt, e){
+  const layer = Tools.rotateLayer || UI.activeLayer();
+  if (!layer || !layer.img){ UI.toast("Select an image layer in the Layers panel first"); return; }
+  if (layer.locked){ UI.toast("Layer is locked"); return; }
+  Tools.rotateLayer = layer;
+  pushUndo();
+  const g = rotateGizmo(layer);
+  const onKnob = Math.hypot(pt.x - g.hx, pt.y - g.hy) <= g.handleR + 6;
+  if (onKnob || (e && e.shiftKey)){
+    // grabbed the knob (or Shift+drag anywhere) → free rotate about the centre
+    Tools.drag = { kind:"rot-gizmo", layer, wx:w.x, wy:w.y, lrot:layer.rot,
+                   lwarp0: layer.warp ? {...layer.warp} : null, moved:false };
+  } else {
+    // anywhere else → draw a level-this line
+    Tools.rotLine = { a:{x:w.x, y:w.y}, b:{x:w.x, y:w.y} };
+    Tools.drag = { kind:"rot-line", layer, moved:false };
+  }
+}
+
+/* rotate the layer so the drawn line A→B becomes axis-aligned (nearest of H/V) */
+function applyRotateLine(layer, A, B){
+  const dx = B.x - A.x, dy = B.y - A.y;
+  if (Math.hypot(dx, dy) * View.zoom < 8){
+    cancelUndo();
+    UI.toast("Line too short — drag ALONG a feature that should be level");
+    return;
+  }
+  const ang = Math.atan2(dy, dx);
+  const target = Math.round(ang / (Math.PI/2)) * (Math.PI/2);   // nearest horizontal/vertical
+  const delta = target - ang;                                   // ≤45°, world space
+  applyLayerRotation(layer, delta, layer.rot, layer.warp ? {...layer.warp} : null);
+  const horiz = Math.abs(Math.cos(target)) > 0.5;
+  UI.refreshLayerList();
+  UI.toast("Straightened to " + (horiz ? "horizontal" : "vertical") +
+           " (rotated " + (delta*180/Math.PI).toFixed(1) + "°)");
+  requestRender();
+}
+
+/* ============ Resize XY — independent X/Y scale from two known dimensions ============
+   Non-destructive (like Rotate): only the layer's transform changes, no pixels baked.
+   The user draws a HORIZONTAL line across a feature of known real width, then a VERTICAL
+   line across a feature of known real height. The layer is scaled independently along the
+   world X and Y axes so those spans match the entered dimensions (at State.pxPerMm). Scaling
+   is anchored on the layer centre, so the picture stays put and only its proportions change. */
+function startResizeXY(){
+  const layer = UI.activeLayer();
+  if (!layer || !layer.img){ UI.toast("Select an image layer in the Layers panel first"); return; }
+  if (layer.locked){ UI.toast("Layer is locked"); return; }
+  if (!confirmRewarpIfPopulated(layer, "Resizing")) return;
+  setTool("resizexy");
+  Tools.resizeLayer = layer;   // capture now; setTool cleared it first
+  Tools.resizeStep = 0;        // 0 = horizontal (X) line, 1 = vertical (Y) line
+  Tools.resizeFx = Tools.resizeFy = 1;
+  Tools.resizeLine = null;
+  UI.setHint("Resize “" + layer.name + "”: drag a HORIZONTAL line across a feature of known WIDTH · Esc to cancel");
+}
+
+/* while dragging, lock the reference line to the axis being calibrated so the span is
+   unambiguous (horizontal on step 0, vertical on step 1) */
+function resizeLineTo(a, w){
+  return Tools.resizeStep === 0 ? { x:w.x, y:a.y } : { x:a.x, y:w.y };
+}
+
+function resizeDown(w, e){
+  const layer = Tools.resizeLayer || UI.activeLayer();
+  if (!layer || !layer.img){ UI.toast("Select an image layer in the Layers panel first"); return; }
+  if (layer.locked){ UI.toast("Layer is locked"); return; }
+  Tools.resizeLayer = layer;
+  Tools.resizeLine = { a:{x:w.x, y:w.y}, b:resizeLineTo({x:w.x,y:w.y}, w) };
+  Tools.drag = { kind:"resize-line", moved:false };
+}
+
+/* one reference line finished: read its span, ask for the real dimension, store the scale
+   factor for that axis. After the vertical line, apply the combined non-uniform scale. */
+function finishResizeLine(){
+  const layer = Tools.resizeLayer, L = Tools.resizeLine;
+  Tools.resizeLine = null;
+  if (!layer || !L){ return; }
+  const horiz = Tools.resizeStep === 0;
+  const spanPx = horiz ? Math.abs(L.b.x - L.a.x) : Math.abs(L.b.y - L.a.y);
+  if (spanPx * View.zoom < 8){
+    UI.toast("Line too short — drag across a feature of known " + (horiz ? "width" : "height"));
+    requestRender();
+    return;   // stay on the same step, let them redraw
+  }
+  const unit = UI.unit();
+  const inp = prompt("This " + (horiz ? "horizontal" : "vertical") + " line spans " + spanPx.toFixed(1) +
+                     " px.\nEnter its real " + (horiz ? "WIDTH" : "HEIGHT") + " in " + unit +
+                     " (blank = don't scale this axis):", "");
+  if (inp !== null && parseFloat(inp) > 0){
+    const realMm = unit === "mil" ? parseFloat(inp)*0.0254 : parseFloat(inp);
+    const factor = (realMm * State.pxPerMm) / spanPx;
+    if (horiz) Tools.resizeFx = factor; else Tools.resizeFy = factor;
+  } else if (inp === null && horiz){
+    // cancelled on the very first line → abort the whole procedure
+    setTool("select");
+    return;
+  }
+  if (Tools.resizeStep === 0){
+    Tools.resizeStep = 1;
+    UI.setHint("Resize “" + layer.name + "”: now drag a VERTICAL line across a feature of known HEIGHT · Esc to cancel");
+    requestRender();
+  } else {
+    applyResizeXY(layer, Tools.resizeFx, Tools.resizeFy);
+  }
+}
+
+function applyResizeXY(layer, fx, fy){
+  fx = fx || 1; fy = fy || 1;
+  if (Math.abs(fx-1) < 1e-4 && Math.abs(fy-1) < 1e-4){
+    UI.toast("No resize applied (both axes unchanged)");
+    setTool("select");
+    return;
+  }
+  pushUndo();
+  // world-space scale diag(fx,fy) about the layer centre: newLinear = diag·L, centre fixed
+  const L = layerLinear(layer);
+  layer.warp = { a: fx*L.a, b: fy*L.b, c: fx*L.c, d: fy*L.d };
+  Tools.resizeLayer = null; Tools.resizeStep = 0;
+  setTool("select");
+  UI.refreshLayerList();
+  if (typeof markImagesDirty === "function") markImagesDirty();
+  UI.toast("Resized “" + layer.name + "” — X ×" + fx.toFixed(3) + ", Y ×" + fy.toFixed(3));
+  requestRender();
+}
+
 function startLineDeskew(){
   const layer = UI.activeLayer();
   if (!layer || !layer.img){ UI.toast("Select an image layer first"); return; }
   // Deskew bakes a new perspective into the image. Doing it AFTER a layer has been
-  // aligned to the base invalidates that alignment, so only the base layer (layer 1)
-  // may be deskewed — every other layer should be aligned to it instead.
-  if (State.layers[0] !== layer){
-    UI.toast("Deskew is only for the base layer (layer 1). Align other layers to it instead.");
-    return;
+  // aligned to the base will invalidate that alignment — heads-up, but allowed on any
+  // layer (some scans only have perspective on a non-base image).
+  if (State.layers[0] !== layer && layer.warp){
+    if (!confirm("“" + layer.name + "” has already been aligned/warped to the base layer.\n\n" +
+                 "Deskewing re-bakes its perspective and will DISCARD that alignment — you'll need to re-align it.\n\n" +
+                 "OK = deskew anyway\nCancel = abort")) return;
   }
   if (!confirmRewarpIfPopulated(layer, "Deskewing")) return;
   setTool("align");
@@ -314,9 +490,13 @@ function applyLineDeskew(layer){
   const a1 = Math.atan2(sp[1].y-sp[0].y, sp[1].x-sp[0].x);
   const a2 = Math.atan2(sp[3].y-sp[2].y, sp[3].x-sp[2].x);
   const avg = 0.5*Math.atan2(Math.sin(2*a1)+Math.sin(2*a2), Math.cos(2*a1)+Math.cos(2*a2));
-  // is the average closer to horizontal or vertical?
-  const horizontal = Math.abs(Math.cos(avg)) >= Math.abs(Math.sin(avg));
-  const rot = horizontal ? -avg : (Math.PI/2 - avg);
+  // Level to the NEAREST axis by the SMALLEST rotation (≤45°). Deriving the target axis
+  // from Math.round (not the sign of avg) avoids a 180° flip: a near-vertical line can
+  // come out of the undirected-angle mean as either +90° or −90°, and the old
+  // `π/2 − avg` gave ≈180° for the −90° case (e.g. two edges drawn top-to-bottom).
+  const nearest = Math.round(avg / (Math.PI/2)) * (Math.PI/2);
+  const rot = nearest - avg;
+  const horizontal = Math.abs(Math.cos(nearest)) > 0.5;   // target axis is 0/π → horizontal
   const cx = (sp[0].x+sp[1].x+sp[2].x+sp[3].x)/4, cy = (sp[0].y+sp[1].y+sp[2].y+sp[3].y)/4;
   const ca = Math.cos(rot), sa = Math.sin(rot);
   const lev = sp.map(p => ({ x: cx + (p.x-cx)*ca - (p.y-cy)*sa, y: cy + (p.x-cx)*sa + (p.y-cy)*ca }));
@@ -357,6 +537,7 @@ function applyLineDeskew(layer){
   // the source changed, so any old LOD pyramid is stale; rebuild it for big bakes
   layer.tiles = (typeof ImageTiles !== "undefined" && ImageTiles.shouldTile(baked))
     ? ImageTiles.build(baked) : null;
+  commitLayerImage(layer);   // register new pixels so undo can swap back to the pre-deskew bitmap
   // straighten the layer transform (deskew supersedes prior rotation/skew).
   // capture the warp's effective scale BEFORE clearing it, or a previously
   // warped/aligned layer would snap back to its raw scale

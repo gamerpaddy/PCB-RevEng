@@ -73,9 +73,13 @@
     <!-- left: layers -->
     <aside id="left-panel">
       <div class="panel-title">Image layers
-        <span style="display:flex;gap:4px">
+        <span style="display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end">
           <button id="btn-measure" title="Measure a distance on the board  [M]">Measure</button>
           <button id="btn-calibrate" title="Calibrate board scale: drag along a known distance, then enter its real mm length">Calibrate</button>
+          <button id="btn-rotate" title="Rotate the ACTIVE layer: drag the on-screen knob to free-rotate, or drag a line ALONG a feature that should be level (board edge, chip row) to snap the image horizontal/vertical. Non-destructive — no pixels are baked. Works on any layer.">Rotate</button>
+          <button id="btn-align" title="4-point align the ACTIVE layer: click 4 reference features, then the same 4 features on this layer (corrects offset, rotation, scale and skew). To just MOVE the image, pick the Align tool [G] and drag.">Align</button>
+          <button id="btn-crop" title="Crop the ACTIVE layer: drag a box around the part to keep — trims off the rest (do this after aligning).">Crop</button>
+          <button id="btn-resizexy" title="Resize XY: independently scale the ACTIVE layer's width and height. Drag a horizontal line across a feature of known width and a vertical line across a feature of known height, entering each real dimension. Non-destructive — no pixels are baked.">Resize XY</button>
           <button id="btn-deskew" title="Deskew / straighten the ACTIVE layer: click two lines that should be parallel &amp; axis-aligned (board edges) to remove perspective and rotation. Only the base layer needs this — align other layers to it with 4-point Align.">Deskew</button>
           <button id="btn-add-layer" title="Add image layer (or drag &amp; drop images onto the canvas)">+ Add</button>
           <button id="btn-add-url" title="Add an image layer from a web URL (loaded live — not saved into the project)">+ URL</button>
@@ -534,9 +538,9 @@
 </div>
 
 
-<script src="js/state.js?v=64"></script>
+<script src="js/state.js?v=67"></script>
 <script src="js/footprints/core.js?v=53"></script>
-<script src="js/footprints/passives.js?v=56"></script>
+<script src="js/footprints/passives.js?v=57"></script>
 <script src="js/footprints/discrete.js?v=49"></script>
 <script src="js/footprints/connectors.js?v=49"></script>
 <script src="js/footprints/ics.js?v=50"></script>
@@ -545,35 +549,35 @@
 <script src="js/view/core.js?v=89"></script>
 <script src="js/view/geom.js?v=89"></script>
 <script src="js/view/hittest.js?v=89"></script>
-<script src="js/view/render.js?v=89"></script>
-<script src="js/view/draw.js?v=89"></script>
+<script src="js/view/render.js?v=93"></script>
+<script src="js/view/draw.js?v=94"></script>
 <script src="js/view/overlays.js?v=89"></script>
 <script src="js/layerstack.js?v=55"></script>
-<script src="js/tools/core.js?v=111"></script>
+<script src="js/tools/core.js?v=115"></script>
 <script src="js/tools/select.js?v=111"></script>
 <script src="js/tools/trace.js?v=111"></script>
-<script src="js/tools/via.js?v=111"></script>
+<script src="js/tools/via.js?v=112"></script>
 <script src="js/tools/checker.js?v=111"></script>
 <script src="js/tools/ops.js?v=111"></script>
-<script src="js/align.js?v=55"></script>
-<script src="js/keymap.js?v=56"></script>
+<script src="js/align.js?v=60"></script>
+<script src="js/keymap.js?v=57"></script>
 <script src="js/resolver.js?v=49"></script>
 <script src="js/netlist.js?v=64"></script>
 <script src="js/eagle.js?v=3"></script>
 <script src="js/easyeda.js?v=4"></script>
 <script src="js/gencad.js?v=4"></script>
 <script src="js/gerber.js?v=1"></script>
-<script src="js/ui/core.js?v=103"></script>
-<script src="js/ui/layers.js?v=103"></script>
+<script src="js/ui/core.js?v=104"></script>
+<script src="js/ui/layers.js?v=105"></script>
 <script src="js/ui/nets.js?v=103"></script>
 <script src="js/ui/parts.js?v=103"></script>
-<script src="js/ui/inspector.js?v=103"></script>
-<script src="js/ui/dialogs.js?v=103"></script>
+<script src="js/ui/inspector.js?v=104"></script>
+<script src="js/ui/dialogs.js?v=104"></script>
 <script src="js/ui/misc.js?v=103"></script>
 <script src="js/kicadsearch.js?v=51"></script>
 <script src="js/fpdialog.js?v=56"></script>
-<script src="js/autosave.js?v=52"></script>
-<script src="js/main.js?v=104"></script>
+<script src="js/autosave.js?v=53"></script>
+<script src="js/main.js?v=107"></script>
 
 </body>
 </html>

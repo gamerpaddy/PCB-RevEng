@@ -4,7 +4,7 @@
 Footprints.register({
   id:"chip2", name:"R / C / L chip (SMD)", prefix:"R",
   params:[{key:"size",label:"Size",type:"select",def:"0805",
-           options:["0201","0402","0603","0805","1206","1210","2010","2512",
+           options:["0201","0402","0406","0603","0612","0805","1206","1210","2010","2512",
                     "Tant 2012-12","Tant 3216-18","Tant 3528-15",
                     "Tant 6032-28","Tant 7343-31","Tant 7343-43"]},
           {key:"polarized",label:"Polarized (tantalum)",type:"bool",def:false}],
@@ -28,15 +28,28 @@ Footprints.register({
         kicad:"Capacitor_Tantalum_SMD:CP_EIA-"+code+(kem[code]||"")
       };
     }
-    const dims = {  // [length, width] mm
-      "0201":[0.6,0.3],"0402":[1.0,0.5],"0603":[1.6,0.8],"0805":[2.0,1.25],
-      "1206":[3.2,1.6],"1210":[3.2,2.5],"2010":[5.0,2.5],"2512":[6.3,3.2] };
+    const dims = {  // [body length, body width] mm
+      "0201":[0.6,0.3],"0402":[1.0,0.5],"0406":[1.0,1.6],"0603":[1.6,0.8],"0612":[1.6,3.2],
+      "0805":[2.0,1.25],"1206":[3.2,1.6],"1210":[3.2,2.5],"2010":[5.0,2.5],"2512":[6.3,3.2] };
     const [L,W] = dims[p.size];
-    const px = L/2 + W*0.35;
-    const code = {"0201":"0603","0402":"1005","0603":"1608","0805":"2012","1206":"3216","1210":"3225","2010":"5025","2512":"6332"}[p.size];
+    // IEC 61188-6-2 land patterns, [G inner gap, Y pad length (along axis), X pad width (across),
+    // Z toe-to-toe] mm. Pad centre px = G/2 + Y/2 → inner edge sits at G/2, outer edge at Z/2.
+    // Sizes not tabulated (2010/2512) fall back to a W-derived estimate.
+    const iec = {
+      "0201":[0.30,0.24,0.32,0.78], "0402":[0.55,0.35,0.55,1.25], "0406":[0.55,0.35,1.55,1.25],
+      "0603":[0.90,0.55,0.90,2.00], "0612":[0.90,0.55,3.15,2.00], "0805":[1.10,0.65,1.30,2.40],
+      "1206":[2.10,0.80,1.65,3.70], "1210":[2.10,0.80,2.50,3.70] };
+    let pw, ph, px;
+    if (iec[p.size]){
+      const [G,Y,X] = iec[p.size];
+      pw = Y; ph = X; px = G/2 + Y/2;
+    } else {
+      pw = W*0.9; ph = W*1.1; px = L/2 + W*0.35;
+    }
+    const code = {"0201":"0603","0402":"1005","0406":"1016","0603":"1608","0612":"1632","0805":"2012","1206":"3216","1210":"3225","2010":"5025","2512":"6332"}[p.size];
     return {
       label:"Chip "+p.size,
-      pins:[_pin(1,-px,0,{w:W*0.9,h:W*1.1,name:p.polarized?"+":""}), _pin(2,px,0,{w:W*0.9,h:W*1.1,name:p.polarized?"-":""})],
+      pins:[_pin(1,-px,0,{w:pw,h:ph,name:p.polarized?"+":""}), _pin(2,px,0,{w:pw,h:ph,name:p.polarized?"-":""})],
       body:{w:L, h:W},
       polar:!!p.polarized,
       kicad:"Resistor_SMD:R_"+p.size+"_"+code+"Metric"

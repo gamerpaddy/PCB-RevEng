@@ -395,12 +395,16 @@ UI.buildHistory = () => {
     row.className = "hist-row";
     const t = new Date(e.time||Date.now());
     const detail = (typeof undoDetail === "function") ? undoDetail(i) : "";
+    // a revert entry isn't itself revertible (that just re-reverts recursively) — show it as
+    // an audit row with no "Undo this" button; Ctrl+Z still rolls it back normally
+    const action = e.isRevert ? `<span class="hist-detail" style="opacity:.7">reverted (Ctrl+Z to restore)</span>`
+                              : `<button class="hist-undo" data-i="${i}">Undo this</button>`;
     row.innerHTML = `<span class="hist-time">${String(t.getHours()).padStart(2,"0")}:${String(t.getMinutes()).padStart(2,"0")}:${String(t.getSeconds()).padStart(2,"0")}</span>
       <span class="hist-main">
         <span class="hist-label">${escAttr(e.label)}</span>
         ${detail ? `<span class="hist-detail">${escAttr(detail)}</span>` : ""}
       </span>
-      <button class="hist-undo" data-i="${i}">Undo this</button>`;
+      ${action}`;
     box.appendChild(row);
   }
   box.querySelectorAll(".hist-undo").forEach(btn => btn.addEventListener("click", ()=>{

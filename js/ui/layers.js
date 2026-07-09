@@ -22,14 +22,13 @@ UI.refreshLayerList = () => {
         <label title="Mirror image horizontally (back-side photos usually need this so they align with the front)">
           <input type="checkbox" class="mir" ${l.mirror?"checked":""}>⇋</label>
         <label title="Lock layer against accidental dragging"><input type="checkbox" class="lock" ${l.locked?"checked":""}>🔒</label>
-        <button class="align2" title="4-point align: click 4 reference features, then the same 4 features on this layer (corrects offset, rotation, scale and skew). To just MOVE the image, pick the Align tool and press Esc, then drag.">Align</button>
-        <button class="crop2" title="Crop: drag a box around the part to keep — trims off the rest (do this after aligning)">Crop</button>
       </div>
       <input type="range" class="op" min="0" max="100" value="${Math.round(l.opacity*100)}" title="Opacity">`;
     card.querySelector(".side-sel").value = l.side;
     card.addEventListener("click", (e)=>{
       if (e.target.closest("button,select,input,label")) return;
       UI.activeLayerId = l.id; UI.refreshLayerList();
+      if (typeof markDirty === "function") markDirty();   // persist the new active layer for reload
       UI.setDrawSide(l.side); // selecting the back image switches drawing to Back, etc.
       UI.autoXrayForLayer(l); // selecting the X-ray image turns on X-ray view
     });
@@ -63,14 +62,6 @@ UI.refreshLayerList = () => {
       requestRender();
     });
     card.querySelector(".lock").addEventListener("change", (e)=>{ l.locked = e.target.checked; });
-    card.querySelector(".align2").addEventListener("click", ()=>{
-      UI.activeLayerId = l.id; UI.refreshLayerList();
-      startPointAlign();
-    });
-    card.querySelector(".crop2").addEventListener("click", ()=>{
-      UI.activeLayerId = l.id; UI.setDrawSide(l.side); UI.refreshLayerList();
-      startCrop();
-    });
     card.querySelector(".op").addEventListener("input", (e)=>{ l.opacity = e.target.value/100; requestRender(); });
     list.appendChild(card);
   }

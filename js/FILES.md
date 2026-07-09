@@ -20,7 +20,7 @@ Cache-buster: bump `?v=` in `index.html` when editing a file so the browser relo
 | `gerber.js` | Gerber layer import (silkscreen etc. as image layers). |
 | `imagetiles.js` | Tiled image renderer for big scanned board photos. |
 | `layerstack.js` | Layer stack editor: reorder, add/remove copper layers, colour, side. |
-| `align.js` | Layer alignment tool (drag/rotate/scale, 4-point skew fit, 2-line deskew). |
+| `align.js` | Layer alignment tool (drag/rotate/scale, 4-point skew fit, 2-line deskew) + Rotate tool (gizmo free-rotate & draw-a-line auto-level to H/V, non-destructive). |
 | `autosave.js` | Autosave to localStorage every N s + startup restore. |
 | `fpdialog.js` | Footprint-picker dialog (search, param editors, kicad-name lookup). |
 | `kicadsearch.js` | KiCad-library fuzzy footprint search backing `fpdialog`. |

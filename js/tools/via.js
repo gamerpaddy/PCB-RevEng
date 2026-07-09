@@ -206,6 +206,7 @@ function viaDown(w, e){
   const via = {
     id: nextId(), x: snap?snap.x:w.x, y: snap?snap.y:w.y, netId: netId||null,
     r: pth ? Math.round(State.viaR*1.8) : State.viaR,
+    hole: pth ? Math.round(State.viaHole*1.8) : State.viaHole,   // drill radius (px); retained default
     kind: pth ? "pth" : "via",
   };
   State.vias.push(via);

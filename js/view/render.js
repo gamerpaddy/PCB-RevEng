@@ -71,6 +71,9 @@ function render(){
     if (!State.layers.some(l => l.visible && l.img && l.img.width)) fillBlack(ctx, 0, View.width);
     drawWorld(ctx);
     drawAlignOverlay(ctx);
+    drawRotateGizmo(ctx);
+    drawResizeBanner(ctx);
+    drawModeBanner(ctx);
   }
   // leave the pane offset cleared so pointer-side transforms are correct between frames
   View._paneDX = 0; View._paneSide = null; View._paneLayerId = null; View._paneXray = null;
@@ -350,6 +353,22 @@ function drawWorld(ctx){
     ctx.restore();
   }
 
+  // --- resize-XY reference line (locked to X or Y axis) ---
+  if (Tools.resizeLine){
+    const a = Tools.resizeLine.a, b = Tools.resizeLine.b;
+    const col = Tools.resizeStep === 0 ? "#ffb648" : "#4fd07f";   // orange = width, green = height
+    ctx.save();
+    ctx.strokeStyle = col; ctx.lineWidth = 2/View.zoom;
+    ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
+    const t = 6/View.zoom;   // end ticks
+    if (Tools.resizeStep === 0){
+      ctx.beginPath(); ctx.moveTo(a.x,a.y-t); ctx.lineTo(a.x,a.y+t); ctx.moveTo(b.x,b.y-t); ctx.lineTo(b.x,b.y+t); ctx.stroke();
+    } else {
+      ctx.beginPath(); ctx.moveTo(a.x-t,a.y); ctx.lineTo(a.x+t,a.y); ctx.moveTo(b.x-t,b.y); ctx.lineTo(b.x+t,b.y); ctx.stroke();
+    }
+    ctx.restore();
+  }
+
   // --- 2-line deskew: draw the line(s) the user is defining ---
   if (Tools.deskewPts){
     ctx.save();
@@ -380,6 +399,7 @@ function drawWorld(ctx){
   // sticky-note markers (screen space, constant size, drawn after the world transform)
   drawNotes(ctx);
   drawMeasureLabel(ctx);
+  drawResizeLabel(ctx);
   drawPadEditOverlay(ctx);
   drawCropOverlay(ctx);
 }
@@ -439,6 +459,38 @@ function drawPadEditOverlay(ctx){
 /* live readout for the Measure tool: distance plus, treating that distance as a trace
    width, the estimated current it could carry on the active copper side. Screen space so
    it stays a constant size and never covers the measured line. */
+/* live px/mm span readout for the resize-XY reference line being dragged */
+function drawResizeLabel(ctx){
+  if (Tools.name !== "resizexy" || !Tools.resizeLine) return;
+  const a = Tools.resizeLine.a, b = Tools.resizeLine.b;
+  const horiz = Tools.resizeStep === 0;
+  const spanPx = horiz ? Math.abs(b.x - a.x) : Math.abs(b.y - a.y);
+  if (spanPx < 2) return;
+  const unit = UI.unit(), mm = spanPx / State.pxPerMm;
+  const cur = unit === "mil" ? (mm/0.0254).toFixed(0) + " mil" : mm.toFixed(2) + " mm";
+  const l1 = (horiz ? "WIDTH " : "HEIGHT ") + spanPx.toFixed(0) + " px";
+  const l2 = "= " + cur + " at current scale";
+  const mid = worldToScreen((a.x + b.x) / 2, (a.y + b.y) / 2);
+  const col = horiz ? "#ffb648" : "#4fd07f";
+
+  ctx.save();
+  ctx.setTransform((View.dpr||1), 0, 0, (View.dpr||1), 0, 0);
+  ctx.font = "12px system-ui, sans-serif";
+  ctx.textBaseline = "top";
+  const pad = 5, lh = 15;
+  const bw = Math.max(ctx.measureText(l1).width, ctx.measureText(l2).width) + pad*2;
+  const bh = lh*2 + pad*2;
+  let x = mid.x + 12, y = mid.y - bh/2;
+  x = Math.min(Math.max(4, x), View.width - bw - 4);
+  y = Math.min(Math.max(4, y), View.height - bh - 4);
+  roundRect(ctx, x, y, bw, bh, 4);
+  ctx.fillStyle = "rgba(20,24,30,.9)"; ctx.fill();
+  ctx.strokeStyle = col; ctx.lineWidth = 1; ctx.stroke();
+  ctx.fillStyle = "#e6ecf2"; ctx.fillText(l1, x + pad, y + pad);
+  ctx.fillStyle = col; ctx.fillText(l2, x + pad, y + pad + lh);
+  ctx.restore();
+}
+
 function drawMeasureLabel(ctx){
   if (Tools.name !== "measure" || !Tools.measureA || !Tools.cursor) return;
   const a = Tools.measureA, b = Tools.measureB || Tools.cursor;

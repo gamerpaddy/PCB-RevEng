@@ -84,6 +84,11 @@ UI.drawSide = () => $("#draw-side").value;
    under the cursor (front/back); otherwise it's the draw-side selector. */
 UI.copperSide = () => (typeof effDrawSide === "function" ? effDrawSide() : UI.drawSide());
 UI.activeLayer = () => getLayer(UI.activeLayerId);
+/* pick the active layer after a load: keep the remembered id if it still exists, else fall
+   back to the first layer. Lets a page reload restore the last-used layer instead of layer 1. */
+UI.resolveActiveLayer = (preferId) => {
+  UI.activeLayerId = (preferId != null && getLayer(preferId)) ? preferId : (State.layers[0]?.id ?? null);
+};
 UI.layerKeyMode = () => localStorage.getItem("pcbreveng.layerKeyMode") || "switch";
 
 /* mouse-wheel zoom sensitivity as a percent of the original speed (5–200).

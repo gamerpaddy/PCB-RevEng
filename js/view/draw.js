@@ -96,9 +96,10 @@ function drawVia(ctx, v, selNet){
   // PTH = thicker annular ring (plated through hole / mounting pad), via = thin ring
   ctx.lineWidth = (pth ? 2.5 : 1.5)/View.zoom;
   ctx.beginPath(); ctx.arc(v.x,v.y,r,0,Math.PI*2); ctx.fill(); ctx.stroke();
-  // drilled hole — larger relative bore for PTH
+  // drilled hole — use the via's own drill radius when set, else a proportional bore (bigger for PTH)
+  const bore = Math.min(r*0.9, v.hole != null ? v.hole : r*(pth?0.55:0.45));
   ctx.fillStyle = "#0d0f12";
-  ctx.beginPath(); ctx.arc(v.x,v.y,r*(pth?0.55:0.45),0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(v.x,v.y,bore,0,Math.PI*2); ctx.fill();
   // blind / buried via: dashed outer ring so it reads as "not a full through via"
   if (viaIsBlind(v)){
     ctx.setLineDash([3/View.zoom, 2.5/View.zoom]);
@@ -311,7 +312,7 @@ function drawAlignBanner(ctx){
     txt = "ALIGN 4-POINT — click: place marker (" + n + "/8) · drag: move image · Esc: exit";
     bg = "#7a5a24";
   } else {
-    txt = "ALIGN / MOVE — drag: move image · Shift+drag: rotate · Esc: exit";
+    txt = "ALIGN / MOVE — drag: move image · Esc: exit  (rotation → Rotate tool)";
     bg = "#245a4a";
   }
   ctx.font = "600 12px Segoe UI, sans-serif";
@@ -324,6 +325,118 @@ function drawAlignBanner(ctx){
   ctx.fill(); ctx.stroke();
   ctx.fillStyle = "#ffce8a"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
   ctx.fillText(txt, cx, y + h/2 + 0.5);
+}
+
+/* rotate tool: free-rotate gizmo on the active layer + the "level this" line while drawn.
+   Drawn in screen space (same overlay pass as the align markers). */
+function drawRotateGizmo(ctx){
+  if (Tools.name !== "rotate") return;
+  const layer = Tools.rotateLayer || (typeof UI !== "undefined" && UI.activeLayer && UI.activeLayer());
+  ctx.save();
+  ctx.setTransform(View.dpr,0,0,View.dpr,0,0);
+
+  // top-centre banner
+  const txt = (layer && layer.img)
+    ? "ROTATE — drag knob: free-rotate (Shift = 15°) · drag a line along a level feature: snap H/V · Esc: exit"
+    : "ROTATE — pick an image layer in the Layers panel first";
+  ctx.font = "600 12px Segoe UI, sans-serif";
+  const bw = ctx.measureText(txt).width, bpad = 12, bh = 24, bcx = View.width/2;
+  ctx.fillStyle = "#245a4a"; ctx.strokeStyle = "rgba(255,255,255,.25)"; ctx.lineWidth = 1;
+  ctx.beginPath();
+  if (ctx.roundRect) ctx.roundRect(bcx-bw/2-bpad, 8, bw+bpad*2, bh, 6); else ctx.rect(bcx-bw/2-bpad, 8, bw+bpad*2, bh);
+  ctx.fill(); ctx.stroke();
+  ctx.fillStyle = "#c8f2e2"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText(txt, bcx, 8 + bh/2 + 0.5);
+
+  // the "level this" line being dragged, with a preview of which axis it will snap to
+  if (Tools.rotLine){
+    const a = worldToScreen(Tools.rotLine.a.x, Tools.rotLine.a.y);
+    const b = worldToScreen(Tools.rotLine.b.x, Tools.rotLine.b.y);
+    ctx.strokeStyle = "#ffd24d"; ctx.lineWidth = 2; ctx.setLineDash([7,5]);
+    ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
+    ctx.setLineDash([]);
+    const ang = Math.atan2(Tools.rotLine.b.y-Tools.rotLine.a.y, Tools.rotLine.b.x-Tools.rotLine.a.x);
+    const target = Math.round(ang/(Math.PI/2))*(Math.PI/2);
+    const horiz = Math.abs(Math.cos(target)) > 0.5;
+    ctx.fillStyle = "#ffd24d"; ctx.font = "600 12px Segoe UI"; ctx.textAlign = "left"; ctx.textBaseline = "bottom";
+    ctx.fillText("→ " + (horiz ? "horizontal" : "vertical"), b.x + 10, b.y - 8);
+  }
+
+  // gizmo ring + knob
+  if (layer && layer.img){
+    const g = rotateGizmo(layer);
+    ctx.strokeStyle = "rgba(120,180,255,.5)"; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(g.cx, g.cy, g.r, 0, Math.PI*2); ctx.stroke();
+    ctx.strokeStyle = "rgba(120,180,255,.6)";
+    ctx.beginPath(); ctx.moveTo(g.cx, g.cy); ctx.lineTo(g.hx, g.hy); ctx.stroke();
+    ctx.fillStyle = "rgba(120,180,255,.9)";
+    ctx.beginPath(); ctx.arc(g.cx, g.cy, 3, 0, Math.PI*2); ctx.fill();
+    const hot = Tools.drag && Tools.drag.kind === "rot-gizmo";
+    ctx.fillStyle = hot ? "#ffd24d" : "#7db4ff";
+    ctx.strokeStyle = "#10141a"; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(g.hx, g.hy, g.handleR, 0, Math.PI*2); ctx.fill(); ctx.stroke();
+    // little curved arrow inside the knob to read as "rotate"
+    ctx.strokeStyle = "#10141a"; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(g.hx, g.hy, g.handleR-4, -Math.PI*0.7, Math.PI*0.55); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+/* shared top-centre instruction pill (screen space). Every image-layer tool draws one so
+   the "what do I do now" guidance is always on-canvas (UI.setHint's status bar was removed).
+   accent = border colour used to key the banner to the tool's overlay colour. */
+function drawTopBanner(ctx, txt, accent){
+  ctx.save();
+  ctx.setTransform(View.dpr,0,0,View.dpr,0,0);
+  ctx.font = "600 12px Segoe UI, sans-serif";
+  const bw = ctx.measureText(txt).width, bpad = 12, bh = 24, bcx = View.width/2;
+  ctx.fillStyle = "#24457a"; ctx.strokeStyle = accent || "rgba(255,255,255,.25)"; ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  if (ctx.roundRect) ctx.roundRect(bcx-bw/2-bpad, 8, bw+bpad*2, bh, 6); else ctx.rect(bcx-bw/2-bpad, 8, bw+bpad*2, bh);
+  ctx.fill(); ctx.stroke();
+  ctx.fillStyle = "#eaf0f7"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText(txt, bcx, 8 + bh/2 + 0.5);
+  ctx.restore();
+}
+
+/* resize-XY tool: prominent top-centre banner making the DRAG action + current step
+   unmistakable, plus a "→ width/height" tag on the line being dragged. Screen space. */
+function drawResizeBanner(ctx){
+  if (Tools.name !== "resizexy") return;
+  const layer = Tools.resizeLayer || (typeof UI !== "undefined" && UI.activeLayer && UI.activeLayer());
+  const horiz = Tools.resizeStep === 0;
+  let txt;
+  if (!layer || !layer.img){
+    txt = "RESIZE XY — pick an image layer in the Layers panel first";
+  } else if (horiz){
+    txt = "RESIZE XY  ·  STEP 1/2 — DRAG a HORIZONTAL line across a known WIDTH, then type its real size · Esc: cancel";
+  } else {
+    txt = "RESIZE XY  ·  STEP 2/2 — now DRAG a VERTICAL line across a known HEIGHT, then type its real size · Esc: cancel";
+  }
+  const accent = horiz ? "#ffb648" : "#4fd07f";
+  drawTopBanner(ctx, txt, accent);
+
+  // axis tag next to the far end of the line while dragging
+  if (Tools.resizeLine){
+    ctx.save();
+    ctx.setTransform(View.dpr,0,0,View.dpr,0,0);
+    const b = worldToScreen(Tools.resizeLine.b.x, Tools.resizeLine.b.y);
+    ctx.fillStyle = accent; ctx.font = "600 12px Segoe UI"; ctx.textAlign = "left"; ctx.textBaseline = "bottom";
+    ctx.fillText(horiz ? "→ width" : "↕ height", b.x + 10, b.y - 8);
+    ctx.restore();
+  }
+}
+
+/* instruction banners for the remaining drag-based tools (measure / calibrate / crop),
+   which otherwise had no on-canvas guidance after the status-bar hint was removed. */
+function drawModeBanner(ctx){
+  if (Tools.name === "measure"){
+    drawTopBanner(ctx, "MEASURE — DRAG across a distance to read it in px & mm · pick another tool to exit", "#ffb648");
+  } else if (Tools.name === "calibrate"){
+    drawTopBanner(ctx, "CALIBRATE SCALE — DRAG along a KNOWN distance, then type its real length (sets the board px/mm) · Esc: exit", "#ff8a5c");
+  } else if (Tools.name === "crop"){
+    drawTopBanner(ctx, "CROP — DRAG a box around the area to KEEP (trims off the rest) · Esc: cancel", "#4fd0ff");
+  }
 }
 
 function drawAlignOverlay(ctx){

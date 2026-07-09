@@ -134,6 +134,7 @@ function markImagesDirty(){ Autosave.imagesDirty = true; Autosave.dirty = true; 
    2.5 s autosave no longer re-encodes megabytes every tick. */
 function serializeLight(){
   const full = JSON.parse(serializeProject());
+  full.activeLayerId = UI.activeLayerId;   // remember the selected layer across page reloads
   full.layers = (full.layers || []).map(l => { const { dataURL, ...rest } = l; return rest; });
   return JSON.stringify(full);
 }
@@ -207,7 +208,7 @@ async function autosaveInit(){
           } catch(e){}
         }
         Autosave.restoring = false;
-        UI.activeLayerId = State.layers[0]?.id ?? null;
+        UI.resolveActiveLayer(proj.activeLayerId);   // restore the last-active layer, not always layer 1
         UI.rebuildSideSelect(); syncSettings();
         UI.refreshLayerList(); UI.refreshNets(); UI.refreshInspector();
         if (State.layers.length || State.components.length) zoomToFit();

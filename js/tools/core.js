@@ -39,6 +39,14 @@ const Tools = {
   // crop tool
   cropLayer: null,     // image layer being cropped
   cropA: null, cropB: null,   // world-space crop rectangle corners (during the drag)
+  // rotate tool
+  rotateLayer: null,   // image layer being rotated (gizmo shown for it)
+  rotLine: null,       // {a,b} world-space "level this" line being dragged
+  // resize-XY tool
+  resizeLayer: null,   // image layer being resized
+  resizeLine: null,    // {a,b} world-space reference line being dragged
+  resizeStep: 0,       // 0 = horizontal (X) line, 1 = vertical (Y) line
+  resizeFx: 1, resizeFy: 1,   // pending per-axis scale factors
 };
 
 const TOOL_HINTS = {
@@ -48,15 +56,17 @@ const TOOL_HINTS = {
   via:       "Click = via (reuses last net) · Shift-click = fresh via · Alt-click = PTH · double-click = layer span (blind/buried)",
   cut:       "Click on a trace to cut it in two — disconnected halves get separate nets",
   note:      "Click to drop a sticky note · type its text in the inspector · in Select, drag to move / double-click to edit",
-  align:     "Drag active layer to move · Alt+wheel scale · Shift+drag rotate · “Align” button = 4-point skew-correcting fit",
+  align:     "Drag active layer to move · Alt+wheel scale · “Align” button = 4-point skew-correcting fit · Rotate tool = free/level rotation",
   measure:   "Drag to measure a distance (px and mm)",
   calibrate: "Drag along a KNOWN distance, then enter its real length in mm",
   crop:      "Drag a box around the part of the image to KEEP · Esc to cancel",
+  rotate:    "Drag the knob (or Shift+drag anywhere) to free-rotate · drag a line along a feature that should be level → snaps it horizontal/vertical · Shift = 15° snap · Esc to exit",
+  resizexy:  "Drag a HORIZONTAL then a VERTICAL line across features of known size, entering each real dimension — scales the layer's X and Y independently · Esc to cancel",
 };
 
 function toolCursor(name){
   return { select:"default", component:"crosshair", trace:"crosshair", via:"crosshair",
-           align:"crosshair", measure:"crosshair", calibrate:"crosshair", cut:"crosshair", note:"crosshair", crop:"crosshair" }[name] || "default";
+           align:"crosshair", measure:"crosshair", calibrate:"crosshair", cut:"crosshair", note:"crosshair", crop:"crosshair", rotate:"crosshair", resizexy:"crosshair" }[name] || "default";
 }
 
 function setTool(name){
@@ -71,6 +81,8 @@ function setTool(name){
   Tools.addPinFor = null;
   Tools.padEdit = null;   // leave the visual pad editor when switching tools
   Tools.cropLayer = null; Tools.cropA = Tools.cropB = null;   // leave the crop tool
+  Tools.rotateLayer = null; Tools.rotLine = null;   // leave the rotate tool
+  Tools.resizeLayer = null; Tools.resizeLine = null; Tools.resizeStep = 0;   // leave the resize-XY tool
   Tools._edgeArmed = false;   // re-arm edge auto-scroll: must leave the margin before it kicks in
   if (name !== "component"){ Tools.ghostFp = null; Tools.pending = null; }
   if (name !== "select"){ View.hoverPin = null; View.cursorLabel = null; UI.setStatusPad(""); Tools._readout = ""; }   // pad/comp readout is select-mode only
@@ -81,6 +93,7 @@ function setTool(name){
   UI.setStatusTool(name);
   UI.setHint(TOOL_HINTS[name] || "");
   if (name === "component" && !Tools.pending) UI.openFootprintDialog();
+  UI.refreshInspector();   // reflect tool-specific panels (e.g. via-tool defaults) when nothing is selected
   requestRender();
 }
 
@@ -120,6 +133,8 @@ function onPointerDown(e){
     case "cut":       return cutDown(w, e);
     case "note":      return noteDown(w, e);
     case "crop":      return cropDown(w, e);
+    case "rotate":    return rotateDown(w, pt, e);
+    case "resizexy":  return resizeDown(w, e);
   }
 }
 
@@ -206,7 +221,7 @@ function onPointerMove(e){
     View.canvas.style.cursor = h ? "pointer" : "default";
   }
 
-  if (View.split || Tools.name==="trace" || Tools.name==="via" || Tools.name==="component" || Tools.name==="measure" || Tools.alignPts || Tools.deskewPts)
+  if (View.split || Tools.name==="trace" || Tools.name==="via" || Tools.name==="component" || Tools.name==="measure" || Tools.name==="rotate" || Tools.alignPts || Tools.deskewPts)
     requestRender();   // redraw every move so the ghost / snap-ring / mirror cursor tracks the pointer
   else if (View.hoverNetId !== Tools._lastHover){ Tools._lastHover = View.hoverNetId; requestRender(); }
 }
@@ -223,6 +238,16 @@ function onPointerUp(e){
     if (!d.moved) cancelUndo(); // a click (no drag) keeps undo clean; dblclick edits
     else Tools._dragEndedAt = Date.now();
     UI.refreshInspector();
+  }
+  if (d.kind === "rot-gizmo"){
+    if (!d.moved) cancelUndo();   // a plain click on the knob shouldn't churn undo
+    UI.refreshLayerList();
+  }
+  if (d.kind === "rot-line"){
+    const rl = Tools.rotLine; Tools.rotLine = null;
+    if (d.moved && rl) applyRotateLine(d.layer, rl.a, rl.b);
+    else cancelUndo();
+    requestRender();
   }
   if (d.kind === "move-comp" || d.kind === "move-via" || d.kind === "move-layer" || d.kind === "rot-layer" || d.kind === "move-vert"){
     if (!d.moved){
@@ -265,6 +290,9 @@ function onPointerUp(e){
   }
   if (d.kind === "measure"){
     finishMeasure();
+  }
+  if (d.kind === "resize-line"){
+    finishResizeLine();
   }
   if (d.kind === "crop-rect"){
     applyCrop();   // bakes the kept region; stays no-op & keeps undo clean if the box was tiny
@@ -345,6 +373,20 @@ function handleDrag(pt, w, e){
       UI.refreshLayerList();
       break;
     }
+    case "rot-gizmo": {
+      d.moved = true;
+      const a0 = Math.atan2(d.wy - d.layer.ty, d.wx - d.layer.tx);
+      const a1 = Math.atan2(w.y - d.layer.ty, w.x - d.layer.tx);
+      let delta = (a1 - a0) * (View.flip ? -1 : 1);
+      if (e && e.shiftKey){ const step = Math.PI/12; delta = Math.round(delta/step)*step; }  // 15° snap
+      applyLayerRotation(d.layer, delta, d.lrot, d.lwarp0);
+      UI.refreshLayerList();
+      break;
+    }
+    case "rot-line":
+      d.moved = true;
+      Tools.rotLine = { a: Tools.rotLine.a, b:{ x:w.x, y:w.y } };
+      break;
     case "pad-resize": {
       d.moved = true;
       const fp = compFootprint(d.comp), fpin = fp && fp.pins[d.idx];
@@ -367,6 +409,10 @@ function handleDrag(pt, w, e){
     }
     case "measure":
       Tools.measureB = w;
+      break;
+    case "resize-line":
+      d.moved = true;
+      Tools.resizeLine = { a: Tools.resizeLine.a, b: resizeLineTo(Tools.resizeLine.a, w) };
       break;
     case "crop-rect":
       d.moved = true;
