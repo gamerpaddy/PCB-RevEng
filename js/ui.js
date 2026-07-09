@@ -346,7 +346,7 @@ UI.refreshNets = () => {
       const name = prompt("Rename net:", n.name);
       if (name === null) return;
       pushUndo("rename net " + n.name);
-      if (!renameNet(n.id, name)){ Undo.stack.pop(); UI.toast("Rename blocked (protected net)"); }
+      if (!renameNet(n.id, name)){ cancelUndo(); UI.toast("Rename blocked (protected net)"); }
       UI.refreshNets(); UI.refreshInspector(); requestRender();
     });
     list.appendChild(item);
@@ -430,12 +430,13 @@ UI.refreshParts = () => {
 
 /* central rename: warns when another part already owns the reference, offering
    abort or a name-swap with that part. Returns nothing; refreshes on success. */
-UI.commitRename = (c, newRef) => {
+UI.commitRename = (c, newRef, noUndo) => {
   newRef = (newRef || "").trim();
   if (!newRef || newRef === c.ref){ UI.refreshInspector(); return; }
   const dup = State.components.find(x => x !== c && (x.ref||"").trim().toLowerCase() === newRef.toLowerCase());
   if (!dup){
-    pushUndo("rename " + c.ref);
+    // noUndo: caller (footprint dialog / quick-edit) already pushed one snapshot for the whole edit
+    if (!noUndo) pushUndo("rename " + c.ref);
     c.ref = newRef; registerRef(c.ref);
     requestRender(); UI.refreshNets(); UI.refreshInspector();
     return;
@@ -523,9 +524,14 @@ UI.inspectMultiPins = () => {
     if (!name) return;
     pushUndo("assign net to " + UI.pinSel.length + " pins");
     const target = findNetByName(name) || findNetByName(name.toUpperCase()) || createNet(name);
-    for (const p of UI.pinSel) p.comp.pins[p.pinIdx].netId = target.id;
+    let applied = 0, skipped = 0;
+    for (const p of UI.pinSel){
+      const pin = p.comp.pins[p.pinIdx];
+      if (pin.nc){ skipped++; continue; }                 // NC pins carry no net — leave them untouched
+      pin.netId = target.id; applied++;
+    }
     pruneNets();
-    UI.toast(UI.pinSel.length + " pins → " + target.name);
+    UI.toast(applied + " pins → " + target.name + (skipped ? " (" + skipped + " NC skipped)" : ""));
     UI.refreshNets(); requestRender();
   });
   sec.querySelector("#i-multiclear").addEventListener("click", ()=>{ UI.pinSel = []; UI.refreshInspector(); requestRender(); });
@@ -1443,6 +1449,7 @@ UI.buildHistory = () => {
     if (selectiveUndo(+btn.dataset.i)){
       UI.toast("Action reverted (only the objects it touched)");
       UI.select(null);
+      if (typeof syncSettings === "function") syncSettings();   // reflect reverted board-wide scalars in the Options panel
       UI.refreshLayerList(); UI.refreshNets(); UI.refreshInspector();
       UI.buildHistory();
       requestRender();
@@ -1506,7 +1513,7 @@ UI.openQuickEdit = (c) => {
     pushUndo("quick edit " + c.ref);
     c.value = resolveVal(); // auto-fill on OK (no apply click)
     UI.refreshInspector(); requestRender();
-    if (refIn.value.trim()) UI.commitRename(c, refIn.value); // may prompt on a duplicate ref
+    if (refIn.value.trim()) UI.commitRename(c, refIn.value, true); // may prompt on a duplicate ref
   };
   $("#quick-cancel").onclick = ()=> dlg.close();
   [refIn, valIn].forEach(inp => inp.onkeydown = (e)=>{ if (e.key === "Enter"){ e.preventDefault(); $("#quick-ok").click(); } });

@@ -461,7 +461,9 @@ function exportKiCadSch(mode){
   for (const c of State.components){
     const g = geo.get(c.id);
     const refLetter = (/^[A-Za-z]+/.exec(c.ref)||["U"])[0];
-    const sym = "REV_" + c.ref;
+    // include the component id so duplicate refdes (common in imported boards) don't
+    // collide on one shared symbol definition — each part gets its own lib symbol
+    const sym = "REV_" + c.ref + "_" + c.id;
     const { w, h, pins, body, hide } = g;
     L.push('    (symbol "reveng:' + sym + '"' + (hide ? ' (pin_numbers (hide yes)) (pin_names (hide yes))' : '') + ' (in_bom yes) (on_board yes)');
     L.push('      (property "Reference" "' + _schEsc(refLetter) + '" (at 0 ' + F(h/2+1.27) + ' 0) (effects (font (size 1.27 1.27))))');
@@ -486,7 +488,7 @@ function exportKiCadSch(mode){
     const g = geo.get(c.id);
     const p = pos.get(c.id) || { x: 30, y: 30 };
     const X = p.x, Y = p.y;
-    const sym = "REV_" + c.ref;
+    const sym = "REV_" + c.ref + "_" + c.id;
     L.push('  (symbol (lib_id "reveng:' + sym + '") (at ' + F(X) + ' ' + F(Y) + ' 0) (unit 1) (in_bom yes) (on_board yes)');
     L.push('    (uuid ' + _uuid() + ')');
     L.push('    (property "Reference" "' + _schEsc(c.ref) + '" (at ' + F(X) + ' ' + F(Y-g.h/2-2.54) + ' 0) (effects (font (size 1.27 1.27))))');

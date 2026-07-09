@@ -343,7 +343,7 @@ Stack3D.render = function(){
     const fp = compFootprint(c);
     for (let pi=0; pi<c.pins.length; pi++){
       const fpin = fp.pins[pi]; if (!fpin) continue;
-      const tht = fpin.shape === "circle";
+      const tht = fpin.shape === "circle" && fpin.tht !== false;
       const st = c.pins[pi] || {};
       const col = st.netId ? netColor(st.netId) : (tht ? "#b8a06a" : (c.side==="back" ? "#41599c" : "#9b8338"));
       const layers = tht ? sides.map((_,i)=>i) : [sides.indexOf(c.side)];

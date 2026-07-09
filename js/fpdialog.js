@@ -252,7 +252,7 @@ UI.confirmFootprint = () => {
     UI.select({type:"comp", comp:c});
     UI.refreshNets(); requestRender();
     // rename goes through the central path so a duplicate reference prompts (abort/swap)
-    if (vals.ref && vals.ref !== c.ref) UI.commitRename(c, vals.ref);
+    if (vals.ref && vals.ref !== c.ref) UI.commitRename(c, vals.ref, true);
   } else {
     Tools.pending = vals;
     Tools.ghostFp = fp;

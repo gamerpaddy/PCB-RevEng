@@ -394,7 +394,13 @@ function selectiveUndo(i){
     const l = getLayer(id);
     if (l) Object.assign(l, bo);
   }
-  if (before.pxPerMm !== after.pxPerMm) State.pxPerMm = before.pxPerMm;
+  // board-wide scalar settings (mirror the list diffSnapshots reports)
+  for (const k of ["pxPerMm","layerCount","viaR","traceW","compView","traceView",
+                   "overlapCheck","refTextSize","copperOz","copperOzInner","focusDim"]){
+    if (JSON.stringify(before[k]) !== JSON.stringify(after[k])) State[k] = before[k];
+  }
+  if (JSON.stringify(before.bomColumns) !== JSON.stringify(after.bomColumns))
+    State.bomColumns = JSON.parse(JSON.stringify(before.bomColumns || []));
   const idx = Undo.stack.indexOf(entry);
   if (idx >= 0) Undo.stack.splice(idx, 1); // the action is gone from the timeline
   State.components.forEach(c => c._fp = null);

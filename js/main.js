@@ -489,7 +489,7 @@ function wireCanvas(){
   // the cursor leaves the canvas — the auto-pan RAF would otherwise keep scrolling from the
   // last in-canvas point. Stop it on leave. (A real drag captures the pointer, so leave
   // doesn't fire and dragging an object off-screen still auto-pans.)
-  cv.addEventListener("pointerleave", () => { if (!Tools.drag) stopEdgeScroll(); if (View.cursorLabel){ View.cursorLabel = null; requestRender(); } });
+  cv.addEventListener("pointerleave", () => { if (!Tools.drag) stopEdgeScroll(); UI.setStatusPad(""); Tools._readout = ""; if (View.cursorLabel){ View.cursorLabel = null; requestRender(); } });
   cv.addEventListener("dblclick", onDoubleClick);
   let lastPlaceRC = 0; // timestamp of last right-click while placing (double = cancel)
   cv.addEventListener("contextmenu", e => {

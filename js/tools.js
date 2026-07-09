@@ -744,7 +744,7 @@ function applyNetRename(obj, name, done){
         pruneNets();
       }
     } else if (!assignNetToObject(obj, name, scope)){
-      Undo.stack.pop();
+      cancelUndo();
     }
     finish();
   };
@@ -1761,6 +1761,13 @@ function deleteSelection(){
       UI.traceSel = [];
       pruneNets();
       UI.select(null); UI.refreshNets(); requestRender();
+    } else if (UI.pinSel.length){
+      // Delete on a shift-click multi-pin selection clears each pad's net (mirrors single-pad Delete)
+      pushUndo("clear net on " + UI.pinSel.length + " pins");
+      for (const p of UI.pinSel) p.comp.pins[p.pinIdx].netId = null;
+      UI.pinSel = [];
+      pruneNets();
+      UI.select(null); UI.refreshNets(); UI.refreshInspector(); requestRender();
     }
     return;
   }
@@ -1899,7 +1906,7 @@ function splitNetByConnectivity(netId){
         // to the pad's REAL edge (rectangle aware) rather than a round radius
         const pr = projectOnSeg(p.x, p.y, tr.points[i], tr.points[i+1]);
         const edge = p.fpin ? pinEdgeDist(p.comp, p.fpin, pr.x, pr.y)
-                            : Math.max(0, pr.d - (p.r||5));
+                            : Math.max(0, pr.d - (p.r||State.viaR));
         if (edge <= half) return true;
       }
       return false;
@@ -1912,7 +1919,7 @@ function splitNetByConnectivity(netId){
     // connected when their metal actually overlaps
     const dA = A.fpin ? pinEdgeDist(A.comp, A.fpin, B.x, B.y) : 0;
     const dB = B.fpin ? pinEdgeDist(B.comp, B.fpin, A.x, A.y) : 0;
-    return dA <= (B.r || 5) || dB <= (A.r || 5);
+    return dA <= (B.r || State.viaR) || dB <= (A.r || State.viaR);
   };
 
   // union-find over O(n²) pairs
