@@ -32,19 +32,22 @@ Footprints.register({
       "0201":[0.6,0.3],"0402":[1.0,0.5],"0406":[1.0,1.6],"0603":[1.6,0.8],"0612":[1.6,3.2],
       "0805":[2.0,1.25],"1206":[3.2,1.6],"1210":[3.2,2.5],"2010":[5.0,2.5],"2512":[6.3,3.2] };
     const [L,W] = dims[p.size];
-    // IEC 61188-6-2 land patterns, [G inner gap, Y pad length (along axis), X pad width (across),
-    // Z toe-to-toe] mm. Pad centre px = G/2 + Y/2 → inner edge sits at G/2, outer edge at Z/2.
-    // Sizes not tabulated (2010/2512) fall back to a W-derived estimate.
-    const iec = {
-      "0201":[0.30,0.24,0.32,0.78], "0402":[0.55,0.35,0.55,1.25], "0406":[0.55,0.35,1.55,1.25],
-      "0603":[0.90,0.55,0.90,2.00], "0612":[0.90,0.55,3.15,2.00], "0805":[1.10,0.65,1.30,2.40],
-      "1206":[2.10,0.80,1.65,3.70], "1210":[2.10,0.80,2.50,3.70] };
+    // IPC-7351B nominal (density level B) land patterns, [px pad centre, pw pad length (along
+    // axis), ph pad width (across)] mm — matching the KiCad Resistor_SMD reference footprints
+    // (pad centre = half the centre-to-centre spacing). 0406/0612 are non-standard wide chips
+    // (no IPC land pattern): they reuse the 0402/0603 termination but widen across the body.
+    const ipc = {
+      "0201":[0.32,   0.46,  0.40], "0402":[0.51,   0.54,  0.64],
+      "0603":[0.825,  0.80,  0.95], "0805":[0.9125, 1.025, 1.40],
+      "1206":[1.4625, 1.125, 1.75], "1210":[1.4625, 1.125, 2.65],
+      "2010":[2.3125, 1.225, 2.65], "2512":[2.9625, 1.225, 3.35] };
     let pw, ph, px;
-    if (iec[p.size]){
-      const [G,Y,X] = iec[p.size];
-      pw = Y; ph = X; px = G/2 + Y/2;
+    if (ipc[p.size]){
+      [px, pw, ph] = ipc[p.size];
+    } else if (p.size === "0406"){ px = 0.51;  pw = 0.54; ph = 1.70;   // 0402 length, 1.6 mm-wide body
+    } else if (p.size === "0612"){ px = 0.825; pw = 0.80; ph = 3.30;   // 0603 length, 3.2 mm-wide body
     } else {
-      pw = W*0.9; ph = W*1.1; px = L/2 + W*0.35;
+      pw = W*0.9; ph = W*1.1; px = L/2 + W*0.35;   // fallback for any untabulated size
     }
     const code = {"0201":"0603","0402":"1005","0406":"1016","0603":"1608","0612":"1632","0805":"2012","1206":"3216","1210":"3225","2010":"5025","2512":"6332"}[p.size];
     return {
