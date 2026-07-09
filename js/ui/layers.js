@@ -1,0 +1,80 @@
+/* ===== ui/layers.js — layer panel ===== */
+"use strict";
+
+/* ---------------- layer panel ---------------- */
+UI.refreshLayerList = () => {
+  const list = $("#layer-list");
+  list.innerHTML = "";
+  const dh = $("#drop-hint");
+  dh.style.display = State.layers.length ? "none" : "flex";
+  if (!State.layers.length) dh.classList.remove("faded");   // show fresh; activity re-fades it
+  for (const l of State.layers){
+    const card = document.createElement("div");
+    card.className = "layer-card" + (l.id === UI.activeLayerId ? " active" : "");
+    card.innerHTML = `
+      <div class="layer-head">
+        <button class="vis" title="Show / hide">${l.visible ? "👁" : "—"}</button>
+        <div class="name" title="${l.url ? "Hosted image — loaded live from "+escAttr(l.url)+" and NOT saved in the project" : escAttr(l.name)}">${l.url ? "🔗 " : ""}${escAttr(l.name)}</div>
+        <button class="del" title="Remove layer">✕</button>
+      </div>
+      <div class="layer-row">
+        <select class="side-sel" title="Which physical side this photo shows">${sideOptionsHtml(l.side)}</select>
+        <label title="Mirror image horizontally (back-side photos usually need this so they align with the front)">
+          <input type="checkbox" class="mir" ${l.mirror?"checked":""}>⇋</label>
+        <label title="Lock layer against accidental dragging"><input type="checkbox" class="lock" ${l.locked?"checked":""}>🔒</label>
+        <button class="align2" title="4-point align: click 4 reference features, then the same 4 features on this layer (corrects offset, rotation, scale and skew). To just MOVE the image, pick the Align tool and press Esc, then drag.">Align</button>
+        <button class="crop2" title="Crop: drag a box around the part to keep — trims off the rest (do this after aligning)">Crop</button>
+      </div>
+      <input type="range" class="op" min="0" max="100" value="${Math.round(l.opacity*100)}" title="Opacity">`;
+    card.querySelector(".side-sel").value = l.side;
+    card.addEventListener("click", (e)=>{
+      if (e.target.closest("button,select,input,label")) return;
+      UI.activeLayerId = l.id; UI.refreshLayerList();
+      UI.setDrawSide(l.side); // selecting the back image switches drawing to Back, etc.
+      UI.autoXrayForLayer(l); // selecting the X-ray image turns on X-ray view
+    });
+    card.querySelector(".vis").addEventListener("click", ()=>{ l.visible = !l.visible; UI.refreshLayerList(); requestRender(); });
+    card.querySelector(".del").addEventListener("click", ()=>{
+      if (!confirm("Remove layer “" + l.name + "”?")) return;
+      State.layers = State.layers.filter(x => x !== l);
+      if (UI.activeLayerId === l.id) UI.activeLayerId = State.layers[0]?.id ?? null;
+      if (typeof markImagesDirty === "function") markImagesDirty();
+      UI.refreshLayerList(); requestRender();
+    });
+    card.querySelector(".side-sel").addEventListener("change", (e)=>{
+      const was = l.side;
+      l.side = e.target.value;
+      // back photos are mirrored by default (only while not yet warped/aligned)
+      if (!l.warp){
+        if (l.side === "back" && was !== "back" && !l.mirror){
+          l.mirror = true; UI.toast("Layer mirrored ⇋ (back-side photo default)");
+        } else if (was === "back" && l.side !== "back" && l.mirror){
+          l.mirror = false;
+        }
+      }
+      UI.setDrawSide(l.side);
+      UI.refreshLayerList(); requestRender();
+    });
+    card.querySelector(".mir").addEventListener("change", (e)=>{
+      l.mirror = e.target.checked;
+      if (l.warp){ // warped layers mirror in image space: W · diag(-1,1)
+        l.warp = { a:-l.warp.a, b:-l.warp.b, c:l.warp.c, d:l.warp.d };
+      }
+      requestRender();
+    });
+    card.querySelector(".lock").addEventListener("change", (e)=>{ l.locked = e.target.checked; });
+    card.querySelector(".align2").addEventListener("click", ()=>{
+      UI.activeLayerId = l.id; UI.refreshLayerList();
+      startPointAlign();
+    });
+    card.querySelector(".crop2").addEventListener("click", ()=>{
+      UI.activeLayerId = l.id; UI.setDrawSide(l.side); UI.refreshLayerList();
+      startCrop();
+    });
+    card.querySelector(".op").addEventListener("input", (e)=>{ l.opacity = e.target.value/100; requestRender(); });
+    list.appendChild(card);
+  }
+  UI.refreshXrayBtn();
+  UI.refreshSplitControls();   // keep the split-view layer dropdowns in sync with the layer list
+};
+
