@@ -176,9 +176,9 @@ function onPointerMove(e){
   // still auto-pan near the edges so you can drop a part off-screen
   updateEdgeScroll(pt);
 
-  // snap preview for relevant tools
+  // snap preview for relevant tools (Shift disables snapping for both trace & via)
   if (Tools.name === "trace"){
-    Tools.snap = snapToConductor(w.x, w.y, Tools.tracePts ? Tools.traceSide : UI.copperSide(), true, State.traceW);
+    Tools.snap = e.shiftKey ? null : snapToConductor(w.x, w.y, Tools.tracePts ? Tools.traceSide : UI.copperSide(), true, State.traceW);
   } else if (Tools.name === "via"){
     Tools.snap = e.shiftKey ? null : snapToConductor(w.x, w.y, "any");   // Shift = free placement, no snap
   } else Tools.snap = null;
@@ -477,9 +477,10 @@ function edgeScrollTick(){
   // finger, the object (or ghost) keeps tracking the pointer and moves along with it
   const w = screenToWorld(pt.x, pt.y);
   Tools.cursor = w;
+  const shift = Tools._lastEvt && Tools._lastEvt.shiftKey;
   if (Tools.drag) handleDrag(pt, w, Tools._lastEvt);   // ghost needs only the updated cursor
-  else if (Tools.name === "trace") Tools.snap = snapToConductor(w.x, w.y, Tools.tracePts ? Tools.traceSide : UI.copperSide(), true, State.traceW);
-  else if (Tools.name === "via")   Tools.snap = (Tools._lastEvt && Tools._lastEvt.shiftKey) ? null : snapToConductor(w.x, w.y, "any");
+  else if (Tools.name === "trace") Tools.snap = shift ? null : snapToConductor(w.x, w.y, Tools.tracePts ? Tools.traceSide : UI.copperSide(), true, State.traceW);
+  else if (Tools.name === "via")   Tools.snap = shift ? null : snapToConductor(w.x, w.y, "any");
   UI.setStatusPos(w);
   requestRender();
   Tools._edgeRAF = requestAnimationFrame(edgeScrollTick);

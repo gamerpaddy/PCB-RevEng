@@ -25,7 +25,9 @@ function tracePointAt(w, snap){
 function traceCursorPoint(){ return tracePointAt(Tools.cursor, Tools.snap); }
 
 function traceDown(w, e){
-  const snap = snapToConductor(w.x, w.y, Tools.tracePts ? Tools.traceSide : UI.copperSide(), true, State.traceW);
+  // Shift = free placement: don't snap this point to a conductor (mirrors the via tool's
+  // reserved use of Shift-to-disable-snap)
+  const snap = e.shiftKey ? null : snapToConductor(w.x, w.y, Tools.tracePts ? Tools.traceSide : UI.copperSide(), true, State.traceW);
   const p = tracePointAt(w, snap);
   if (!Tools.tracePts){
     Tools.tracePts = [p];

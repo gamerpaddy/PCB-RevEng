@@ -44,7 +44,7 @@ UI.inspectMultiPins = () => {
   sec.innerHTML = `
     <div class="insp-title">${UI.pinSel.length} pins selected</div>
     <div class="panel-hint" style="word-break:break-all">${list}</div>
-    ${inspRow("Net", `<input id="i-multinet" placeholder="net for ALL selected pins">`)}
+    ${inspRow("Net", `<input id="i-multinet" class="net-ac" placeholder="net for ALL selected pins">`)}
     <div class="insp-actions">
       <button id="i-multiclear">Clear selection</button>
     </div>
@@ -82,7 +82,7 @@ UI.inspectMultiTraces = () => {
   sec.innerHTML = `
     <div class="insp-title">${UI.traceSel.length} trace segments</div>
     <div class="panel-hint">Net: ${netLabel}</div>
-    ${inspRow("Set net", `<span style="display:flex;gap:4px;flex:1;min-width:0"><input id="i-tsnet" placeholder="net for all" style="flex:1;min-width:0"><button id="i-tsgen" title="Generate a new unique net name">⊕</button></span>`)}
+    ${inspRow("Set net", `<span style="display:flex;gap:4px;flex:1;min-width:0"><input id="i-tsnet" class="net-ac" placeholder="net for all" style="flex:1;min-width:0"><button id="i-tsgen" title="Generate a new unique net name">⊕</button></span>`)}
     ${inspRow("Width", UI.traceWidthInputs(widths[0]||3, "i-tsw", wUniform))}
     ${wUniform ? UI.traceCurrentRow(UI.traceSel[0]) : ""}
     <div class="insp-actions">
@@ -298,7 +298,7 @@ UI.inspectComponent = (c, selPin) => {
     rows += `<tr data-i="${i}" class="${i===selPin?'sel':''}">
       <td style="width:30px;color:#8b96a5">${p.num}</td>
       <td><input class="pname" data-i="${i}" value="${escAttr(p.name)}" placeholder="name"></td>
-      <td><input class="pnet" data-i="${i}" value="${escAttr(netName)}" placeholder="net" ${p.nc?"disabled":""}></td>
+      <td><input class="pnet net-ac" data-i="${i}" value="${escAttr(netName)}" placeholder="net" ${p.nc?"disabled":""}></td>
       <td style="width:24px;text-align:center" title="No-connect (excluded from checker)"><input type="checkbox" class="pnc" data-i="${i}" ${p.nc?"checked":""}></td>
       ${padCells}</tr>`;
   }
@@ -370,10 +370,15 @@ UI.inspectViaTool = () => {
   sec.className = "insp-section";
   sec.innerHTML = `
     <div class="insp-title">Via tool</div>
+    ${inspRow("Net", `<span style="display:flex;gap:4px;flex:1;min-width:0"><input id="i-dvnet" class="net-ac" value="${escAttr(Tools.lastViaNet || "")}" placeholder="(inherit / none)" style="flex:1;min-width:0"><button id="i-dvnetgen" title="Generate a new unique net name">⊕</button></span>`)}
     ${inspRow("Size Ø", UI.viaSizeInputs(State.viaR, "i-dvr-"))}
     ${inspRow("Drill Ø", UI.viaSizeInputs(State.viaHole, "i-dvh-"))}
-    <div class="panel-hint">Defaults for new vias · Alt-click = PTH · Shift-click = free (no net). Values are retained.</div>`;
+    <div class="panel-hint">Net is assigned to new vias (unless one snaps onto a conductor). Alt-click = PTH · Shift-click = free (no net). Values are retained.</div>`;
   box.appendChild(sec);
+  const applyNet = (name) => { Tools.lastViaNet = name.trim() || null; };
+  const netEl = sec.querySelector("#i-dvnet");
+  netEl.addEventListener("change", e => applyNet(e.target.value));
+  sec.querySelector("#i-dvnetgen").addEventListener("click", () => { const n = uniqueNetName(); netEl.value = n; applyNet(n); });
   const applySize = (mm) => { if (!(mm > 0)) return; pushUndo("via size"); State.viaR = Math.max(1, mm*State.pxPerMm/2); UI.refreshInspector(); requestRender(); };
   const applyDrill = (mm) => { if (!(mm > 0)) return; pushUndo("via drill"); State.viaHole = Math.max(0.5, mm*State.pxPerMm/2); UI.refreshInspector(); requestRender(); };
   sec.querySelector("#i-dvr-mm").addEventListener("change",  e => applySize(parseFloat(e.target.value)||0));
@@ -423,7 +428,7 @@ UI.inspectNetObj = (title, obj) => {
   const isViaObj = obj.kind === "via" || obj.kind === "pth";
   sec.innerHTML = `
     <div class="insp-title">${title}</div>
-    ${inspRow("Net", `<span style="display:flex;gap:4px;flex:1;min-width:0"><input id="i-net" value="${escAttr(netName)}" placeholder="net name" style="flex:1;min-width:0"><button id="i-netgen" title="Generate a new unique net name">⊕</button></span>`)}
+    ${inspRow("Net", `<span style="display:flex;gap:4px;flex:1;min-width:0"><input id="i-net" class="net-ac" value="${escAttr(netName)}" placeholder="net name" style="flex:1;min-width:0"><button id="i-netgen" title="Generate a new unique net name">⊕</button></span>`)}
     ${isViaObj ? inspRow("Type", `<select id="i-kind"><option value="via">Via</option><option value="pth">PTH (plated hole)</option></select>`) : ""}
     ${isViaObj ? inspRow("Size Ø", UI.viaSizeInputs(obj.r||State.viaR, "i-vr-")) : ""}
     ${isViaObj ? inspRow("Drill Ø", UI.viaSizeInputs(obj.hole != null ? obj.hole : State.viaHole, "i-vh-")) : ""}
@@ -579,7 +584,7 @@ UI.inspectTrace = (t) => {
   sec.className = "insp-section";
   sec.innerHTML = `
     <div class="insp-title">Trace <span style="color:${SIDE_COLORS[t.side]};font-size:11px">● ${SIDE_LABELS[t.side]}</span></div>
-    ${inspRow("Net", `<span style="display:flex;gap:4px;flex:1;min-width:0"><input id="i-net" value="${escAttr(netName)}" style="flex:1;min-width:0"><button id="i-netgen" title="Generate a new unique net name">⊕</button></span>`)}
+    ${inspRow("Net", `<span style="display:flex;gap:4px;flex:1;min-width:0"><input id="i-net" class="net-ac" value="${escAttr(netName)}" style="flex:1;min-width:0"><button id="i-netgen" title="Generate a new unique net name">⊕</button></span>`)}
     ${inspRow("Side", `<select id="i-tside">${copperSideOptionsHtml(t.side)}</select>`)}
     ${inspRow("Width", UI.traceWidthInputs(t.width||3, "i-w"))}
     ${UI.traceCurrentRow(t, {showLength:true})}

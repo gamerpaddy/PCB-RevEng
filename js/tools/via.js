@@ -68,12 +68,12 @@ function viaLandedNet(via, attached){
   return null;
 }
 
-/* first via (other than `via`) whose copper overlaps `via` */
+/* first via (other than `via`) whose copper actually overlaps `via` (centres closer than
+   the sum of the two radii — i.e. the discs cross, not merely touch) */
 function firstViaOverlap(via){
   for (const o of State.vias){
     if (o === via) continue;
-    const rr = Math.max(via.r||State.viaR, o.r||State.viaR);
-    if (Math.hypot(o.x-via.x, o.y-via.y) <= rr*0.9) return o;
+    if (Math.hypot(o.x-via.x, o.y-via.y) < (via.r||State.viaR) + (o.r||State.viaR)) return o;
   }
   return null;
 }
@@ -183,29 +183,35 @@ function handleViaDrop(via){
 /* ---------------- via / PTH tool ---------------- */
 function viaDown(w, e){
   const pth = e.altKey;          // Alt-click = plated through hole (mounting/component hole)
-  // no stacked vias/PTH on the same spot
+  const newR = pth ? Math.round(State.viaR*1.8) : State.viaR;
+  // don't let a new via overlap an existing one: block when the discs would cross (centre
+  // distance < sum of radii). Edges may still touch.
   for (const v of State.vias){
-    if (Math.hypot(w.x-v.x, w.y-v.y) < Math.max(v.r||0, State.viaR)){
+    if (Math.hypot(w.x-v.x, w.y-v.y) < (v.r||State.viaR) + newR){
       UI.toast("There is already a " + (v.kind==="pth"?"PTH":"via") + " here"); return;
     }
   }
   pushUndo(pth ? "place PTH" : "place via");
-  // Shift = free placement: don't snap to a conductor and don't inherit its net
+  // Shift disables snapping (free placement) — but the via still inherits a net (from a
+  // nearby trace / the picked lastViaNet). Use the V-key picker to clear/re-pick the net.
   const snap = e.shiftKey ? null : snapToConductor(w.x, w.y, "any");
   let netId = snap ? snap.netId : null;
-  if (!netId && !e.shiftKey){
-    // near a trace?
+  if (!netId){
+    // sitting on a pad / via / trace (matters most when Shift skipped the snap) → inherit its net
     const h = hitTest(w.x, w.y);
     if (h && h.type === "trace") netId = h.trace.netId;
+    else if (h && h.type === "pin") netId = h.comp.pins[h.pinIdx].netId;
+    else if (h && h.type === "via") netId = h.via.netId;
   }
-  // reuse the last via's net for stitching multiple vias — unless Shift-placed or PTH
-  if (!netId && !e.shiftKey && !pth && Tools.lastViaNet){
+  // reuse the picked / last via net for stitching multiple vias — unless PTH.
+  // (Use the V-key picker to clear or re-pick this net — see viaNetPick.)
+  if (!netId && !pth && Tools.lastViaNet){
     const t = findNetByName(Tools.lastViaNet) || findNetByName(Tools.lastViaNet.toUpperCase()) || createNet(Tools.lastViaNet);
     netId = t.id;
   }
   const via = {
     id: nextId(), x: snap?snap.x:w.x, y: snap?snap.y:w.y, netId: netId||null,
-    r: pth ? Math.round(State.viaR*1.8) : State.viaR,
+    r: newR,
     hole: pth ? Math.round(State.viaHole*1.8) : State.viaHole,   // drill radius (px); retained default
     kind: pth ? "pth" : "via",
   };
@@ -214,5 +220,32 @@ function viaDown(w, e){
   if (netId && !pth) Tools.lastViaNet = getNet(netId)?.name || Tools.lastViaNet; // remember
   UI.select({type:"via", via});
   pruneNets();
+  requestRender();
+}
+
+/* Pressing the via-tool key (V) again acts as a net picker: if the cursor is over a
+   pad / via / trace, adopt that copper's net as the net for the NEXT vias placed;
+   over empty board it clears the pending net so new vias start unnetted. */
+function viaNetPick(){
+  const w = Tools.cursor;
+  let over = false, netId = null;
+  if (w){
+    const snap = snapToConductor(w.x, w.y, "any");
+    if (snap && snap.attach){ over = true; netId = snap.netId; }
+    else {
+      const h = hitTest(w.x, w.y);
+      if (h && h.type === "pin"){ over = true; netId = h.comp.pins[h.pinIdx].netId; }
+      else if (h && h.type === "via"){ over = true; netId = h.via.netId; }
+      else if (h && h.type === "trace"){ over = true; netId = h.trace.netId; }
+    }
+  }
+  if (over && netId){
+    Tools.lastViaNet = getNet(netId)?.name || null;
+    UI.toast("Via net picked → “" + (Tools.lastViaNet || "?") + "” (new vias join it)");
+  } else {
+    Tools.lastViaNet = null;
+    UI.toast("Via net cleared — new vias start unnetted");
+  }
+  UI.refreshInspector();
   requestRender();
 }

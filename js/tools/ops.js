@@ -131,6 +131,7 @@ function deleteSelection(){
     State.components = State.components.filter(c => c !== sel.comp);
   } else if (sel.type === "via"){
     State.vias = State.vias.filter(v => v !== sel.via);
+    pruneCollinearAnchors(sel.via.x, sel.via.y);   // drop the anchor vertex the via added, if still straight
   } else if (sel.type === "trace"){
     State.traces = State.traces.filter(t => t !== sel.trace);
   } else if (sel.type === "note"){

@@ -205,9 +205,13 @@ UI.openNetPopup = (title, current, onPick) => {
   // number keys 1-9 pick a quick net. They fire when the field is empty OR its whole
   // value is still selected — which is the just-opened state (we focus+select on open),
   // so the hotkeys work immediately even though the current net name is pre-filled.
-  // Once the user starts typing (selection gone) digits type normally into the name.
+  // Once the user CLICKS into the field, digits type normally — so a net name that starts
+  // with a number (e.g. "5V0", "3V3_A") can be typed without a preset stealing the keypress.
+  let clicked = false;
+  inp.onpointerdown = () => { clicked = true; };
   const allSelected = () => inp.selectionStart === 0 && inp.selectionEnd === inp.value.length;
   const keyPick = (e) => {
+    if (clicked) return;                                        // user clicked in → type freely
     if (!/^[1-9]$/.test(e.key) || !quickNames[+e.key - 1]) return;
     if (e.target !== inp || inp.value === "" || allSelected()){
       e.preventDefault(); finish(quickNames[+e.key - 1]);

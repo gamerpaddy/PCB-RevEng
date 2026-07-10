@@ -32,8 +32,14 @@ window.addEventListener("DOMContentLoaded", () => {
   Resolver.wire();
   UI.wireFpSearch();
   UI.wireNetSearch();
+  UI.wireNetAutocomplete();
   UI.wirePartSearch();
   autosaveInit();
+  // Backstop for an accidental tab/window close (Ctrl+W, the × button, a reload): the
+  // browser shows its native "leave site?" prompt whenever the board has any content.
+  window.addEventListener("beforeunload", e => {
+    if (boardHasContent()){ e.preventDefault(); e.returnValue = ""; }
+  });
   window.addEventListener("resize", viewResize);
   requestRender();
 });
@@ -632,6 +638,11 @@ function wireKeyboard(){
         case "y": e.preventDefault(); if (redo()) afterHistory(); return;
         case "d": e.preventDefault(); duplicateSelection(); return;
         case "f": e.preventDefault(); UI.openPartsDialog(); return;
+        // Guard the browser's Ctrl+W (close tab) / Ctrl+T (new tab) so a mis-hit while
+        // routing doesn't nuke the tab. preventDefault is best-effort (most browsers reserve
+        // these), so a beforeunload prompt (see below) is the real backstop for Ctrl+W.
+        case "w": e.preventDefault(); return;
+        case "t": e.preventDefault(); return;
       }
       return;
     }
