@@ -193,3 +193,77 @@ UI.openButtonHotkeyMenu = (id, x, y) => {
   items.push({ label: "Open hotkey editor…", action: () => UI.openKeysDialog() });
   UI.showContextMenu(x, y, items);
 };
+
+/* ---------------- trace width (Shift+W quick picker) ---------------- */
+/* short human label for a width in display px, e.g. "0.25 mm / 10 mil" */
+UI.traceWidthLabel = (px) => {
+  const mm = px / State.pxPerMm;
+  return mm.toFixed(2) + " mm / " + Math.round(mm / MM_PER_MIL) + " mil";
+};
+
+/* Apply a width (display px). While routing, it changes the width for the REST of the
+   trace (splitting off the part already drawn at its current width — see
+   changeTraceWidthWhileDrawing) without touching your default. Idle, it sets State.traceW
+   (the new-trace default). Only call from deliberate confirms (Enter / preset / field
+   change), never per-keystroke, or it would split on every digit typed. */
+UI.setTraceWidth = (px) => {
+  if (!(px > 0)) return;
+  px = Math.max(0.05, px);
+  if (Tools.tracePts) changeTraceWidthWhileDrawing(px);
+  else { State.traceW = px; requestRender(); }
+};
+
+/* floating quick picker: a mm/mil input plus common presets. Sets the drawing width
+   (mid-route) or the new-trace default (idle). Closes on Enter / Esc / click-away. */
+UI.openTraceWidthMenu = (x, y) => {
+  UI.closeTraceWidthMenu();
+  const drawing = !!Tools.tracePts;
+  const curPx = drawing ? (Tools.traceWidth || State.traceW) : State.traceW;
+  const m = document.createElement("div");
+  m.id = "tracew-menu";
+  const presetsMm = [0.15, 0.2, 0.25, 0.3, 0.4, 0.5, 0.8, 1.0];
+  m.innerHTML = `
+    <div class="tracew-title">${drawing ? "Current trace width" : "New-trace width"}</div>
+    <div class="tracew-inputs">
+      <input id="tracew-mm" type="number" step="0.05" min="0.05" title="Width in millimetres"><span>mm</span>
+      <input id="tracew-mil" type="number" step="1" min="0.5" title="Width in mils (thou)"><span>mil</span>
+    </div>
+    <div class="tracew-presets">${presetsMm.map(mm => `<button data-mm="${mm}">${mm}</button>`).join("")}</div>`;
+  document.body.appendChild(m);
+  const r = m.getBoundingClientRect();
+  m.style.left = Math.min(x, window.innerWidth  - r.width  - 6) + "px";
+  m.style.top  = Math.min(y, window.innerHeight - r.height - 6) + "px";
+
+  const mmIn = m.querySelector("#tracew-mm"), milIn = m.querySelector("#tracew-mil");
+  const setFields = (px) => {
+    const mm = px / State.pxPerMm;
+    mmIn.value = mm.toFixed(3);
+    milIn.value = (mm / MM_PER_MIL).toFixed(1);
+  };
+  // Apply is deliberate (Enter / preset) — never per-keystroke, since while routing it
+  // splits the trace at the current anchor. Confirming closes the picker.
+  const apply = (px) => {
+    UI.setTraceWidth(px);
+    UI.refreshInspector();
+    if (!Tools.tracePts) UI.toast("New-trace width → " + UI.traceWidthLabel(State.traceW));
+    UI.closeTraceWidthMenu();
+  };
+  setFields(curPx);
+  // typing just keeps the paired unit in sync; the value is applied on Enter or a preset
+  mmIn.addEventListener("input",  () => { const mm = parseFloat(mmIn.value)||0; milIn.value = (mm / MM_PER_MIL).toFixed(1); });
+  milIn.addEventListener("input", () => { const mil = parseFloat(milIn.value)||0; mmIn.value = (mil * MM_PER_MIL).toFixed(3); });
+  m.querySelectorAll(".tracew-presets button").forEach(b =>
+    b.addEventListener("click", () => apply(parseFloat(b.dataset.mm) * State.pxPerMm)));
+  m.addEventListener("keydown", (e) => {
+    if (e.key === "Enter"){ e.preventDefault(); apply((parseFloat(mmIn.value)||0) * State.pxPerMm); }
+    else if (e.key === "Escape"){ e.preventDefault(); UI.closeTraceWidthMenu(); }
+  });
+  setTimeout(() => document.addEventListener("pointerdown", UI._tracewDismiss, true), 0);
+  mmIn.focus(); mmIn.select();
+};
+UI._tracewDismiss = (e) => { if (!e.target.closest("#tracew-menu")) UI.closeTraceWidthMenu(); };
+UI.closeTraceWidthMenu = () => {
+  const m = document.getElementById("tracew-menu");
+  if (m) m.remove();
+  document.removeEventListener("pointerdown", UI._tracewDismiss, true);
+};

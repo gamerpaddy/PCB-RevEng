@@ -678,6 +678,16 @@ function wireKeyboard(){
       return;
     }
 
+    // Shift+W — quick trace-width picker (only with the trace tool). Must run BEFORE the
+    // rebindable actions: "W" is the trace-tool hotkey and Shift doesn't change normKey.
+    if (e.shiftKey && e.code === "KeyW" && Tools.name === "trace"){
+      e.preventDefault();
+      const evt = Tools._lastEvt;
+      const x = evt ? evt.clientX : window.innerWidth/2, y = evt ? evt.clientY : window.innerHeight/2;
+      UI.openTraceWidthMenu(x, y);
+      return;
+    }
+
     // rebindable actions first
     const act = Keymap.actionForKey(normKey(e));
     if (act){ act.run(e); return; }

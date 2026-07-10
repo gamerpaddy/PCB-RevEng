@@ -390,14 +390,22 @@ UI.inspectTraceTool = () => {
   const sec = document.createElement("div");
   sec.className = "insp-section";
   const on = !!Tools.angleSnap;
+  // while drawing, the width row edits THIS trace's live width (Tools.traceWidth);
+  // otherwise it edits State.traceW, the default applied to new traces
+  const drawing = !!Tools.tracePts;
+  const wPx = drawing ? (Tools.traceWidth || State.traceW) : State.traceW;
   sec.innerHTML = `
     <div class="insp-title">Trace tool</div>
+    ${inspRow(drawing ? "Width (drawing)" : "New-trace width", UI.traceWidthInputs(wPx, "i-tw"))}
     ${inspRow("Placement", `<select id="i-tanglesnap">
        <option value="free">Free (any angle)</option>
        <option value="snap">Snap to 45°</option>
      </select>`)}
-    <div class="panel-hint">Angle snap constrains each new segment to 45° steps from the previous point. Pads/vias still snap normally. Click to add points, Enter/double-click to finish.</div>`;
+    <div class="panel-hint">Shift+W opens a quick width picker (works mid-route too). Angle snap constrains each new segment to 45° steps from the previous point. Pads/vias still snap normally.</div>`;
   box.appendChild(sec);
+  const applyW = (px) => { UI.setTraceWidth(px); UI.refreshInspector(); requestRender(); };
+  sec.querySelector("#i-twmm").addEventListener("change",  e => applyW((parseFloat(e.target.value)||0) * State.pxPerMm));
+  sec.querySelector("#i-twmil").addEventListener("change", e => applyW((parseFloat(e.target.value)||0) * MM_PER_MIL * State.pxPerMm));
   const selEl = sec.querySelector("#i-tanglesnap");
   selEl.value = on ? "snap" : "free";
   selEl.addEventListener("change", e => {

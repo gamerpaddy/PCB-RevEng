@@ -77,6 +77,61 @@ function pathTrace(ctx, t){
   for (let i=1;i<t.points.length;i++) ctx.lineTo(t.points[i].x, t.points[i].y);
 }
 
+/* trace copper split into its two coats so the merge buffer can paint ALL bodies first
+   and ALL cores second (drawing body+core per-trace would let the next segment's body
+   overpaint the previous segment's core, leaving a seam line through every junction). */
+function strokeTraceBody(ctx, t){
+  ctx.strokeStyle = t.netId ? netColor(t.netId) : SIDE_COLORS[t.side];
+  ctx.lineWidth = t.width || 3;
+  pathTrace(ctx, t); ctx.stroke();
+}
+function strokeTraceCore(ctx, t){
+  ctx.strokeStyle = SIDE_COLORS[t.side] || "#fff";
+  ctx.lineWidth = Math.max((t.width||3)*0.55, 2/View.zoom);
+  pathTrace(ctx, t); ctx.stroke();
+}
+
+/* Resting-state trace rendering (nothing selected/hovered, so every trace shares one
+   alpha per side): draw all copper into an offscreen buffer at full opacity — where
+   traces of different widths meet at a junction or width change they merge into one solid
+   shape — then composite the whole buffer once at the trace opacity. This removes the
+   "stacked sausages" look you get from stroking each trace translucently on its own.
+   Two passes keep active-side copper on top; each blits at its own dim (X-ray dims the
+   other side). Falls back to per-trace drawTrace when a net is focused (that path needs
+   per-trace alpha and its highlight halo already unifies the net visually). */
+function renderTracesMerged(ctx){
+  const aSide = effDrawSide();
+  const cw = View.canvas.width, ch = View.canvas.height;
+  if (!cw || !ch) return;
+  let buf = View._traceBuf;
+  if (!buf){ buf = View._traceBuf = document.createElement("canvas"); }
+  if (buf.width !== cw || buf.height !== ch){ buf.width = cw; buf.height = ch; }
+  const bctx = buf.getContext("2d");
+  const m = ctx.getTransform();   // current world transform (incl. dpr, pan, zoom, pane offset)
+
+  const pass = (activeSidePass, alpha) => {
+    const group = State.traces.filter(t =>
+      traceVisible(t) && ((t.side === aSide) === activeSidePass));
+    if (!group.length) return;
+    bctx.setTransform(1,0,0,1,0,0);
+    bctx.clearRect(0,0,cw,ch);
+    bctx.setTransform(m.a,m.b,m.c,m.d,m.e,m.f);
+    bctx.lineCap = "round"; bctx.lineJoin = "round"; bctx.globalAlpha = 1;
+    // all bodies first, then all cores → same-net copper fuses into one shape with a
+    // single continuous border instead of each segment keeping its own outline
+    for (const t of group) strokeTraceBody(bctx, t);
+    for (const t of group) strokeTraceCore(bctx, t);
+    ctx.save();
+    ctx.setTransform(1,0,0,1,0,0);   // buffer is device-pixel aligned → blit 1:1
+    ctx.globalAlpha = alpha;
+    ctx.drawImage(buf, 0, 0);
+    ctx.restore();
+  };
+  const dimOther = effXray() ? 0.4 : 1;   // matches xrayDim() for non-active sides
+  pass(false, 0.85 * dimOther);           // other layers first (behind)
+  pass(true,  0.85);                       // active-side copper on top
+}
+
 function drawVia(ctx, v, selNet){
   const pth = v.kind === "pth";
   const r = v.r || State.viaR;

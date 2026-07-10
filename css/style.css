@@ -375,6 +375,19 @@ dialog::backdrop{background:rgba(0,0,0,.55);}
 .ctx-item.danger:hover{background:var(--danger); color:#fff;}
 .ctx-sep{height:1px; background:var(--line); margin:4px 0;}
 
+/* trace width quick picker (Shift+W) */
+#tracew-menu{
+  position:fixed; z-index:600; padding:8px; min-width:200px;
+  background:var(--bg2); border:1px solid var(--line); border-radius:8px;
+  box-shadow:0 6px 24px rgba(0,0,0,.5); font-size:12px;
+}
+.tracew-title{color:var(--accent); font-weight:600; margin-bottom:6px;}
+.tracew-inputs{display:flex; gap:4px; align-items:center; margin-bottom:6px;}
+.tracew-inputs input{width:0; flex:1; min-width:0;}
+.tracew-inputs span{color:var(--fg-dim); font-size:10px;}
+.tracew-presets{display:grid; grid-template-columns:repeat(4,1fr); gap:4px;}
+.tracew-presets button{padding:3px 0; font-size:11px;}
+
 /* net name popup */
 #netname-quick{display:flex; flex-wrap:wrap; gap:5px; max-width:300px;}
 #netname-quick button{font-size:12px; padding:3px 9px;}

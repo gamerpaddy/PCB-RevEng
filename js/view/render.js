@@ -218,31 +218,46 @@ function drawWorld(ctx){
   // focused net's other-side trace (shown "across all layers") could paint over the
   // active-side trace the cursor is actually on.
   if (!View.hideTraces){
-    const aSide = effDrawSide();
-    const pass = (activeSidePass) => {
-      for (const t of State.traces){
-        // a focused net stays visible on every layer, even ones the active-side
-        // filter would normally hide — that is the "show the net across all layers" cue
-        const focused = selNet && selNet !== -1 && t.netId === selNet;
-        if (!traceVisible(t) && !focused) continue;
-        if ((t.side === aSide) !== activeSidePass) continue;
-        drawTrace(ctx, t, selNet);
-      }
-    };
-    pass(false);   // other layers first (behind)
-    pass(true);    // active-side traces on top
+    // resting state (no net focused) → merge-composite so overlapping/differing-width
+    // copper reads as one solid track instead of stacked translucent pills
+    if (!selNet){
+      renderTracesMerged(ctx);
+    } else {
+      const aSide = effDrawSide();
+      const pass = (activeSidePass) => {
+        for (const t of State.traces){
+          // a focused net stays visible on every layer, even ones the active-side
+          // filter would normally hide — that is the "show the net across all layers" cue
+          const focused = selNet && selNet !== -1 && t.netId === selNet;
+          if (!traceVisible(t) && !focused) continue;
+          if ((t.side === aSide) !== activeSidePass) continue;
+          drawTrace(ctx, t, selNet);
+        }
+      };
+      pass(false);   // other layers first (behind)
+      pass(true);    // active-side traces on top
+    }
   }
   // --- in-progress trace preview ---
   if (Tools.tracePts && Tools.tracePts.length){
+    const col = SIDE_COLORS[Tools.traceSide] || "#fff";
+    const buildPath = () => {
+      ctx.beginPath();
+      ctx.moveTo(Tools.tracePts[0].x, Tools.tracePts[0].y);
+      for (let i=1;i<Tools.tracePts.length;i++) ctx.lineTo(Tools.tracePts[i].x, Tools.tracePts[i].y);
+      if (Tools.cursor){ const cp = traceCursorPoint(); ctx.lineTo(cp.x, cp.y); }
+    };
     ctx.save();
-    ctx.strokeStyle = SIDE_COLORS[Tools.traceSide] || "#fff";
+    // translucent band at the ACTUAL width being drawn, so Shift+W changes are visible live
+    ctx.strokeStyle = col; ctx.globalAlpha = 0.3;
+    ctx.lineWidth = Tools.traceWidth || State.traceW;
+    ctx.lineCap = "round"; ctx.lineJoin = "round";
+    buildPath(); ctx.stroke();
+    // dashed centreline on top
+    ctx.globalAlpha = 1;
     ctx.lineWidth = 3/View.zoom;
     ctx.setLineDash([6/View.zoom, 4/View.zoom]);
-    ctx.beginPath();
-    ctx.moveTo(Tools.tracePts[0].x, Tools.tracePts[0].y);
-    for (let i=1;i<Tools.tracePts.length;i++) ctx.lineTo(Tools.tracePts[i].x, Tools.tracePts[i].y);
-    if (Tools.cursor){ const cp = traceCursorPoint(); ctx.lineTo(cp.x, cp.y); }
-    ctx.stroke();
+    buildPath(); ctx.stroke();
     ctx.restore();
   }
 

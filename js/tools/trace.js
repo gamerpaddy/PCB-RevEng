@@ -31,8 +31,13 @@ function traceDown(w, e){
     Tools.tracePts = [p];
     Tools.traceStartSnap = snap;
     Tools.traceSide = UI.copperSide();
+    // Starting on an existing trace adopts ITS width for this drawn trace, without
+    // touching State.traceW (your default for new traces). Shift+W overrides it live.
+    Tools.traceWidth = (snap && snap.attach && snap.attach.type === "trace" && snap.attach.trace.width)
+      ? snap.attach.trace.width : State.traceW;
     const netNote = snap && snap.netId ? " — continuing net “" + (getNet(snap.netId)?.name || "?") + "”" : "";
-    UI.setHint("Routing on " + SIDE_LABELS[Tools.traceSide] + netNote + " — click to add points, Enter/double-click to finish, Esc to cancel");
+    UI.setHint("Routing on " + SIDE_LABELS[Tools.traceSide] + netNote + " — " + UI.traceWidthLabel(Tools.traceWidth) +
+      " (Shift+W) · click to add points, Enter/double-click to finish, Esc to cancel");
   } else {
     Tools.tracePts.push(p);
     if (snap){ finishTrace(snap); return; } // ended on a pad/via → done
@@ -98,11 +103,39 @@ function completeTrace(pts, sSnap, endSnap, netId, opts){
     applyAttach(endSnap, netId);
   }
   const trace = weldOrCreateTrace(pts, Tools.traceSide, netId, sSnap, endSnap);
-  Tools.tracePts = null; Tools.traceStartSnap = null;
+  Tools.tracePts = null; Tools.traceStartSnap = null; Tools.traceWidth = null;
   UI.setHint(TOOL_HINTS.trace);
   UI.refreshNets(); requestRender();
   // join any touching same-side trace; different-net crossings prompt A→B/B→A (async)
   if (!opts.skipAttach) mergeIntersectingTraces(trace);
+}
+
+/* Change the drawing width MID-ROUTE without re-widthing the part already drawn.
+   A trace polyline has a single width, so we finalize the segment routed so far (at the
+   current width) as its own trace and keep routing from the last anchor at the NEW width —
+   the two share that anchor + net, so it reads as one continuous track of two widths.
+   With no segment placed yet (only the start point) we simply adopt the new width. */
+function changeTraceWidthWhileDrawing(px){
+  let pts = Tools.tracePts;
+  if (!pts) return;
+  pts = pts.filter((p,i) => !i || Math.hypot(p.x-pts[i-1].x, p.y-pts[i-1].y) > 0.5);
+  if (pts.length < 2){ Tools.tracePts = pts; Tools.traceWidth = px; requestRender(); return; }
+
+  const sSnap = Tools.traceStartSnap;
+  pushUndo("trace width change");
+  const netId = (sSnap && sSnap.netId) ? sSnap.netId : createNet().id;
+  applyAttach(sSnap, netId);
+  const committed = weldOrCreateTrace(pts, Tools.traceSide, netId, sSnap, null); // width = current Tools.traceWidth
+
+  // continue a fresh segment from the last anchor at the new width, wired to the committed copper
+  const end = pts[pts.length-1];
+  Tools.tracePts = [{ x:end.x, y:end.y }];
+  Tools.traceStartSnap = { x:end.x, y:end.y, netId, attach:{ type:"trace", trace:committed, seg:0 } };
+  Tools.traceWidth = px;
+  UI.refreshNets();
+  UI.setHint("Routing on " + SIDE_LABELS[Tools.traceSide] + " — " + UI.traceWidthLabel(px) +
+    " (Shift+W) · width changed; earlier part kept — click to add points, Enter/double-click to finish");
+  requestRender();
 }
 
 /* If a snap landed on (or very near) one END of an existing trace on `side`,
@@ -135,12 +168,19 @@ function appendToTraceEnd(t, end, extra){
    same-side trace — weld it into that trace so the result is one polyline.
    If BOTH ends meet two different traces, all three become a single trace. */
 function weldOrCreateTrace(pts, side, netId, sSnap, endSnap){
-  const sm = traceEndpointSnap(sSnap, side);
+  const drawW = Tools.traceWidth || State.traceW;
+  let sm = traceEndpointSnap(sSnap, side);
   let em = traceEndpointSnap(endSnap, side);
   if (sm && em && sm.trace === em.trace && sm.end === em.end) em = null; // same spot, ignore
+  // Only weld into a host of the SAME width. When you changed the width mid-draw (Shift+W),
+  // the drawn width differs from the host's — keep it a separate trace so the chosen width
+  // survives (it still shares the junction + net via mergeIntersectingTraces).
+  const wDiff = (m) => m && Math.abs((m.trace.width || State.traceW) - drawW) > 0.01;
+  if (wDiff(sm)) sm = null;
+  if (wDiff(em)) em = null;
 
   if (!sm && !em){
-    const t = { id:nextId(), side, netId, points: pts.map(p=>({x:p.x,y:p.y})), width: State.traceW };
+    const t = { id:nextId(), side, netId, points: pts.map(p=>({x:p.x,y:p.y})), width: drawW };
     State.traces.push(t);
     return t;
   }
@@ -493,7 +533,7 @@ function weldTraceAnchor(trace, vi, snap){
 }
 
 function cancelTrace(){
-  Tools.tracePts = null; Tools.traceStartSnap = null;
+  Tools.tracePts = null; Tools.traceStartSnap = null; Tools.traceWidth = null;
   UI.setHint(TOOL_HINTS.trace);
   requestRender();
 }
