@@ -419,42 +419,57 @@ function schPathNet(ctx, pts){
   }
 }
 
-/* fixed power symbols: a GND bar below / supply tick + name above each pin on a
-   power net — replaces their airwires entirely (KiCad-style, far fewer wires) */
+/* fixed power symbols: a GND bar / supply tick + name on each pin of a power net —
+   replaces their airwires entirely (KiCad-style, far fewer wires). The symbol
+   extends OUTWARD in the pin's own direction (honouring rotation/flips), so a
+   left/right pin gets a sideways-leading symbol instead of one drawn over the
+   part; the net-name text itself stays upright. */
 function schDrawPowerPins(ctx, comps, geo){
   const s = Sch.zoom;
   const showText = s > 2.2;
   ctx.lineWidth = Math.max(1, Math.min(2, 0.22 * s));
-  ctx.textAlign = "center";
   for (const c of comps){
+    const g = geo.get(c.id);
     for (let i = 0; i < c.pins.length; i++){
       const pin = c.pins[i];
       if (!pin.netId) continue;
       const net = getNet(pin.netId);
       if (!schIsPowerNet(net)) continue;
       const p = schPinPos(c, i, geo); if (!p) continue;
+      const pg = g && g.pins[i];
       const X = schX2S(p.x), Y = schY2S(p.y);
       const gnd = schIsGroundNet(net);
+      // pin angles point INWARD (toward the body) — the symbol leads the other way
+      const out = pg ? (schPinEffAngle(c, pg) + 180) % 360 : (gnd ? 270 : 90);
+      const dirX = Math.cos(out * Math.PI/180), dirY = -Math.sin(out * Math.PI/180);  // screen
       ctx.strokeStyle = ctx.fillStyle = gnd ? "#9aa3ad" : "#ff8080";
+      // draw in a frame where local +y = the outward direction
+      ctx.save();
+      ctx.translate(X, Y);
+      ctx.rotate(Math.atan2(-dirX, dirY));
       ctx.beginPath();
-      if (gnd){                       // lead down + 3 shrinking bars
-        ctx.moveTo(X, Y); ctx.lineTo(X, Y + 1.5*s);
-        ctx.moveTo(X - 1.1*s, Y + 1.5*s); ctx.lineTo(X + 1.1*s, Y + 1.5*s);
-        ctx.moveTo(X - 0.7*s, Y + 2.0*s); ctx.lineTo(X + 0.7*s, Y + 2.0*s);
-        ctx.moveTo(X - 0.3*s, Y + 2.5*s); ctx.lineTo(X + 0.3*s, Y + 2.5*s);
-        ctx.stroke();
-        if (showText && !/^gnd$/i.test(net.name)){
-          ctx.font = (1.1 * s) + "px sans-serif";
-          ctx.fillText(net.name, X, Y + 3.6*s);
-        }
-      } else {                        // lead up + supply bar + net name
-        ctx.moveTo(X, Y); ctx.lineTo(X, Y - 1.5*s);
-        ctx.moveTo(X - 0.9*s, Y - 1.5*s); ctx.lineTo(X + 0.9*s, Y - 1.5*s);
-        ctx.stroke();
-        if (showText){
-          ctx.font = (1.2 * s) + "px sans-serif";
-          ctx.fillText(net.name, X, Y - 2.1*s);
-        }
+      let tipMm;                       // where (along the lead) the text hangs off
+      if (gnd){                        // lead out + 3 shrinking bars
+        ctx.moveTo(0, 0); ctx.lineTo(0, 1.5*s);
+        ctx.moveTo(-1.1*s, 1.5*s); ctx.lineTo(1.1*s, 1.5*s);
+        ctx.moveTo(-0.7*s, 2.0*s); ctx.lineTo(0.7*s, 2.0*s);
+        ctx.moveTo(-0.3*s, 2.5*s); ctx.lineTo(0.3*s, 2.5*s);
+        tipMm = 3.3;
+      } else {                         // lead out + supply bar
+        ctx.moveTo(0, 0); ctx.lineTo(0, 1.5*s);
+        ctx.moveTo(-0.9*s, 1.5*s); ctx.lineTo(0.9*s, 1.5*s);
+        tipMm = 2.0;
+      }
+      ctx.stroke();
+      ctx.restore();
+      // upright net name just past the symbol tip, out in the same direction
+      if (showText && !(gnd && /^gnd$/i.test(net.name))){
+        ctx.font = (gnd ? 1.1 : 1.2) * s + "px sans-serif";
+        const tx = X + dirX * tipMm * s, ty = Y + dirY * tipMm * s;
+        if (out === 0){        ctx.textAlign = "left";   ctx.fillText(net.name, tx + 0.3*s, ty + 0.4*s); }
+        else if (out === 180){ ctx.textAlign = "right";  ctx.fillText(net.name, tx - 0.3*s, ty + 0.4*s); }
+        else if (out === 90){  ctx.textAlign = "center"; ctx.fillText(net.name, tx, ty - 0.3*s); }        // up
+        else {                 ctx.textAlign = "center"; ctx.fillText(net.name, tx, ty + 1.1*s); }        // down
       }
     }
   }
