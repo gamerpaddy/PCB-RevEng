@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PCB RevEng - Reverse Engineering Workbench</title>
 
-<link rel="stylesheet" href="css/style.css?v=73">
+<link rel="stylesheet" href="css/style.css?v=75">
 
 </head>
 <body>
@@ -154,6 +154,23 @@
           <button id="fp-cancel">Cancel</button>
           <button id="fp-ok" class="primary">Place (click on board)</button>
         </div>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- ======= QUICK-ADD POPUP (experimental) ======= -->
+  <dialog id="qa-dialog">
+    <div class="dlg-title">Quick add component</div>
+    <div class="qa-body">
+      <canvas id="qa-preview" width="240" height="180"></canvas>
+      <input id="qa-input" placeholder="e.g. 0805 10k · sot-23 npn · soic14 74hc130" autocomplete="off">
+      <div id="qa-info" class="qa-info"></div>
+      <div class="qa-keys">Arrows nudge · Shift rotate CW · Ctrl rotate CCW · Enter place · Esc cancel  <span style="opacity:.7">(keys editable in the hotkey editor)</span></div>
+      <div class="dlg-buttons">
+        <button id="qa-full" type="button" title="Open the full footprint selector">Full selector…</button>
+        <span style="flex:1"></span>
+        <button id="qa-cancel" type="button">Cancel</button>
+        <button id="qa-place" class="primary" type="button">Place</button>
       </div>
     </div>
   </dialog>
@@ -343,7 +360,7 @@
   <!-- ======= EXPERIMENTAL (LAB) ======= -->
   <dialog id="lab-dialog">
     <div class="dlg-title">&#128300; Experimental features</div>
-    <div class="panel-hint" style="max-width:380px;margin-bottom:10px">Work-in-progress tools. Each is off unless you switch it on and changes nothing else.</div>
+    <div class="panel-hint" style="max-width:380px;margin-bottom:10px">Work-in-progress tools. Each is off unless you switch it on and changes nothing else. <b>All settings here are remembered across sessions</b> (future experimental options will be too).</div>
 
     <div style="border:1px solid #2a3038;border-radius:6px;padding:10px;margin-bottom:10px">
       <label style="display:flex;align-items:center;gap:8px;font-weight:600">
@@ -355,6 +372,13 @@
         <input type="number" id="lab-viaconn-max" min="0" max="9" step="1" value="1" style="width:56px">
         <label style="width:auto">connection(s)</label>
       </div>
+    </div>
+
+    <div style="border:1px solid #2a3038;border-radius:6px;padding:10px;margin-bottom:10px">
+      <label style="display:flex;align-items:center;gap:8px;font-weight:600">
+        <input type="checkbox" id="lab-quickadd"> Quick-add components (component tool)
+      </label>
+      <div class="panel-hint" style="margin:6px 0 0">With the component tool active (C), clicking the board opens a small popup where you type the part (e.g. <b>0805 10k</b>, <b>sot-23 npn</b>) instead of using the footprint selector.</div>
     </div>
 
     <div style="border:1px solid #2a3038;border-radius:6px;padding:10px;margin-bottom:10px">
@@ -561,18 +585,18 @@
 <script src="js/view/core.js?v=89"></script>
 <script src="js/view/geom.js?v=89"></script>
 <script src="js/view/hittest.js?v=89"></script>
-<script src="js/view/render.js?v=97"></script>
+<script src="js/view/render.js?v=99"></script>
 <script src="js/view/draw.js?v=96"></script>
 <script src="js/view/overlays.js?v=89"></script>
 <script src="js/layerstack.js?v=55"></script>
-<script src="js/tools/core.js?v=119"></script>
+<script src="js/tools/core.js?v=121"></script>
 <script src="js/tools/select.js?v=112"></script>
 <script src="js/tools/trace.js?v=116"></script>
 <script src="js/tools/via.js?v=116"></script>
 <script src="js/tools/checker.js?v=111"></script>
-<script src="js/tools/ops.js?v=114"></script>
+<script src="js/tools/ops.js?v=116"></script>
 <script src="js/align.js?v=60"></script>
-<script src="js/keymap.js?v=58"></script>
+<script src="js/keymap.js?v=60"></script>
 <script src="js/resolver.js?v=49"></script>
 <script src="js/netlist.js?v=70"></script>
 <script src="js/eagle.js?v=4"></script>
@@ -585,11 +609,12 @@
 <script src="js/ui/parts.js?v=103"></script>
 <script src="js/ui/inspector.js?v=111"></script>
 <script src="js/ui/dialogs.js?v=105"></script>
-<script src="js/ui/misc.js?v=105"></script>
+<script src="js/ui/misc.js?v=106"></script>
 <script src="js/kicadsearch.js?v=51"></script>
 <script src="js/fpdialog.js?v=57"></script>
+<script src="js/quickadd.js?v=6"></script>
 <script src="js/autosave.js?v=53"></script>
-<script src="js/main.js?v=110"></script>
+<script src="js/main.js?v=114"></script>
 
 </body>
 </html>

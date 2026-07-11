@@ -49,6 +49,11 @@ const KeyActions = [
   { id:"file.bom",       label:"BOM editor",                    def:"",       btn:"#btn-bom",        run:clickBtn("#btn-bom") },
   { id:"layer.add",      label:"Add image layer",               def:"",       btn:"#btn-add-layer",  run:clickBtn("#btn-add-layer") },
   { id:"layer.addurl",   label:"Add image from URL",            def:"",       btn:"#btn-add-url",    run:clickBtn("#btn-add-url") },
+  // Quick-add popup (experimental) — used only while that dialog is open; defaults are a
+  // bare-modifier tap / Enter so they don't clash with typing the part name in the field
+  { id:"quickadd.rotcw", label:"Quick-add: rotate clockwise",     def:"Shift",   local:true, run:()=>{ if (QuickAdd.active) QuickAdd.rotate(90); } },
+  { id:"quickadd.rotccw",label:"Quick-add: rotate counter-clockwise", def:"Control", local:true, run:()=>{ if (QuickAdd.active) QuickAdd.rotate(-90); } },
+  { id:"quickadd.place", label:"Quick-add: place component",      def:"Enter",   local:true, run:()=>{ if (QuickAdd.active) QuickAdd.place(); } },
   // NB: Undo/Redo are intentionally NOT here — they're fixed to Ctrl+Z / Ctrl+Y in
   // wireKeyboard (main.js) and can't be rebound, so they don't belong in the hotkey editor.
 ];
@@ -97,7 +102,23 @@ const Keymap = {
   },
 };
 
-/* normalize a KeyboardEvent into a binding key string */
+/* normalize a KeyboardEvent into a base (modifier-insensitive) binding key string */
 function normKey(e){
   return e.key.length === 1 ? e.key.toUpperCase() : e.key;
 }
+
+/* a modifier-aware key string: pure modifiers → "Shift"/"Control"/"Alt"; otherwise a
+   prefix like "Ctrl+", "Alt+", "Shift+" ahead of the base key (e.g. "Shift+K"). Used so
+   the hotkey editor can bind bare modifiers and combos in addition to plain keys. */
+function comboKey(e){
+  const base = normKey(e);
+  if (["Shift","Control","Alt","Meta"].includes(base)) return base;
+  let pre = "";
+  if (e.ctrlKey || e.metaKey) pre += "Ctrl+";
+  if (e.altKey) pre += "Alt+";
+  if (e.shiftKey) pre += "Shift+";
+  return pre + base;
+}
+
+/* is this binding string a bare modifier? (fired on tap, not as a global action) */
+function isModifierKey(k){ return k === "Shift" || k === "Control" || k === "Alt"; }

@@ -359,6 +359,10 @@ function drawWorld(ctx){
     ctx.restore();
   }
 
+  // NB: the quick-add ghost is NOT drawn on the board — its popup samples this canvas as a
+  // crop, so drawing the ghost here would double-expose it (and lag a frame while nudging).
+  // The footprint is drawn only inside the popup preview (quickadd.js QuickAdd.render).
+
   // --- measure overlay ---
   if (Tools.measureA && Tools.cursor){
     const a = Tools.measureA, b = Tools.measureB || Tools.cursor;

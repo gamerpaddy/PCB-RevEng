@@ -110,34 +110,54 @@ UI.buildKeysList = () => {
     box.querySelectorAll(".key-btn").forEach(b => b.classList.remove("listening"));
     btn.classList.add("listening");
     btn.querySelector("kbd").textContent = "press a key…";
-    const capture = (e) => {
-      e.preventDefault(); e.stopPropagation();
-      if (["Shift","Control","Alt","Meta"].includes(e.key)) return; // wait for a real key
-      window.removeEventListener("keydown", capture, true);
+    UI._captureKey((key) => {
       btn.classList.remove("listening");
-      if (e.key === "Escape"){ UI.buildKeysList(); return; }
-      const key = normKey(e);
-      if (e.ctrlKey || e.metaKey || e.altKey || RESERVED_KEYS.includes(key) || /^[0-9]$/.test(key)){
-        UI.toast("That key is reserved");
-        UI.buildKeysList();
-        return;
+      if (UI._applyBinding(btn.dataset.id, key)){
+        UI.updateHotkeyHints(); UI.buildHelp(); UI.refreshInspector();
       }
-      // already taken by another action → confirm before stealing it
-      const owner = Keymap.actionForKey(key);
-      if (owner && owner.id !== btn.dataset.id &&
-          !confirm("“" + key + "” is already the hotkey for “" + owner.label + "”.\n\n" +
-                   "OK = overwrite (it becomes unbound)\nCancel = keep it")){
-        UI.buildKeysList();   // aborted — restore the row, no change
-        return;
-      }
-      Keymap.bind(btn.dataset.id, key);
       UI.buildKeysList();
-      UI.updateHotkeyHints();
-      UI.buildHelp();
-      UI.refreshInspector();
-    };
-    window.addEventListener("keydown", capture, true);
+    });
   }));
+};
+
+/* Capture the next hotkey the user presses, resolving:
+   · a bare modifier (Shift / Ctrl / Alt) pressed & released alone → "Shift"/"Control"/"Alt"
+   · a modifier + key combo → "Shift+K", "Ctrl+Alt+P", …
+   · a plain key → "K", "F2", …
+   Esc cancels (→ null). Validates the base key against RESERVED_KEYS. */
+UI._captureKey = (onKey) => {
+  let modDown = null;   // a lone modifier currently held
+  const done = (key) => {
+    window.removeEventListener("keydown", kd, true);
+    window.removeEventListener("keyup", ku, true);
+    onKey(key);
+  };
+  const kd = (e) => {
+    e.preventDefault(); e.stopPropagation();
+    if (e.key === "Escape"){ done(null); return; }
+    if (["Shift","Control","Alt","Meta"].includes(e.key)){ modDown = (e.key === "Meta") ? "Control" : e.key; return; }
+    modDown = null;   // a real key ends any pending bare-modifier tap
+    const base = normKey(e);
+    if (RESERVED_KEYS.includes(base) || /^[0-9]$/.test(base)){ UI.toast("That key is reserved"); done(null); return; }
+    done(comboKey(e));
+  };
+  const ku = (e) => {
+    const m = (e.key === "Meta") ? "Control" : e.key;
+    if (modDown && m === modDown){ modDown = null; done(m); }   // modifier tapped alone
+  };
+  window.addEventListener("keydown", kd, true);
+  window.addEventListener("keyup", ku, true);
+};
+
+/* confirm/steal + bind a resolved key to an action id; returns true if it was applied */
+UI._applyBinding = (id, key) => {
+  if (key === null) return false;   // cancelled
+  const owner = Keymap.actionForKey(key);
+  if (owner && owner.id !== id &&
+      !confirm("“" + key + "” is already the hotkey for “" + owner.label + "”.\n\n" +
+               "OK = overwrite (it becomes unbound)\nCancel = keep it")) return false;
+  Keymap.bind(id, key);
+  return true;
 };
 
 /* refresh every place a binding is shown after it changes */
@@ -155,29 +175,13 @@ UI.afterHotkeyChange = (msg) => {
 UI.captureHotkey = (id) => {
   const a = KeyActions.find(k => k.id === id);
   if (!a) return;
-  UI.toast("Press a key for “" + a.label + "”   (Esc cancels)");
-  const capture = (e) => {
-    e.preventDefault(); e.stopPropagation();
-    if (["Shift","Control","Alt","Meta"].includes(e.key)) return;   // wait for a real key
-    window.removeEventListener("keydown", capture, true);
-    if (e.key === "Escape") return;
-    const key = normKey(e);
-    if (e.ctrlKey || e.metaKey || e.altKey || RESERVED_KEYS.includes(key) || /^[0-9]$/.test(key)){
-      UI.toast("That key is reserved"); return;
-    }
-    // already taken by another action → confirm before stealing it
-    const owner = Keymap.actionForKey(key);
-    if (owner && owner.id !== id &&
-        !confirm("“" + key + "” is already the hotkey for “" + owner.label + "”.\n\n" +
-                 "OK = overwrite (it becomes unbound)\nCancel = keep it")){
-      UI.toast("Cancelled — “" + owner.label + "” keeps " + key);
-      return;
-    }
-    Keymap.bind(id, key);
-    UI.afterHotkeyChange("“" + a.label + "” → " + key +
-      (owner && owner.id !== id ? "  (was “" + owner.label + "”)" : ""));
-  };
-  window.addEventListener("keydown", capture, true);
+  UI.toast("Press a key for “" + a.label + "”   (modifiers OK · Esc cancels)");
+  UI._captureKey((key) => {
+    const owner = key !== null ? Keymap.actionForKey(key) : null;
+    if (UI._applyBinding(id, key))
+      UI.afterHotkeyChange("“" + a.label + "” → " + key +
+        (owner && owner.id !== id ? "  (was “" + owner.label + "”)" : ""));
+  });
 };
 
 /* right-click menu on a bindable toolbar button: set / change / clear its hotkey */

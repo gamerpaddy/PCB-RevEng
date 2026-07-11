@@ -3,7 +3,11 @@
 
 /* ---------------- component tool ---------------- */
 function componentDown(w, e){
-  if (!Tools.pending){ UI.openFootprintDialog(); return; }
+  // no footprint armed → either the experimental quick-add popup (if enabled) or the selector
+  if (!Tools.pending){
+    if (QuickAdd.enabled()) QuickAdd.open(w); else UI.openFootprintDialog();
+    return;
+  }
   const p = Tools.pending;
   const fp = generateFootprint(p.fpId, p.fpParams);
   // no components stacked on the same spot (same side)

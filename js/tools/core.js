@@ -54,7 +54,7 @@ const TOOL_HINTS = {
   select:    "Click to select · drag to move · R rotate · B flip side · Del delete · double-click pin to name net",
   component: "Click to place · R rotate · B side · Esc cancel · C reopens footprint dialog",
   trace:     "Click pins/points to route · Enter/double-click finish · Esc cancel · starts & ends snap to pads/vias",
-  via:       "Click = via (reuses last net) · Shift-click = fresh via · Alt-click = PTH · double-click = layer span (blind/buried)",
+  via:       "Click = via (reuses last net) · Shift-click = fresh via · Alt-click = PTH · double-click = layer span (blind/buried) · press the via key again to probe the net under the cursor",
   cut:       "Click on a trace to cut it in two — disconnected halves get separate nets",
   note:      "Click to drop a sticky note · type its text in the inspector · in Select, drag to move / double-click to edit",
   align:     "Drag active layer to move · Alt+wheel scale · “Align” button = 4-point skew-correcting fit · Rotate tool = free/level rotation",
@@ -93,7 +93,9 @@ function setTool(name){
   View.canvas.style.cursor = toolCursor(name);
   UI.setStatusTool(name);
   UI.setHint(TOOL_HINTS[name] || "");
-  if (name === "component" && !Tools.pending) UI.openFootprintDialog();
+  // arming the component tool opens the footprint selector — unless quick-add is enabled,
+  // where the selector only appears on click (via componentDown → QuickAdd)
+  if (name === "component" && !Tools.pending && !QuickAdd.enabled()) UI.openFootprintDialog();
   UI.refreshInspector();   // reflect tool-specific panels (e.g. via-tool defaults) when nothing is selected
   requestRender();
 }

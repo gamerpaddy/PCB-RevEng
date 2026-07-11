@@ -30,6 +30,7 @@ window.addEventListener("DOMContentLoaded", () => {
   wirePanelResizer("#right-resizer", "#right-panel", "pcbreveng.inspW", "right");
   wirePanelResizer("#left-resizer",  "#left-panel",  "pcbreveng.leftW",  "left");
   Resolver.wire();
+  QuickAdd.wire();
   UI.wireFpSearch();
   UI.wireNetSearch();
   UI.wireNetAutocomplete();
@@ -699,9 +700,18 @@ function wireKeyboard(){
       return;
     }
 
-    // rebindable actions first
-    const act = Keymap.actionForKey(normKey(e));
-    if (act){ act.run(e); return; }
+    // rebindable actions first. Prefer an exact modifier combo (e.g. "Shift+K"); fall back
+    // to the base key so shift-reading actions (R = rotate, Shift+R = 15°) still work.
+    if (["Shift","Control","Alt","Meta"].includes(e.key)){ /* lone modifier: never a global action */ }
+    else {
+      // exact modifier combo first (e.g. "Shift+K"), else the base key; skip `local` actions
+      // (context-only bindings like quick-add's, handled inside their own dialog)
+      const pick = (k) => { const a = Keymap.actionForKey(k); return (a && !a.local) ? a : null; };
+      const act = pick(comboKey(e)) || pick(normKey(e));
+      // preventDefault so a hotkey that focuses an input (e.g. N → net-name prompt) doesn't
+      // also leak its character into that field
+      if (act){ e.preventDefault(); act.run(e); return; }
+    }
 
     // arrow keys pan the view (Shift = half a screen per press). Handled AFTER the
     // rebindable actions so a user-assigned arrow binding wins over panning.
@@ -861,17 +871,33 @@ function wireDialogs(){
 
 /* Experimental features dialog. Every option here is off by default and only mutates its own
    View flags, so leaving it untouched changes nothing. */
+/* every experimental setting is remembered across sessions in localStorage under a
+   pcbreveng.lab.* key — add future toggles to this same retained scheme. */
+const LAB_LS = { viaHi:"pcbreveng.lab.viaHi", viaMax:"pcbreveng.lab.viaMax" };
+function labRestore(){
+  try {
+    View.labViaHi  = localStorage.getItem(LAB_LS.viaHi) === "on";
+    const m = parseInt(localStorage.getItem(LAB_LS.viaMax), 10);
+    if (isFinite(m)) View.labViaMax = Math.max(0, Math.min(9, m));
+  } catch(e){}
+}
 function wireLab(){
   const chk = $("#lab-viaconn"), maxIn = $("#lab-viaconn-max");
+  labRestore();
+  chk.checked = !!View.labViaHi; maxIn.value = View.labViaMax;
   const apply = () => {
     View.labViaHi  = chk.checked;
     View.labViaMax = Math.max(0, Math.min(9, parseInt(maxIn.value, 10) || 0));
+    try { localStorage.setItem(LAB_LS.viaHi, chk.checked ? "on" : "off");
+          localStorage.setItem(LAB_LS.viaMax, String(View.labViaMax)); } catch(e){}
     requestRender();
   };
-  $("#btn-lab").addEventListener("click", ()=>{ chk.checked = !!View.labViaHi; $("#lab-dialog").showModal(); });
+  const qa = $("#lab-quickadd");
+  $("#btn-lab").addEventListener("click", ()=>{ chk.checked = !!View.labViaHi; maxIn.value = View.labViaMax; qa.checked = QuickAdd.enabled(); $("#lab-dialog").showModal(); });
   $("#lab-close").addEventListener("click", ()=> $("#lab-dialog").close());
   chk.addEventListener("change", apply);
   maxIn.addEventListener("input", apply);
+  qa.addEventListener("change", ()=>{ try{ localStorage.setItem("pcbreveng.quickAdd", qa.checked?"on":"off"); }catch(e){} });
 
   // clear/remove-all: bulk-delete every object of the ticked kinds (undoable)
   $("#lab-clear-go").addEventListener("click", () => {
