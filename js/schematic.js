@@ -970,7 +970,10 @@ function schUpdateEdgeScroll(p){
 function schEdgeTick(){
   Sch._edgeRAF = 0;
   const v = Sch._edgeVel, p = Sch._lastP;
-  if (!schEdgeScrollAllowed() || !v || !p) return;
+  // stop the moment the cursor is no longer inside the canvas (pointermove stops
+  // firing once it leaves, so the tick must re-check the last known point itself)
+  if (!schEdgeScrollAllowed() || !v || !p ||
+      p.x < 0 || p.x > Sch.width || p.y < 0 || p.y > Sch.height) return;
   Sch.panX += v.x; Sch.panY += v.y;
   // re-drive the interaction from the stationary cursor so the dragged thing tracks it
   Sch.onMove(p, Sch._lastEvt || {});
@@ -986,6 +989,14 @@ function schStopEdgeScroll(){
 /* pointer-move core, callable from both the event handler and the edge-scroll tick */
 Sch.onMove = (p, e) => {
   const mx = schS2X(p.x), my = schS2Y(p.y);
+
+  // an active pan (wheel-click / Space) works in EVERY mode, including wire mode
+  if (Sch.drag && Sch.drag.kind === "pan"){
+    Sch.panX = Sch.drag.px + (p.x - Sch.drag.sx);
+    Sch.panY = Sch.drag.py + (p.y - Sch.drag.sy);
+    Sch.render();
+    return;
+  }
 
   if (Sch.mode === "wire"){
     const pin = schFindPin(p.x, p.y);
@@ -1003,12 +1014,6 @@ Sch.onMove = (p, e) => {
 
   const d = Sch.drag;
   if (d){
-    if (d.kind === "pan"){
-      Sch.panX = d.px + (p.x - d.sx);
-      Sch.panY = d.py + (p.y - d.sy);
-      Sch.render();
-      return;
-    }
     if (d.kind === "marquee"){
       d.moved = true;
       d.x = mx; d.y = my;
@@ -1210,6 +1215,14 @@ Sch.wire = () => {
     Sch._lastP = p; Sch._lastEvt = e;
     Sch.onMove(p, e);
     schUpdateEdgeScroll(p);
+  });
+
+  // no pointer capture in wire mode → move events stop at the canvas border; kill the
+  // auto-pan (and invalidate the stale last point) the moment the cursor leaves
+  cv.addEventListener("pointerleave", () => {
+    Sch._lastP = null;
+    schStopEdgeScroll();
+    if (Sch.hotPin){ Sch.hotPin = null; Sch.requestRender(); }
   });
 
   const endDrag = (e) => {
