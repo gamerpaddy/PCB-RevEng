@@ -17,6 +17,8 @@ Plain HTML + CSS + vanilla JS. No build step, no CDN, no server-side code.
 
 ![Trace routing close-up](images/xray-closeup.png)
 
+<img width="1906" height="1277" alt="firefox_oWt9LO7s4P" src="https://github.com/user-attachments/assets/ad96aaaf-efe0-439c-b3c6-83f26679bc34" />
+<img width="713" height="686" alt="firefox_xeYeZYlMq8" src="https://github.com/user-attachments/assets/4b83a3a1-7eac-4828-a9da-56b1b1b5b0af" />
 
 ## Running
 
@@ -87,6 +89,7 @@ want to keep or move between machines.
    part becomes a boxed symbol with global-label nets, since Eeschema can't import
    netlists), CSV, or JSON. `Ctrl+S` saves the whole project (including images) as
    one JSON file; reopen it with `Ctrl+O` or drag & drop.
+<img width="325" height="250" alt="claude_HoQ5RjeWJb" src="https://github.com/user-attachments/assets/f04503d1-2443-460e-9c4d-2aa01a4e142c" />
 
 Press `?` in the app for the full hotkey list. All single-key shortcuts are
 rebindable via the ⌨ **Hotkey editor** in the top bar (saved in the browser).
@@ -147,6 +150,7 @@ automatically (and off again when you leave it, unless you'd enabled it by hand)
 **Options** gained a configurable **autosave interval** (never runs mid-drag; can be
 switched off) and a **non-selected opacity** slider for how far the rest of the board
 fades when a net is focused.
+<img width="1126" height="771" alt="firefox_7J42z4hYx8" src="https://github.com/user-attachments/assets/df5ca5c1-3e36-4308-9b16-3523cea9397f" />
 
 **More interaction.** **Right-click** anything for a context menu whose options
 match what's under the cursor - right-clicking a *pad* offers pad actions (set/clear
