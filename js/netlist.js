@@ -787,9 +787,14 @@ function exportKiCadSch(mode){
     const g = geo.get(c.id);
     const p = pos.get(c.id) || { x: 30, y: 30 };
     const X = p.x, Y = p.y;
-    const rot = schRotOf(c);   // manual rotation from the Schematic tab (R key)
+    let rot = schRotOf(c);   // manual rotation from the Schematic tab (R key)
+    // manual flips (X/Y in the Schematic tab). Both flips together = a 180° rotation;
+    // a single flip maps to KiCad's instance mirror.
+    let fh = !!c.schFlipH, fv = !!c.schFlipV;
+    if (fh && fv){ rot = (rot + 180) % 360; fh = fv = false; }
+    const mirror = fh ? " (mirror y)" : fv ? " (mirror x)" : "";
     const sym = "REV_" + c.ref + "_" + c.id;
-    L.push('  (symbol (lib_id "reveng:' + sym + '") (at ' + F(X) + ' ' + F(Y) + ' ' + rot + ') (unit 1) (in_bom yes) (on_board yes)');
+    L.push('  (symbol (lib_id "reveng:' + sym + '") (at ' + F(X) + ' ' + F(Y) + ' ' + rot + ')' + mirror + ' (unit 1) (in_bom yes) (on_board yes)');
     L.push('    (uuid ' + _uuid() + ')');
     L.push('    (property "Reference" "' + _schEsc(c.ref) + '" (at ' + F(X) + ' ' + F(Y-g.h/2-2.54) + ' 0) (effects (font (size 1.27 1.27))))');
     L.push('    (property "Value" "' + _schEsc(c.value || c.part || "~") + '" (at ' + F(X) + ' ' + F(Y+g.h/2+2.54) + ' 0) (effects (font (size 1.27 1.27))))');
@@ -802,8 +807,11 @@ function exportKiCadSch(mode){
       const net = getNet(p2.netId);
       if (!net) continue;
       const pg = g.pins[i] || { x: -g.w/2-2.54, y: 0, angle: 0 };
-      const rp = schRot2d(pg.x, pg.y, rot);            // pin offset follows the instance rotation
-      const eff = ((pg.angle || 0) + rot) % 360;       // effective pin direction after rotation
+      const rp = schRot2d(pg.x * (fh?-1:1), pg.y * (fv?-1:1), rot);  // pin offset follows flips + rotation
+      let effA = pg.angle || 0;
+      if (fh) effA = 180 - effA;
+      if (fv) effA = -effA;
+      const eff = ((effA + rot) % 360 + 360) % 360;    // effective pin direction after flips + rotation
       const px = X + rp.x;
       const py = Y - rp.y; // schematic y axis points down
       const labAngle = (eff + 180) % 360;              // label points away from the body

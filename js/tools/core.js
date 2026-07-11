@@ -257,6 +257,11 @@ function onPointerUp(e){
       cancelUndo(); // no-op drag, drop the snapshot (restores redo — a click mustn't wipe it)
       // a shift-click that never dragged a single-pad part falls back to pin multi-select
       if (d.shiftPin){ UI.togglePinSel(d.shiftPin.comp, d.shiftPin.pinIdx); requestRender(); }
+      // shift-click (no drag) on a component body → show it in the Schematic tab
+      else if (d.kind === "move-comp" && d.detach && typeof SchEnabled === "function" && SchEnabled()){
+        EditorTabs.show("schematic");
+        Sch.focusComp(d.comp);
+      }
       // an align-tool click that never dragged drops the next 4-point marker
       if (d.alignClick){ placeAlignMarker(d.alignClick.x, d.alignClick.y, d.alignClick.thumb); }
     }
@@ -465,7 +470,7 @@ function edgeScrollAllowed(){
   if (!UI.edgeScrollOn()) return false;
   if (Tools.drag) return !!EDGE_SCROLL_KINDS[Tools.drag.kind];
   if (Tools.name === "component") return !!Tools.pending;   // ghost part about to drop
-  if (Tools.name === "trace")     return !!Tools.tracePts;  // mid-route, rubber-band tracks cursor
+  if (Tools.name === "trace")     return true;              // whenever the trace tool is armed (not just mid-route)
   if (Tools.name === "via")       return true;              // via drops wherever the cursor lands
   return false;
 }

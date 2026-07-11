@@ -268,8 +268,14 @@ dialog::backdrop{background:rgba(0,0,0,.55);}
 .dlg-row{display:flex; align-items:center; gap:8px; margin-bottom:8px;}
 
 /* quick-add popup (experimental) */
-#qa-dialog{ width:460px; max-width:94vw; }
-#qa-dialog .qa-body{display:flex; flex-direction:column; gap:8px;}
+#qa-dialog{ width:840px; max-width:96vw; }
+#qa-dialog .qa-wrap{display:flex; gap:12px; align-items:stretch;}
+#qa-dialog .qa-body{display:flex; flex-direction:column; gap:8px; flex:1 1 auto; min-width:0;}
+.qa-side{width:170px; flex:0 0 auto; display:flex; flex-direction:column; gap:6px; min-height:0;}
+.qa-side-h{font-size:10px; text-transform:uppercase; letter-spacing:.04em; color:#8b96a5;}
+.qa-side-list{display:flex; flex-direction:column; gap:3px; overflow-y:auto; max-height:520px;}
+.qa-side-list button{text-align:left; padding:3px 7px; font-size:11.5px;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
 #qa-preview{width:100%; height:340px; border:1px solid #38424f; border-radius:5px; background:#0d0f12;}
 #qa-input{font-size:14px; padding:6px 8px;}
 .qa-info{min-height:16px; font-size:12px; color:#8b96a5;}
@@ -333,6 +339,16 @@ dialog::backdrop{background:rgba(0,0,0,.55);}
 .fp-pad-tune label{display:flex; align-items:center; gap:6px; font-size:12px; color:var(--fg-dim);}
 .fp-pad-tune input{flex:1;}
 #fp-preview{background:#0d0f12; border:1px solid var(--line); border-radius:6px;}
+/* Custom (imported) footprints + placed-freestyle quick-select */
+.fp-custom-box{margin-top:6px; padding:7px 9px; display:flex; flex-direction:column; gap:4px;
+  background:#1c222b; border:1px solid #38424f; border-left:3px solid var(--accent2); border-radius:4px;
+  max-height:260px; overflow-y:auto;}
+.fp-custom-box>button{text-align:left; padding:4px 8px;}
+.fp-custom-row{display:flex; gap:4px;}
+.fp-custom-row button:first-child{flex:1 1 auto; text-align:left; padding:3px 8px; min-width:0;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.fp-custom-row button.active{background:var(--accent); border-color:var(--accent); color:#08233f;}
+.fp-custom-del{flex:0 0 auto; padding:3px 7px; color:#e08585;}
 
 /* 3D layer-stack viewer */
 #stack3d-dialog{max-width:none;}
@@ -470,6 +486,8 @@ dialog::backdrop{background:rgba(0,0,0,.55);}
   background:var(--bg2); border-bottom:1px solid var(--line); font-size:12px;
 }
 #sch-toolbar .panel-hint{margin:0; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+#sch-toolbar .sch-chk{display:flex; align-items:center; gap:4px; color:var(--fg-dim); cursor:pointer; white-space:nowrap;}
+#sch-toolbar .sch-chk input{margin:0;}
 #sch-canvas-wrap{flex:1 1 auto; position:relative; min-height:0;}
 #sch-canvas{position:absolute; inset:0; width:100%; height:100%; cursor:default;}
 

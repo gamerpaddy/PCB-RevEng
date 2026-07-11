@@ -4,7 +4,7 @@
 Footprints.register({
   id:"sip", name:"SIP / pin header 1×N", prefix:"J",
   params:[{key:"pins",label:"Pins",type:"int",def:4,min:1,max:40,step:1},
-          {key:"pitch",label:"Pitch mm",type:"select",def:"2.54",options:["1.27","2.0","2.54","3.96","5.0"]}],
+          {key:"pitch",label:"Pitch mm",type:"select",def:"2.54",options:["1.0","1.27","2.0","2.54","3.96","5.0"]}],
   gen(p){
     const n=p.pins, pt=parseFloat(p.pitch), pins=[];
     for (let i=0;i<n;i++) pins.push(_pin(i+1,(i-(n-1)/2)*pt,0,{shape:"circle",w:pt*0.55,h:pt*0.55}));
@@ -16,7 +16,7 @@ Footprints.register({
 Footprints.register({
   id:"header2", name:"Pin header 2×N (IDC)", prefix:"J",
   params:[{key:"pins",label:"Total pins",type:"int",def:10,min:2,max:80,step:2},
-          {key:"pitch",label:"Pitch mm",type:"select",def:"2.54",options:["1.27","2.0","2.54"]},
+          {key:"pitch",label:"Pitch mm",type:"select",def:"2.54",options:["1.0","1.27","2.0","2.54"]},
           {key:"numbering",label:"Numbering",type:"select",def:"Odd/Even (1-2)",
            options:["Odd/Even (1-2)","Sequential rows (1..N)"]}],
   gen(p){
@@ -46,6 +46,24 @@ Footprints.register({
     for (let i=0;i<n;i++) pins.push(_pin(i+1,(i-(n-1)/2)*pt,0,{shape:"circle",w:pt*0.45,h:pt*0.45}));
     return { label:"Terminal ×"+n+" P"+p.pitch, pins, body:{w:n*pt, h:pt*1.6},
       kicad:"TerminalBlock:TerminalBlock_bornier-"+n+"_P"+p.pitch+"mm" };
+  }
+});
+
+Footprints.register({
+  id:"fpc", name:"FPC / FFC socket 1×N (SMD)", prefix:"J",
+  params:[{key:"pins",label:"Pins",type:"int",def:20,min:4,max:80,step:1},
+          {key:"pitch",label:"Pitch mm",type:"select",def:"0.5",options:["0.3","0.5","1.0"]}],
+  gen(p){
+    const n=p.pins, pt=parseFloat(p.pitch), pins=[];
+    // signal pads: one SMD row (pad ≈ 0.6×pitch wide, connector-typical 1.3–1.8 mm long)
+    const padW = pt*0.6, padH = Math.max(1.3, pt*1.6);
+    for (let i=0;i<n;i++) pins.push(_pin(i+1,(i-(n-1)/2)*pt,-padH/2,{w:padW,h:padH,tht:false}));
+    // mechanical anchor tabs at both ends
+    const tabX = (n-1)/2*pt + pt + 1.0;
+    pins.push(_pin("MP1",-tabX, 1.2, {w:1.6,h:2.2,name:"MP",tht:false}));
+    pins.push(_pin("MP2", tabX, 1.2, {w:1.6,h:2.2,name:"MP",tht:false}));
+    return { label:"FPC 1×"+n+" P"+p.pitch, pins, body:{w:(n-1)*pt + 2*pt + 4, h:5.5},
+      kicad:"Connector_FFC-FPC:FFC-FPC_Generic_1x"+String(n).padStart(2,"0")+"-1MP_P"+parseFloat(p.pitch).toFixed(2)+"mm" };
   }
 });
 

@@ -53,7 +53,6 @@ const KeyActions = [
   { id:"file.open",      label:"Open project",                  def:"",       btn:"#btn-open",       run:clickBtn("#btn-open") },
   { id:"file.save",      label:"Save project",                  def:"",       btn:"#btn-save",       run:clickBtn("#btn-save") },
   { id:"file.export",    label:"Export",                        def:"",       btn:"#btn-export",     run:clickBtn("#btn-export") },
-  { id:"file.bom",       label:"BOM editor",                    def:"",       btn:"#btn-bom",        run:clickBtn("#btn-bom") },
   { id:"layer.add",      label:"Add image layer",               def:"",       btn:"#btn-add-layer",  run:clickBtn("#btn-add-layer") },
   { id:"layer.addurl",   label:"Add image from URL",            def:"",       btn:"#btn-add-url",    run:clickBtn("#btn-add-url") },
   // editor tabs (schematic.js) + schematic-pane buttons

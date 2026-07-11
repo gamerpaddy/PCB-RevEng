@@ -174,6 +174,65 @@ function buildFpParams(){
     box.appendChild(grp);
   }
 
+  // Custom (imported) category: import .kicad_mod files + manage the stored list
+  if (FPD.catId === "customfp"){
+    const grp = document.createElement("div");
+    grp.className = "fp-custom-box";
+    const imp = document.createElement("button");
+    imp.type = "button"; imp.textContent = "Import .kicad_mod…";
+    imp.title = "Import KiCad footprint files — they are retained in this browser and searchable in quick-add as custom:<name>";
+    imp.addEventListener("click", () => $("#file-customfp").click());
+    grp.appendChild(imp);
+    for (const f of CustomFPs.list()){
+      const row = document.createElement("div");
+      row.className = "fp-custom-row";
+      const b = document.createElement("button");
+      b.type = "button"; b.textContent = f.name; b.title = "Select " + f.name;
+      b.classList.toggle("active", FPD.params.name === f.name);
+      b.addEventListener("click", () => { FPD.params.name = f.name; buildFpParams(); });
+      const del = document.createElement("button");
+      del.type = "button"; del.textContent = "✕"; del.className = "fp-custom-del";
+      const used = CustomFPs.usedBy(f.name).length;
+      del.title = used ? "In use by " + used + " placed part" + (used>1?"s":"") + " — can't delete" : "Delete this custom footprint";
+      del.addEventListener("click", () => { if (CustomFPs.remove(f.name)){ UI.toast("Deleted custom footprint " + f.name); buildFpParams(); } });
+      row.appendChild(b); row.appendChild(del);
+      grp.appendChild(row);
+    }
+    if (!CustomFPs.list().length){
+      const hint = document.createElement("div");
+      hint.className = "panel-hint";
+      hint.textContent = "No custom footprints yet — import KiCad .kicad_mod files. Quick-add finds them via custom:<name>.";
+      grp.appendChild(hint);
+    }
+    box.appendChild(grp);
+  }
+
+  // Freestyle: quick-select from the freestyle parts already placed on the board —
+  // clicking copies that part's pad layout into the params (place a twin)
+  if (FPD.catId === "free"){
+    const placed = State.components.filter(c => c.fpId === "free" && c.fpParams && (c.fpParams.pinList || []).length);
+    if (placed.length){
+      const grp = document.createElement("div");
+      grp.className = "fp-custom-box";
+      const h = document.createElement("div");
+      h.className = "fp-pad-tune-h"; h.textContent = "Placed freestyle parts";
+      grp.appendChild(h);
+      for (const c of placed.slice(0, 30)){
+        const b = document.createElement("button");
+        b.type = "button";
+        b.textContent = c.ref + " · " + (c.fpParams.pinList.length) + " pads" + (c.value ? " · " + c.value : "");
+        b.title = "Copy " + c.ref + "'s pad layout as the new part";
+        b.addEventListener("click", () => {
+          FPD.params = { w: c.fpParams.w, h: c.fpParams.h, pinList: JSON.parse(JSON.stringify(c.fpParams.pinList)) };
+          $("#fp-value").value = c.value || ""; $("#fp-part").value = c.part || ""; $("#fp-kicad").value = c.kicad || "";
+          buildFpParams();
+        });
+        grp.appendChild(b);
+      }
+      box.appendChild(grp);
+    }
+  }
+
   // R/C/L chip: spell out the modifier-click → refdes mapping right in the dialog
   if (FPD.catId === "chip2"){
     const note = document.createElement("div");
@@ -245,6 +304,25 @@ function buildFpSymRow(fp){
     .join("");
   row.style.display = "";
 }
+
+/* custom-footprint import file input (Custom category's Import… button) */
+window.addEventListener("DOMContentLoaded", () => {
+  const inp = $("#file-customfp");
+  if (!inp) return;
+  inp.addEventListener("change", async () => {
+    let last = null, n = 0;
+    for (const f of inp.files){
+      try {
+        const entry = CustomFPs.importKicadMod(f.name, await f.text());
+        if (entry){ last = entry; n++; }
+      } catch(e){ UI.toast("Could not read " + f.name); }
+    }
+    inp.value = "";
+    if (!n) return;
+    UI.toast("Imported " + n + " custom footprint" + (n>1?"s":"") + " — quick-add: custom:" + last.name);
+    if ($("#fp-dialog").open && FPD.catId === "customfp"){ FPD.params.name = last.name; buildFpParams(); }
+  });
+});
 
 UI.confirmFootprint = () => {
   const fp = generateFootprint(FPD.catId, FPD.params);

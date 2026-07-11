@@ -362,6 +362,40 @@ function duplicateSelection(){
   requestRender();
 }
 
+/* ---------- clipboard (Ctrl+C / Ctrl+V) ----------
+   Copies the selected component; paste arms the component tool with a copy, so the
+   ghost sticks to the cursor and a click places it — the exact mechanics of placing
+   a new part (R rotates, B flips side, edge auto-scroll, Esc cancels). Nets are not
+   copied (same as Duplicate). */
+function copySelection(){
+  const c = UI.sel && UI.sel.comp;
+  if (!c){ UI.toast("Select a component to copy (traces/vias can't be copied)"); return; }
+  Tools.clipboard = {
+    fpId: c.fpId, fpParams: JSON.parse(JSON.stringify(c.fpParams || {})),
+    value: c.value || "", part: c.part || "", kicad: c.kicad || "",
+    symOverride: c.symOverride || null,
+    rot: c.rot || 0, side: c.side,
+    refPrefix: (/^([A-Za-z]+)/.exec(c.ref) || [,"U"])[1],
+  };
+  UI.toast("Copied " + c.ref + " — Ctrl+V to place a copy");
+}
+
+function pasteClipboard(){
+  const cb = Tools.clipboard;
+  if (!cb){ UI.toast("Clipboard is empty — Ctrl+C a component first"); return; }
+  if (typeof EditorTabs !== "undefined" && EditorTabs.current !== "visual") return;
+  Tools.pending = {
+    fpId: cb.fpId, fpParams: JSON.parse(JSON.stringify(cb.fpParams)),
+    ref: "", value: cb.value, part: cb.part, kicad: cb.kicad,
+    symOverride: cb.symOverride, refPrefix: cb.refPrefix,
+  };
+  Tools.ghostFp = generateFootprint(cb.fpId, Tools.pending.fpParams);
+  Tools.ghostRot = cb.rot;
+  Tools.ghostSide = cb.side;
+  setTool("component");
+  UI.setHint("Click to place the copied " + (Tools.ghostFp ? Tools.ghostFp.label : "part") + " — R rotate, B flip side, Esc cancel");
+}
+
 /* after a component move ends: warn when a pad now overlaps copper of another net */
 function checkMoveOverlaps(comp){
   if (!State.overlapCheck) return;

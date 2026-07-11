@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PCB RevEng - Reverse Engineering Workbench</title>
 
-<link rel="stylesheet" href="css/style.css?v=77">
+<link rel="stylesheet" href="css/style.css?v=78">
 
 </head>
 <body>
@@ -33,7 +33,6 @@
       <button id="btn-open"       title="Open project (.pcbrev.json) or import a board — EAGLE (.brd) / GENCAD (.cad)  [Ctrl+O]">Open</button>
       <button id="btn-save"       title="Save project  [Ctrl+S]">Save</button>
       <button id="btn-export"     title="Export netlist / BOM / schematic  [Ctrl+E]">Export</button>
-      <button id="btn-bom"        title="BOM editor — edit values, designators, footprints &amp; custom columns; changes apply to the parts on the board">BOM</button>
     </div>
 
     <div class="tb-group" id="toolbar">
@@ -148,9 +147,10 @@
       </select>
       <button id="sch-arrange-go" title="Re-place every symbol with the chosen auto-arrangement (undoable)">Apply</button>
       <button id="sch-fit" title="Zoom to fit all symbols">Fit</button>
-      <button id="sch-wire" title="Draw schematic wires  [W] — click a pin, click corners (snapped to 90°), end on a pin. Wires follow their pins when parts move. Esc exits.">Wire</button>
+      <button id="sch-wire" title="Draw schematic wires  [W] — start on a pin, click corners (snapped to 90°), end on a pin of the same net. Green = net fully wired, red = dangling / incomplete. R flips H/V-first while drawing. Esc exits.">Wire</button>
+      <label class="sch-chk" title="Show every connected pin's net name sticking out of the pin (faint). N pins a movable label to the hovered pin instead."><input type="checkbox" id="sch-autolabels" checked> Net labels</label>
       <button id="sch-export" title="Export the schematic (.kicad_sch) using this arrangement">Export…</button>
-      <span class="panel-hint" style="margin-left:12px">Drag symbols · R rotates · W draws wires · click a wire + Del removes it. Blue ratlines show which pins connect; GND/VCC pins get power symbols. Saved with the project (“Manual” in the export dialog).</span>
+      <span class="panel-hint" style="margin-left:12px">Drag symbols (drag empty = box select) · R rotate · X/Y flip · W wires · N net label · Shift-click = show on board · F1–F3 switch tabs. Saved with the project (“Manual” in the export dialog).</span>
     </div>
     <div id="sch-canvas-wrap"><canvas id="sch-canvas"></canvas></div>
   </div>
@@ -199,17 +199,27 @@
   <!-- ======= QUICK-ADD POPUP (experimental) ======= -->
   <dialog id="qa-dialog">
     <div class="dlg-title">Quick add component</div>
-    <div class="qa-body">
-      <canvas id="qa-preview" width="240" height="180"></canvas>
-      <input id="qa-input" placeholder="e.g. 0805 10k · sot23 npn 2n2222 · ic sot23 ref30 · to-220-5 · free 4x5" autocomplete="off">
-      <div id="qa-info" class="qa-info"></div>
-      <div id="qa-facts" class="qa-facts" style="display:none"></div>
-      <div class="qa-keys">Arrows nudge · Shift rotate CW · Ctrl rotate CCW · Enter place · Esc cancel  <span style="opacity:.7">(keys editable in the hotkey editor)</span></div>
-      <div class="dlg-buttons">
-        <button id="qa-full" type="button" title="Open the full footprint selector">Full selector…</button>
-        <span style="flex:1"></span>
-        <button id="qa-cancel" type="button">Cancel</button>
-        <button id="qa-place" class="primary" type="button">Place</button>
+    <div class="qa-wrap">
+      <div id="qa-hist" class="qa-side" title="Your last quick-adds — click to reuse">
+        <div class="qa-side-h">History</div>
+        <div id="qa-hist-list" class="qa-side-list"></div>
+      </div>
+      <div class="qa-body">
+        <canvas id="qa-preview" width="240" height="180"></canvas>
+        <input id="qa-input" placeholder="e.g. 0805 10k · sot23 npn 2n2222 · 1x5 · fpc32 p1 · custom:name" autocomplete="off">
+        <div id="qa-info" class="qa-info"></div>
+        <div id="qa-facts" class="qa-facts" style="display:none"></div>
+        <div class="qa-keys">Arrows nudge · Shift rotate CW · Ctrl rotate CCW · Enter place · Esc cancel  <span style="opacity:.7">(keys editable in the hotkey editor)</span></div>
+        <div class="dlg-buttons">
+          <button id="qa-full" type="button" title="Open the full footprint selector">Full selector…</button>
+          <span style="flex:1"></span>
+          <button id="qa-cancel" type="button">Cancel</button>
+          <button id="qa-place" class="primary" type="button">Place</button>
+        </div>
+      </div>
+      <div id="qa-examples" class="qa-side" title="Example queries — click to try">
+        <div class="qa-side-h">Examples</div>
+        <div id="qa-ex-list" class="qa-side-list"></div>
       </div>
     </div>
   </dialog>
@@ -634,18 +644,20 @@
   </dialog>
 
   <input type="file" id="file-images" accept="image/*" multiple hidden>
+  <input type="file" id="file-customfp" accept=".kicad_mod,.mod" multiple hidden>
   <input type="file" id="file-project" accept=".json,.pcbrev,.brd,.cad" hidden>
   <input type="file" id="file-options" accept=".json" hidden>
 </div>
 
 
-<script src="js/state.js?v=69"></script>
+<script src="js/state.js?v=70"></script>
 <script src="js/footprints/core.js?v=53"></script>
 <script src="js/footprints/passives.js?v=58"></script>
 <script src="js/footprints/discrete.js?v=50"></script>
-<script src="js/footprints/connectors.js?v=49"></script>
+<script src="js/footprints/connectors.js?v=50"></script>
 <script src="js/footprints/ics.js?v=50"></script>
-<script src="js/footprints/misc.js?v=55"></script>
+<script src="js/footprints/misc.js?v=56"></script>
+<script src="js/footprints/custom.js?v=1"></script>
 <script src="js/imagetiles.js?v=1"></script>
 <script src="js/view/core.js?v=89"></script>
 <script src="js/view/geom.js?v=89"></script>
@@ -654,16 +666,16 @@
 <script src="js/view/draw.js?v=96"></script>
 <script src="js/view/overlays.js?v=89"></script>
 <script src="js/layerstack.js?v=55"></script>
-<script src="js/tools/core.js?v=121"></script>
-<script src="js/tools/select.js?v=113"></script>
+<script src="js/tools/core.js?v=122"></script>
+<script src="js/tools/select.js?v=114"></script>
 <script src="js/tools/trace.js?v=117"></script>
 <script src="js/tools/via.js?v=116"></script>
 <script src="js/tools/checker.js?v=111"></script>
 <script src="js/tools/ops.js?v=116"></script>
 <script src="js/align.js?v=60"></script>
-<script src="js/keymap.js?v=63"></script>
+<script src="js/keymap.js?v=64"></script>
 <script src="js/resolver.js?v=49"></script>
-<script src="js/netlist.js?v=72"></script>
+<script src="js/netlist.js?v=73"></script>
 <script src="js/eagle.js?v=4"></script>
 <script src="js/easyeda.js?v=4"></script>
 <script src="js/gencad.js?v=5"></script>
@@ -676,11 +688,11 @@
 <script src="js/ui/dialogs.js?v=106"></script>
 <script src="js/ui/misc.js?v=108"></script>
 <script src="js/kicadsearch.js?v=51"></script>
-<script src="js/fpdialog.js?v=57"></script>
-<script src="js/quickadd.js?v=12"></script>
-<script src="js/schematic.js?v=3"></script>
+<script src="js/fpdialog.js?v=58"></script>
+<script src="js/quickadd.js?v=13"></script>
+<script src="js/schematic.js?v=4"></script>
 <script src="js/autosave.js?v=53"></script>
-<script src="js/main.js?v=116"></script>
+<script src="js/main.js?v=117"></script>
 
 </body>
 </html>

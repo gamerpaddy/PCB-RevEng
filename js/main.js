@@ -69,7 +69,6 @@ function wireToolbar(){
   $("#btn-save").addEventListener("click", saveProject);
   $("#btn-open").addEventListener("click", ()=> $("#file-project").click());
   $("#btn-export").addEventListener("click", ()=> UI.openExport());
-  $("#btn-bom").addEventListener("click", ()=> UI.openBomEditor());
   $("#btn-add-layer").addEventListener("click", ()=> $("#file-images").click());
   $("#btn-add-url").addEventListener("click", ()=> {
     const inp = $("#url-input");
@@ -631,6 +630,8 @@ function wireKeyboard(){
         case "z": e.preventDefault(); if (e.shiftKey ? redo() : undo()) afterHistory(); return;
         case "y": e.preventDefault(); if (redo()) afterHistory(); return;
         case "d": e.preventDefault(); duplicateSelection(); return;
+        case "c": e.preventDefault(); copySelection(); return;
+        case "v": e.preventDefault(); pasteClipboard(); return;
         case "f": e.preventDefault(); UI.openPartsDialog(); return;
         // Guard the browser's Ctrl+W (close tab) / Ctrl+T (new tab) so a mis-hit while
         // routing doesn't nuke the tab. preventDefault is best-effort (most browsers reserve

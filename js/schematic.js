@@ -1,12 +1,16 @@
 /* ===== schematic.js — editor tabs (Visual / Schematic / BOM) + schematic editor =====
    The Schematic tab (experimental, enabled in the Lab dialog) is an interactive
    arrangement editor over the SAME data the .kicad_sch exporter uses: symbols come
-   from schGeometry() (netlist.js), positions/rotation live on each component as
-   schX/schY (schematic mm) and schRot (R key, CCW 90° steps) — serialized/undone
-   with the component, exported as the "Manual" arrangement. Thin blue ratlines
-   (per-net MST) show which pins belong together; power nets (GND/VCC/+5V…) draw
-   as fixed power symbols instead of wires; W draws 90°-snapped schematic wires
-   (State.schWires) that follow their pins when parts move or rotate.
+   from schGeometry() (netlist.js), positions/rotation/flips live on each component as
+   schX/schY (schematic mm), schRot (R, CCW 90° steps) and schFlipH/schFlipV (X / Y) —
+   serialized/undone with the component, exported as the "Manual" arrangement.
+   All of this is SCHEMATIC-ONLY: nothing here touches the part's board x/y/rot/side.
+   Thin blue ratlines (per-net MST) show which pins belong together; power nets
+   (GND/VCC/+5V…) draw as fixed power symbols instead of wires; W draws 90°-snapped
+   schematic wires (State.schWires) that must START on a pin, may only END on a pin of
+   the same net, and colour green (fully connected net) / red (dangling or incomplete).
+   Net labels: auto labels stick out of every connected pin (toolbar checkbox), and N
+   pins a movable label object (State.schLabels) to the hovered pin.
    Everything reads State live, so the tab is always in sync with the board editor. */
 "use strict";
 
@@ -53,6 +57,15 @@ const EditorTabs = {
     $("#tab-schematic").addEventListener("click", () => EditorTabs.show("schematic"));
     $("#tab-bom").addEventListener("click",       () => EditorTabs.show("bom"));
     EditorTabs.refreshLabTab();
+    // F1 / F2 / F3 switch tabs from anywhere (capture, ahead of the browser's F1 help)
+    window.addEventListener("keydown", (e) => {
+      if (!/^F[123]$/.test(e.key) || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
+      if (document.querySelector("dialog[open]")) return;
+      e.preventDefault();
+      if (e.key === "F1") EditorTabs.show("visual");
+      else if (e.key === "F2"){ if (SchEnabled()) EditorTabs.show("schematic"); else UI.toast("Schematic tab is off — enable it in 🔬 Experimental"); }
+      else EditorTabs.show("bom");
+    }, true);
   },
 };
 
@@ -65,10 +78,17 @@ const Sch = {
   _queued: false,
   _entered: false,                 // first enter → zoom to fit
   mode: "select",                  // "select" | "wire" (W)
-  drag: null,                      // {comp,dx,dy,armed} symbol drag · {pan,sx,sy,px,py} view pan
+  drag: null,                      // {kind:...} — see pointerdown
   hover: null,                     // component under the cursor
-  wireDraft: null,                 // {points:[{x,y}mm], a:{comp,pin}|null, preview:[{x,y}]|null}
+  hotPin: null,                    // pin under the cursor in wire mode {comp,pin,pos}
+  wireDraft: null,                 // {points:[{x,y}mm], a:{comp,pin}, preview:[{x,y}]|null}
+  axisPref: null,                  // "h"|"v"|null — R while drafting toggles which leg comes first
   selWire: null,                   // selected schematic wire (Delete removes it)
+  selLabel: null,                  // selected manual net label (Delete removes it)
+  boxSel: [],                      // box-selected components (schematic-local selection)
+  _labelRects: [],                 // manual-label screen rects from the last render (hit test)
+  _lastP: null, _lastEvt: null,    // last pointer canvas point / event (edge scroll re-drive)
+  _edgeRAF: 0, _edgeVel: null,
 };
 
 const SCH_GRID = 1.27;             // KiCad half-grid — positions & wires snap to it
@@ -80,6 +100,11 @@ function schS2X(sx){ return (sx - Sch.panX) / Sch.zoom; }
 function schS2Y(sy){ return (sy - Sch.panY) / Sch.zoom; }
 const schSnap = (v) => Math.round(v / SCH_GRID) * SCH_GRID;
 
+/* auto net labels on/off (toolbar checkbox, retained) */
+function schAutoLabelsOn(){
+  try { return localStorage.getItem("pcbreveng.sch.autoLabels") !== "off"; } catch(e){ return true; }
+}
+
 Sch.invalidate = () => { Sch._geo = null; };
 Sch.geo = () => (Sch._geo || (Sch._geo = schGeometry()));
 
@@ -89,13 +114,30 @@ Sch.requestRender = () => {
   requestAnimationFrame(() => { Sch._queued = false; if (EditorTabs.current === "schematic") Sch.render(); });
 };
 
-/* a pin's position in schematic mm (y down), honouring the symbol's rotation */
+/* local symbol point (mm, +y up) → rotated/flipped offset, honouring schFlipH/V.
+   Flips are applied in symbol space BEFORE the rotation, matching the canvas draw
+   order (rotate then scale). */
+function schXf(c, x, y){
+  return schRot2d(x * (c.schFlipH ? -1 : 1), y * (c.schFlipV ? -1 : 1), schRotOf(c));
+}
+
+/* a pin's position in schematic mm (y down), honouring rotation + flips */
 function schPinPos(c, i, geo){
   const g = (geo || Sch.geo()).get(c.id);
   if (!g || typeof c.schX !== "number") return null;
   const pg = g.pins[i]; if (!pg) return null;
-  const r = schRot2d(pg.x, pg.y, c.schRot);
+  const r = schXf(c, pg.x, pg.y);
   return { x: c.schX + r.x, y: c.schY - r.y };
+}
+
+/* a pin's effective direction (deg, +y-up convention: 0=points right/inward) after
+   the symbol's flips + rotation. Pin angles point TOWARD the body; the label side
+   is the opposite direction. */
+function schPinEffAngle(c, pg){
+  let a = pg.angle || 0;
+  if (c.schFlipH) a = 180 - a;
+  if (c.schFlipV) a = -a;
+  return ((a + schRotOf(c)) % 360 + 360) % 360;
 }
 
 /* the symbol's axis-aligned half-extents after rotation (90/270 swap w/h) */
@@ -119,10 +161,49 @@ function schWiredPinSet(){
   return set;
 }
 
-/* components that never got a schematic position (project predates the editor, or a
-   part was just placed on the board) → seed them from the manual arrangement (which
-   packs newcomers below the already-arranged ones, or runs the default grouped grid
-   when nothing is arranged yet). Passive default — not an undo step. */
+/* ---------- net connectivity (wire colouring) ----------
+   A net is "fully connected" when every non-power pin on it is joined into ONE
+   group by fully-anchored wires (single-pin nets count as connected). A wire is
+   green only when it has both ends on pins AND its net is fully connected;
+   anything dangling or partial draws red. */
+function schNetStatus(){
+  const stat = new Map();                       // netId -> {complete}
+  const pinsByNet = new Map();                  // netId -> ["compId:pin", ...]
+  for (const c of State.components){
+    if (typeof c.schX !== "number") continue;
+    for (let i = 0; i < c.pins.length; i++){
+      const nid = c.pins[i].netId;
+      if (!nid || schIsPowerNet(getNet(nid))) continue;
+      let a = pinsByNet.get(nid); if (!a) pinsByNet.set(nid, a = []);
+      a.push(c.id + ":" + i);
+    }
+  }
+  for (const [nid, pins] of pinsByNet){
+    if (pins.length < 2){ stat.set(nid, { complete: true }); continue; }
+    // union-find over the net's pins, unioned by fully-anchored wires
+    const idx = new Map(pins.map((k, i) => [k, i]));
+    const par = pins.map((_, i) => i);
+    const find = (i) => { while (par[i] !== i){ par[i] = par[par[i]]; i = par[i]; } return i; };
+    let ok = true;
+    for (const w of State.schWires){
+      if (w.netId !== nid) continue;
+      if (!w.a || !w.b){ ok = false; continue; }      // dangling wire on this net
+      const ia = idx.get(w.a.comp + ":" + w.a.pin), ib = idx.get(w.b.comp + ":" + w.b.pin);
+      if (ia == null || ib == null) continue;
+      par[find(ia)] = find(ib);
+    }
+    const root = find(0);
+    for (let i = 1; i < pins.length && ok; i++) if (find(i) !== root) ok = false;
+    stat.set(nid, { complete: ok });
+  }
+  return stat;
+}
+
+const SCH_WIRE_OK  = "#54c66a";
+const SCH_WIRE_BAD = "#e05555";
+
+/* components that never got a schematic position → seed them from the manual
+   arrangement. Passive default — not an undo step. */
 Sch.ensurePositions = () => {
   const has = (c) => typeof c.schX === "number" && typeof c.schY === "number";
   if (State.components.every(has)) return;
@@ -152,6 +233,27 @@ Sch.enter = () => {
   if (!Sch._entered){ Sch._entered = true; Sch.fit(); }
   Sch.render();
 };
+
+/* centre + zoom the schematic view on one component (cross-jump from the board) */
+Sch.focusComp = (c) => {
+  Sch.ensurePositions();
+  if (typeof c.schX !== "number") return;
+  Sch.resize();
+  Sch.zoom = Math.max(Sch.zoom, 8);
+  Sch.panX = Sch.width/2  - c.schX * Sch.zoom;
+  Sch.panY = Sch.height/2 - c.schY * Sch.zoom;
+  UI.select({ type: "comp", comp: c });
+  Sch.render();
+};
+
+/* jump the other way: show a schematic part on the board, zoomed + selected */
+function schJumpToVisual(c){
+  EditorTabs.show("visual");
+  const r = Math.max(20, compRadius(c));
+  View.zoom = Math.max(View.zoom, Math.min(12, View.width / (r * 10)));
+  UI.jumpToComp(c);
+  UI.toast(c.ref + " on the board");
+}
 
 Sch.fit = () => {
   const geo = Sch.geo();
@@ -220,18 +322,25 @@ Sch.render = () => {
     return;
   }
 
+  // drop labels whose component/pin no longer exists (part deleted on the board)
+  if (State.schLabels.length){
+    const ok = (l) => { const c = getComp(l.comp); return c && c.pins[l.pin]; };
+    if (State.schLabels.some(l => !ok(l))) State.schLabels = State.schLabels.filter(ok);
+    if (Sch.selLabel && !State.schLabels.includes(Sch.selLabel)) Sch.selLabel = null;
+  }
+
   schDrawRatlines(ctx, comps, geo);
   schDrawWires(ctx);
   for (const c of comps) schDrawSymbol(ctx, c, geo.get(c.id));
   schDrawPowerPins(ctx, comps, geo);
+  schDrawNetLabels(ctx, comps, geo);
   schDrawWireDraft(ctx);
+  schDrawHotPin(ctx);
+  schDrawMarquee(ctx);
 };
 
 /* thin blue ratlines: per net, a minimum-spanning tree over every connected pin
-   (centroid star for very large nets), showing which pins must be wired together.
-   Power nets are skipped (they get power symbols), as are pin pairs already joined
-   by a drawn wire. While a symbol is being dragged, ITS nets are highlighted and
-   their pins marked, so you can see exactly what the moved part connects to. */
+   (centroid star for very large nets), showing which pins must be wired together. */
 function schDrawRatlines(ctx, comps, geo){
   const wired = schWiredPinSet();
   const byNet = new Map();
@@ -247,7 +356,7 @@ function schDrawRatlines(ctx, comps, geo){
       a.push({ x: schX2S(p.x), y: schY2S(p.y) });
     }
   }
-  const dragComp = Sch.drag && Sch.drag.comp;
+  const dragComp = Sch.drag && (Sch.drag.comp || (Sch.drag.group && Sch.drag.group[0] && Sch.drag.group[0].c));
   const hotNets = new Set();
   if (dragComp) for (const pin of dragComp.pins) if (pin.netId) hotNets.add(pin.netId);
 
@@ -352,27 +461,96 @@ function schDrawPowerPins(ctx, comps, geo){
   ctx.textAlign = "left";
 }
 
-/* ---------- schematic wires ---------- */
-function schWireColor(w){
-  const net = w.netId ? getNet(w.netId) : null;
-  return net ? (net.color || "#54c66a") : "#54c66a";
+/* ---------- net labels ----------
+   Auto labels (checkbox): every connected, non-power pin shows its net name just
+   past the pin tip, sticking OUT in the pin's direction — faint, display only.
+   Manual labels (N / context menu, State.schLabels): stronger, selectable, movable;
+   they follow their pin when the part moves/rotates/flips. */
+function schDrawNetLabels(ctx, comps, geo){
+  Sch._labelRects = [];
+  const s = Sch.zoom;
+  if (s <= 2.2) return;
+  const fpx = Math.max(8, 1.15 * s);
+  ctx.font = fpx + "px sans-serif";
+  const manual = new Set(State.schLabels.map(l => l.comp + ":" + l.pin));
+  const auto = schAutoLabelsOn();
+
+  // auto labels
+  if (auto){
+    ctx.fillStyle = "rgba(111,146,184,0.62)";
+    for (const c of comps){
+      const g = geo.get(c.id);
+      for (let i = 0; i < c.pins.length; i++){
+        const pin = c.pins[i];
+        if (!pin.netId || manual.has(c.id + ":" + i)) continue;
+        const net = getNet(pin.netId);
+        if (!net || schIsPowerNet(net)) continue;
+        const pg = g.pins[i]; if (!pg) continue;
+        const p = schPinPos(c, i, geo); if (!p) continue;
+        schLabelText(ctx, net.name, schX2S(p.x), schY2S(p.y), schPinEffAngle(c, pg), s, false);
+      }
+    }
+  }
+
+  // manual labels
+  for (const lab of State.schLabels){
+    const c = getComp(lab.comp);
+    if (!c || typeof c.schX !== "number") continue;
+    const p = schPinPos(c, lab.pin, geo); if (!p) continue;
+    const net = c.pins[lab.pin] && c.pins[lab.pin].netId ? getNet(c.pins[lab.pin].netId) : null;
+    const text = net ? net.name : "(no net)";
+    const X = schX2S(p.x + lab.dx), Y = schY2S(p.y + lab.dy);
+    const wpx = ctx.measureText(text).width;
+    const sel = lab === Sch.selLabel;
+    // leader dot on the pin + label text with a subtle plate
+    ctx.fillStyle = sel ? "#4da3ff" : "#8fd0ff";
+    ctx.beginPath(); ctx.arc(schX2S(p.x), schY2S(p.y), 2, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = sel ? "rgba(77,163,255,0.22)" : "rgba(20,28,38,0.75)";
+    ctx.fillRect(X - 3, Y - fpx + 1, wpx + 6, fpx + 5);
+    if (sel){ ctx.strokeStyle = "#4da3ff"; ctx.lineWidth = 1.2; ctx.strokeRect(X - 3, Y - fpx + 1, wpx + 6, fpx + 5); }
+    ctx.fillStyle = net ? "#8fd0ff" : "#e0b34a";
+    ctx.textAlign = "left";
+    ctx.fillText(text, X, Y);
+    Sch._labelRects.push({ lab, x: X - 3, y: Y - fpx + 1, w: wpx + 6, h: fpx + 5 });
+  }
 }
 
+/* place label text sticking out along the pin's outward direction */
+function schLabelText(ctx, text, X, Y, effAngle, s, plate){
+  const out = (effAngle + 180) % 360;   // pins point inward — labels go the other way
+  const gap = 0.7 * s;
+  ctx.textAlign = "left";
+  if (out === 0){ ctx.textAlign = "left";  ctx.fillText(text, X + gap, Y + 0.4*s); }
+  else if (out === 180){ ctx.textAlign = "right"; ctx.fillText(text, X - gap, Y + 0.4*s); }
+  else if (out === 90){  ctx.textAlign = "center"; ctx.fillText(text, X, Y - gap); }         // up
+  else {                 ctx.textAlign = "center"; ctx.fillText(text, X, Y + gap + 0.9*s); } // down
+  ctx.textAlign = "left";
+}
+
+/* ---------- schematic wires ---------- */
 function schDrawWires(ctx){
+  const stat = schNetStatus();
   for (const w of State.schWires){
     const pts = w.points;
     if (!pts || pts.length < 2) continue;
     const sel = w === Sch.selWire;
-    ctx.strokeStyle = sel ? "#4da3ff" : schWireColor(w);
+    const good = w.a && w.b && (!w.netId || (stat.get(w.netId) || { complete: true }).complete);
+    ctx.strokeStyle = sel ? "#4da3ff" : (good ? SCH_WIRE_OK : SCH_WIRE_BAD);
     ctx.lineWidth = sel ? 2.4 : 1.6;
     ctx.lineJoin = "round"; ctx.lineCap = "round";
     ctx.beginPath();
     pts.forEach((p, i) => i ? ctx.lineTo(schX2S(p.x), schY2S(p.y)) : ctx.moveTo(schX2S(p.x), schY2S(p.y)));
     ctx.stroke();
-    // connection dots on anchored ends
+    // connection dots on anchored ends; an open end gets a hollow red ring
     ctx.fillStyle = ctx.strokeStyle;
-    if (w.a){ const p = pts[0];             ctx.beginPath(); ctx.arc(schX2S(p.x), schY2S(p.y), 2.2, 0, Math.PI*2); ctx.fill(); }
-    if (w.b){ const p = pts[pts.length-1];  ctx.beginPath(); ctx.arc(schX2S(p.x), schY2S(p.y), 2.2, 0, Math.PI*2); ctx.fill(); }
+    const endDot = (p, anchored) => {
+      const X = schX2S(p.x), Y = schY2S(p.y);
+      ctx.beginPath(); ctx.arc(X, Y, 2.2, 0, Math.PI*2);
+      if (anchored) ctx.fill();
+      else { ctx.strokeStyle = SCH_WIRE_BAD; ctx.lineWidth = 1.4; ctx.stroke(); ctx.strokeStyle = sel ? "#4da3ff" : (good ? SCH_WIRE_OK : SCH_WIRE_BAD); }
+    };
+    endDot(pts[0], !!w.a);
+    endDot(pts[pts.length-1], !!w.b);
   }
 }
 
@@ -380,7 +558,7 @@ function schDrawWireDraft(ctx){
   const d = Sch.wireDraft;
   if (Sch.mode !== "wire") return;
   if (d && d.points.length){
-    ctx.strokeStyle = "#54c66a";
+    ctx.strokeStyle = SCH_WIRE_OK;
     ctx.lineWidth = 1.6;
     ctx.beginPath();
     d.points.forEach((p, i) => i ? ctx.lineTo(schX2S(p.x), schY2S(p.y)) : ctx.moveTo(schX2S(p.x), schY2S(p.y)));
@@ -394,14 +572,42 @@ function schDrawWireDraft(ctx){
       ctx.stroke();
       ctx.setLineDash([]);
     }
+    // highlight the start anchor pin for the whole draft
+    const a = d.points[0];
+    ctx.strokeStyle = "#7ec3ff"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(schX2S(a.x), schY2S(a.y), 5.5, 0, Math.PI*2); ctx.stroke();
+  }
+}
+
+/* ring around the pin the wire tool would anchor to */
+function schDrawHotPin(ctx){
+  if (Sch.mode !== "wire" || !Sch.hotPin) return;
+  const p = Sch.hotPin.pos;
+  ctx.strokeStyle = "#ffd24d"; ctx.lineWidth = 1.8;
+  ctx.beginPath(); ctx.arc(schX2S(p.x), schY2S(p.y), 6.5, 0, Math.PI*2); ctx.stroke();
+}
+
+function schDrawMarquee(ctx){
+  const d = Sch.drag;
+  // live marquee
+  if (d && d.kind === "marquee" && d.moved){
+    const x = Math.min(schX2S(d.sx), schX2S(d.x)), y = Math.min(schY2S(d.sy), schY2S(d.y));
+    const w = Math.abs(schX2S(d.x) - schX2S(d.sx)), h = Math.abs(schY2S(d.y) - schY2S(d.sy));
+    ctx.strokeStyle = "#4da3ff"; ctx.lineWidth = 1;
+    ctx.setLineDash([4, 3]);
+    ctx.fillStyle = "rgba(77,163,255,0.08)";
+    ctx.fillRect(x, y, w, h); ctx.strokeRect(x, y, w, h);
+    ctx.setLineDash([]);
   }
 }
 
 /* 90°-snapped path from L to target T: straight when aligned, else one corner.
-   prevDir ("h"/"v"/null) = direction of the previous segment, so the wire turns. */
+   prevDir ("h"/"v"/null) = direction of the previous segment; Sch.axisPref (R while
+   drafting) forces which leg comes first when there's no previous segment. */
 function schOrthoPath(L, T, prevDir){
   if (Math.abs(L.x - T.x) < 0.01 || Math.abs(L.y - T.y) < 0.01) return [T];
   const horizFirst = prevDir === "h" ? false : prevDir === "v" ? true
+                   : Sch.axisPref === "h" ? true : Sch.axisPref === "v" ? false
                    : Math.abs(T.x - L.x) >= Math.abs(T.y - L.y);
   return horizFirst ? [{ x: T.x, y: L.y }, T] : [{ x: L.x, y: T.y }, T];
 }
@@ -425,8 +631,15 @@ function schFindPin(sx, sy, tol){
   return best;
 }
 
+/* net of a wire anchor, or null */
+function schNetOfAnchor(an){
+  if (!an) return null;
+  const c = getComp(an.comp);
+  return c ? (c.pins[an.pin] || {}).netId || null : null;
+}
+
 /* wires whose endpoint is anchored to a pin of `comp` follow the pin when the part
-   moves or rotates; the neighbouring point is shifted to keep every bend at 90° */
+   moves/rotates/flips; the neighbouring point is shifted to keep every bend at 90° */
 function schUpdateWiresFor(comp){
   const geo = Sch.geo();
   for (const w of State.schWires){
@@ -476,6 +689,15 @@ function schWireHit(sx, sy){
   return null;
 }
 
+/* manual label under a screen point (uses the rects captured during render) */
+function schLabelHit(sx, sy){
+  for (let i = Sch._labelRects.length - 1; i >= 0; i--){
+    const r = Sch._labelRects[i];
+    if (sx >= r.x && sx <= r.x + r.w && sy >= r.y && sy <= r.y + r.h) return r.lab;
+  }
+  return null;
+}
+
 function schDrawSymbol(ctx, c, g){
   const s = Sch.zoom;
   const X = schX2S(c.schX), Y = schY2S(c.schY);
@@ -490,11 +712,13 @@ function schDrawSymbol(ctx, c, g){
   ctx.lineWidth = Math.max(1, Math.min(2.2, 0.25 * s));
   ctx.strokeStyle = stroke;
 
-  // geometry (body + pin stubs) is drawn inside a rotated frame; local mm +y up.
-  // a CCW symbol rotation appears as a −θ canvas rotation because y is flipped.
+  // geometry (body + pin stubs) is drawn inside a rotated+flipped frame; local mm +y up.
+  // a CCW symbol rotation appears as a −θ canvas rotation because y is flipped; the
+  // X/Y flips apply as a scale in symbol space (matching schXf's flip-then-rotate).
   ctx.save();
   ctx.translate(X, Y);
   ctx.rotate(-rot * Math.PI / 180);
+  ctx.scale(c.schFlipH ? -1 : 1, c.schFlipV ? -1 : 1);
   const lx = (x) => x * s;
   const ly = (y) => -y * s;
 
@@ -532,7 +756,7 @@ function schDrawSymbol(ctx, c, g){
     }
   }
 
-  // pin stubs (rotate with the body)
+  // pin stubs (rotate/flip with the body)
   for (let i = 0; i < c.pins.length; i++){
     const pg = g.pins[i]; if (!pg) continue;
     const a = (pg.angle || 0) * Math.PI / 180;
@@ -543,31 +767,28 @@ function schDrawSymbol(ctx, c, g){
   }
   ctx.restore();
 
-  // pin numbers / names stay upright — positions rotated, text not
+  // pin numbers / names stay upright — positions rotated/flipped, text not
   const showText = s > 3.2;
   if (showText){
     for (let i = 0; i < c.pins.length; i++){
       const pg = g.pins[i]; if (!pg) continue;
       const a = (pg.angle || 0) * Math.PI / 180;
-      const eff = ((pg.angle || 0) + rot) % 360;
+      const eff = schPinEffAngle(c, pg);
       if (!g.hideNums){
-        const mid = schRot2d(pg.x + Math.cos(a)*pg.len/2, pg.y + Math.sin(a)*pg.len/2, rot);
+        const mid = schXf(c, pg.x + Math.cos(a)*pg.len/2, pg.y + Math.sin(a)*pg.len/2);
         ctx.fillStyle = "#8b96a5";
         ctx.font = (1.15 * s) + "px sans-serif";
         ctx.textAlign = "center";
         ctx.fillText(c.pins[i].num, X + mid.x * s, Y - mid.y * s - 0.35 * s);
       }
-      if (!g.hideNames){
-        // unnamed pin → show its NET name instead (display only, never exported)
-        const net = c.pins[i].netId ? getNet(c.pins[i].netId) : null;
-        const nm = c.pins[i].name || (net && !schIsPowerNet(net) ? net.name : "");
-        if (nm){
-          const inn = schRot2d(pg.x + Math.cos(a)*(pg.len + 0.6), pg.y + Math.sin(a)*(pg.len + 0.6), rot);
-          ctx.fillStyle = c.pins[i].name ? "#aeb7c2" : "#6f92b8";   // net-name stand-ins slightly blue
-          ctx.font = (c.pins[i].name ? "" : "italic ") + (1.15 * s) + "px sans-serif";
-          ctx.textAlign = eff === 0 ? "left" : eff === 180 ? "right" : "center";
-          ctx.fillText(nm, X + inn.x * s, Y - inn.y * s + 0.4 * s);
-        }
+      if (!g.hideNames && c.pins[i].name){
+        // net names are no longer drawn inside the box — the outward net labels
+        // (auto or manual) carry them without obstructing the symbol
+        const inn = schXf(c, pg.x + Math.cos(a)*(pg.len + 0.6), pg.y + Math.sin(a)*(pg.len + 0.6));
+        ctx.fillStyle = "#aeb7c2";
+        ctx.font = (1.15 * s) + "px sans-serif";
+        ctx.textAlign = eff === 0 ? "left" : eff === 180 ? "right" : "center";
+        ctx.fillText(c.pins[i].name, X + inn.x * s, Y - inn.y * s + 0.4 * s);
       }
     }
   }
@@ -589,7 +810,7 @@ function schDrawSymbol(ctx, c, g){
   ctx.textAlign = "left";
 
   // selection / hover outline (axis-aligned around the rotated symbol)
-  const selected = UI.sel && UI.sel.type === "comp" && UI.sel.comp === c;
+  const selected = (UI.sel && UI.sel.type === "comp" && UI.sel.comp === c) || Sch.boxSel.includes(c);
   if (selected || Sch.hover === c){
     ctx.save();
     ctx.strokeStyle = selected ? "#4da3ff" : "rgba(77,163,255,0.45)";
@@ -622,13 +843,75 @@ Sch.rotate = (c) => {
   Sch.render();
 };
 
+/* flip a symbol horizontally (X) or vertically (Y) — schematic only */
+Sch.flip = (c, vert) => {
+  if (!c) return;
+  pushUndo("flip schematic symbol");
+  if (vert) c.schFlipV = !c.schFlipV; else c.schFlipH = !c.schFlipH;
+  schUpdateWiresFor(c);
+  Sch.render();
+};
+
+/* the component(s) the current keys act on: box selection, else selected, else hovered */
+Sch.targets = () => {
+  if (Sch.boxSel.length) return Sch.boxSel.slice();
+  if (UI.sel && UI.sel.type === "comp" && typeof UI.sel.comp.schX === "number") return [UI.sel.comp];
+  if (Sch.hover) return [Sch.hover];
+  return [];
+};
+
 Sch.setMode = (mode) => {
   Sch.mode = mode;
   Sch.wireDraft = null;
+  Sch.hotPin = null;
   const btn = $("#sch-wire");
   if (btn) btn.classList.toggle("active", mode === "wire");
   if (Sch.canvas) Sch.canvas.style.cursor = mode === "wire" ? "crosshair" : "default";
+  if (mode !== "wire") schStopEdgeScroll();
   Sch.render();
+};
+
+/* add (or select) a manual net label on a pin */
+Sch.addLabel = (comp, pin) => {
+  const existing = State.schLabels.find(l => l.comp === comp.id && l.pin === pin);
+  if (existing){ Sch.selLabel = existing; Sch.render(); return existing; }
+  if (!comp.pins[pin] || !comp.pins[pin].netId){ UI.toast("That pin has no net — assign one in the Visual editor first"); return null; }
+  const g = Sch.geo().get(comp.id);
+  const pg = g && g.pins[pin];
+  // default offset: stick out in the pin's outward direction
+  let dx = 1.2, dy = 0;
+  if (pg){
+    const out = (schPinEffAngle(comp, pg) + 180) % 360;
+    dx = Math.round(Math.cos(out * Math.PI/180)) * 1.6;
+    dy = -Math.round(Math.sin(out * Math.PI/180)) * 1.6;   // schematic y is down
+  }
+  pushUndo("add net label");
+  const lab = { id: nextId(), comp: comp.id, pin, dx, dy };
+  State.schLabels.push(lab);
+  Sch.selLabel = lab;
+  Sch.selWire = null;
+  Sch.render();
+  return lab;
+};
+
+Sch.deleteLabel = (lab) => {
+  if (!lab) return;
+  pushUndo("delete net label");
+  State.schLabels = State.schLabels.filter(l => l !== lab);
+  if (Sch.selLabel === lab) Sch.selLabel = null;
+  Sch.render();
+};
+
+/* edit a label's net = rename/reassign the pin's net (kept in sync with the board) */
+Sch.editLabel = (lab) => {
+  const c = getComp(lab.comp);
+  if (!c) return;
+  const pin = c.pins[lab.pin];
+  const cur = pin && pin.netId ? (getNet(pin.netId)?.name || "") : "";
+  UI.openNetPopup(c.ref + "." + (pin ? pin.num : "?") + " net", cur, (name) => {
+    applyNetRename({ type: "pin", comp: c, pinIdx: lab.pin }, name);
+    Sch.invalidate(); Sch.render();
+  });
 };
 
 /* finish the wire draft → a persisted State.schWires entry */
@@ -636,17 +919,182 @@ Sch.finishWire = (endAnchor) => {
   const d = Sch.wireDraft;
   Sch.wireDraft = null;
   if (!d || d.points.length < 2){ Sch.render(); return; }
-  // net comes from whichever end lands on a pin; two different nets = warning, first wins
-  let netId = null;
-  const netOf = (an) => { if (!an) return null; const c = getComp(an.comp); return c ? (c.pins[an.pin] || {}).netId || null : null; };
-  const na = netOf(d.a), nb = netOf(endAnchor);
-  netId = na || nb;
-  if (na && nb && na !== nb)
-    UI.warn("Wire joins pins of different nets (" + (getNet(na)?.name || "?") + " vs " + (getNet(nb)?.name || "?") + ") — nets are NOT merged");
+  const na = schNetOfAnchor(d.a), nb = schNetOfAnchor(endAnchor);
   pushUndo("draw schematic wire");
-  State.schWires.push({ id: nextId(), netId, points: d.points, a: d.a, b: endAnchor || null });
+  State.schWires.push({ id: nextId(), netId: na || nb || null, points: d.points, a: d.a, b: endAnchor || null });
   Sch.render();
 };
+
+/* ---------- schematic edge auto-scroll ----------
+   Active while the wire tool is enabled (not just mid-draft), while dragging a
+   symbol/group/label and while box-selecting — shares the Options prefs with the
+   board editor (UI.edgeScrollOn/edgeMargin/edgeSpeed). */
+function schEdgeScrollAllowed(){
+  if (!UI.edgeScrollOn()) return false;
+  if (Sch.mode === "wire") return true;
+  const d = Sch.drag;
+  return !!(d && (d.kind === "comp" || d.kind === "group" || d.kind === "label" || d.kind === "marquee"));
+}
+
+function schUpdateEdgeScroll(p){
+  if (!schEdgeScrollAllowed() || !p || p.x < 0 || p.x > Sch.width || p.y < 0 || p.y > Sch.height){
+    schStopEdgeScroll(); return;
+  }
+  const m = UI.edgeMargin(), speed = UI.edgeSpeed(), W = Sch.width, H = Sch.height;
+  const clamp = t => t < 0 ? 0 : t > 1 ? 1 : t;
+  let vx = 0, vy = 0;
+  if (p.x < m)          vx =  clamp((m - p.x) / m);
+  else if (p.x > W - m) vx = -clamp((p.x - (W - m)) / m);
+  if (p.y < m)          vy =  clamp((m - p.y) / m);
+  else if (p.y > H - m) vy = -clamp((p.y - (H - m)) / m);
+  if (!vx && !vy){ schStopEdgeScroll(); return; }
+  Sch._edgeVel = { x: vx * speed, y: vy * speed };
+  if (!Sch._edgeRAF) Sch._edgeRAF = requestAnimationFrame(schEdgeTick);
+}
+
+function schEdgeTick(){
+  Sch._edgeRAF = 0;
+  const v = Sch._edgeVel, p = Sch._lastP;
+  if (!schEdgeScrollAllowed() || !v || !p) return;
+  Sch.panX += v.x; Sch.panY += v.y;
+  // re-drive the interaction from the stationary cursor so the dragged thing tracks it
+  Sch.onMove(p, Sch._lastEvt || {});
+  Sch.render();
+  Sch._edgeRAF = requestAnimationFrame(schEdgeTick);
+}
+
+function schStopEdgeScroll(){
+  if (Sch._edgeRAF){ cancelAnimationFrame(Sch._edgeRAF); Sch._edgeRAF = 0; }
+  Sch._edgeVel = null;
+}
+
+/* pointer-move core, callable from both the event handler and the edge-scroll tick */
+Sch.onMove = (p, e) => {
+  const mx = schS2X(p.x), my = schS2Y(p.y);
+
+  if (Sch.mode === "wire"){
+    const pin = schFindPin(p.x, p.y);
+    Sch.hotPin = pin;
+    const d = Sch.wireDraft;
+    if (d){
+      const last = d.points[d.points.length - 1];
+      const prevDir = d.points.length > 1 ? schSegDir(d.points[d.points.length-2], last) : null;
+      const target = pin ? pin.pos : { x: schSnap(mx), y: schSnap(my) };
+      d.preview = schOrthoPath(last, target, prevDir);
+    }
+    Sch.requestRender();
+    return;
+  }
+
+  const d = Sch.drag;
+  if (d){
+    if (d.kind === "pan"){
+      Sch.panX = d.px + (p.x - d.sx);
+      Sch.panY = d.py + (p.y - d.sy);
+      Sch.render();
+      return;
+    }
+    if (d.kind === "marquee"){
+      d.moved = true;
+      d.x = mx; d.y = my;
+      Sch.render();
+      return;
+    }
+    if (d.kind === "label"){
+      const lab = d.lab;
+      if (!d.armed){ pushUndo("move net label"); d.armed = true; }
+      d.moved = true;
+      lab.dx = mx - d.pin.x - d.offX;
+      lab.dy = my - d.pin.y - d.offY;
+      Sch.render();
+      return;
+    }
+    if (d.kind === "comp" || d.kind === "group"){
+      const items = d.kind === "comp" ? [{ c: d.comp, dx: d.dx, dy: d.dy }] : d.group;
+      const lead = items[0];
+      const nx = schSnap(mx - lead.dx), ny = schSnap(my - lead.dy);
+      if (nx === lead.c.schX && ny === lead.c.schY) return;
+      if (!d.armed){ pushUndo(d.kind === "group" ? "move schematic selection" : "move schematic symbol"); d.armed = true; }
+      d.moved = true;
+      const shX = nx - lead.c.schX, shY = ny - lead.c.schY;
+      for (const it of items){ it.c.schX += shX; it.c.schY += shY; schUpdateWiresFor(it.c); }
+      Sch.render();
+      return;
+    }
+    return;
+  }
+
+  const h = Sch.hit(mx, my);
+  if (h !== Sch.hover){
+    Sch.hover = h;
+    Sch.canvas.style.cursor = h ? "move" : "default";
+    Sch.requestRender();
+  }
+};
+
+/* nudge the current selection (box selection or selected part) one grid step */
+Sch.nudgeSelection = (dx, dy) => {
+  const targets = Sch.boxSel.length ? Sch.boxSel
+                : (UI.sel && UI.sel.type === "comp" && typeof UI.sel.comp.schX === "number") ? [UI.sel.comp] : [];
+  if (!targets.length) return false;
+  // coalesce rapid arrow presses into one undo step
+  const now = Date.now();
+  if (!Sch._nudgeAt || now - Sch._nudgeAt > 1500) pushUndo("move schematic selection");
+  Sch._nudgeAt = now;
+  for (const c of targets){
+    c.schX = schSnap(c.schX + dx * SCH_GRID);
+    c.schY = schSnap(c.schY + dy * SCH_GRID);
+    schUpdateWiresFor(c);
+  }
+  Sch.render();
+  return true;
+};
+
+/* schematic-pane context menu (right-click) */
+function schContextMenu(clientX, clientY, p){
+  const mx = schS2X(p.x), my = schS2Y(p.y);
+  const items = [];
+  const lab = schLabelHit(p.x, p.y);
+  const pin = schFindPin(p.x, p.y, 12);
+  const w = schWireHit(p.x, p.y);
+  const c = Sch.hit(mx, my);
+  if (lab){
+    Sch.selLabel = lab; Sch.render();
+    items.push({ label: "Edit net name…", action: () => Sch.editLabel(lab) });
+    items.push({ label: "Delete net label", danger: true, action: () => Sch.deleteLabel(lab) });
+  } else if (pin){
+    const pnum = pin.comp.pins[pin.pin] ? pin.comp.pins[pin.pin].num : "?";
+    items.push({ label: "Add net label to " + pin.comp.ref + "." + pnum, action: () => Sch.addLabel(pin.comp, pin.pin) });
+    items.push({ label: "Set net…", action: () => {
+      const cur = pin.comp.pins[pin.pin].netId ? (getNet(pin.comp.pins[pin.pin].netId)?.name || "") : "";
+      UI.openNetPopup(pin.comp.ref + "." + pnum + " net", cur, (name) => { applyNetRename({ type:"pin", comp:pin.comp, pinIdx:pin.pin }, name); Sch.invalidate(); Sch.render(); });
+    }});
+    if (Sch.mode === "wire") items.push({ label: "Start wire here", action: () => {
+      Sch.wireDraft = { points: [{ x: pin.pos.x, y: pin.pos.y }], a: { comp: pin.comp.id, pin: pin.pin }, preview: null };
+      UI.select(null); Sch.render();
+    }});
+  } else if (c){
+    UI.select({ type: "comp", comp: c }); Sch.render();
+    items.push({ label: "Rotate 90°  [R]", action: () => Sch.rotate(c) });
+    items.push({ label: "Flip horizontal  [X]", action: () => Sch.flip(c, false) });
+    items.push({ label: "Flip vertical  [Y]", action: () => Sch.flip(c, true) });
+    items.push({ label: "Edit ref / value…", action: () => UI.openQuickEdit(c) });
+    items.push({ sep: true });
+    items.push({ label: "Show on board (Visual)", action: () => schJumpToVisual(c) });
+  } else if (w){
+    Sch.selWire = w; Sch.render();
+    items.push({ label: "Delete wire", danger: true, action: () => {
+      pushUndo("delete schematic wire");
+      State.schWires = State.schWires.filter(x => x !== w);
+      if (Sch.selWire === w) Sch.selWire = null;
+      Sch.render();
+    }});
+  } else {
+    items.push({ label: Sch.mode === "wire" ? "Wire mode off  [W/Esc]" : "Wire mode  [W]", action: () => Sch.setMode(Sch.mode === "wire" ? "select" : "wire") });
+    items.push({ label: "Zoom to fit", action: () => Sch.fit() });
+  }
+  if (items.length) UI.showContextMenu(clientX, clientY, items);
+}
 
 Sch.wire = () => {
   Sch.canvas = $("#sch-canvas");
@@ -657,17 +1105,44 @@ Sch.wire = () => {
 
   cv.addEventListener("pointerdown", (e) => {
     const p = pt(e);
+    Sch._lastP = p; Sch._lastEvt = e;
     const mx = schS2X(p.x), my = schS2Y(p.y);
 
-    if (Sch.mode === "wire" && e.button === 0){
+    // middle button / space = pan (any mode) — unless it grabs the box selection
+    if (e.button === 1 || Keys.space){
+      e.preventDefault();
+      try { cv.setPointerCapture(e.pointerId); } catch(ex){}
+      const c = Sch.hit(mx, my);
+      if (e.button === 1 && c && Sch.boxSel.includes(c)){
+        // wheel-click drag moves the box-selected group
+        Sch.drag = { kind: "group", group: Sch.boxSel.map(g => ({ c: g, dx: mx - g.schX, dy: my - g.schY })), armed: false, moved: false };
+        return;
+      }
+      Sch.drag = { kind: "pan", sx: p.x, sy: p.y, px: Sch.panX, py: Sch.panY };
+      cv.style.cursor = "grabbing";
+      return;
+    }
+    if (e.button === 2) return;   // context menu handled separately
+
+    if (Sch.mode === "wire"){
+      // no panning / selecting with the wire tool — clicks only place wire points
       const pin = schFindPin(p.x, p.y);
       const d = Sch.wireDraft;
       if (!d){
-        // start: on a pin (anchored) or on the grid
-        const start = pin ? pin.pos : { x: schSnap(mx), y: schSnap(my) };
-        Sch.wireDraft = { points: [{ x: start.x, y: start.y }],
-                          a: pin ? { comp: pin.comp.id, pin: pin.pin } : null, preview: null };
+        if (!pin){ UI.toast("Wires start on a pin — click a pin to begin"); return; }
+        Sch.wireDraft = { points: [{ x: pin.pos.x, y: pin.pos.y }],
+                          a: { comp: pin.comp.id, pin: pin.pin }, preview: null };
+        UI.select(null);           // drawing must not leave a part selected (stray R rotates it)
+        Sch.boxSel = [];
       } else {
+        // ending on a pin of a DIFFERENT net is refused
+        if (pin){
+          const na = schNetOfAnchor(d.a), nb = schNetOfAnchor({ comp: pin.comp.id, pin: pin.pin });
+          if (na && nb && na !== nb){
+            UI.warn("Different net — " + (getNet(na)?.name || "?") + " can't connect to " + (getNet(nb)?.name || "?"));
+            return;
+          }
+        }
         const last = d.points[d.points.length - 1];
         const prevDir = d.points.length > 1 ? schSegDir(d.points[d.points.length-2], last) : null;
         const target = pin ? pin.pos : { x: schSnap(mx), y: schSnap(my) };
@@ -680,69 +1155,85 @@ Sch.wire = () => {
     }
 
     try { cv.setPointerCapture(e.pointerId); } catch(ex){}
-    const c = e.button === 0 ? Sch.hit(mx, my) : null;
-    if (c){ Sch.drag = { comp: c, dx: mx - c.schX, dy: my - c.schY, armed: false, moved: false }; return; }
+    if (e.button !== 0) return;
+
+    // manual net label under the cursor → select + drag it
+    const lab = schLabelHit(p.x, p.y);
+    if (lab){
+      const c = getComp(lab.comp);
+      const pinPos = c ? schPinPos(c, lab.pin) : null;
+      Sch.selLabel = lab; Sch.selWire = null;
+      Sch.drag = pinPos ? { kind: "label", lab, pin: pinPos, offX: mx - pinPos.x - lab.dx, offY: my - pinPos.y - lab.dy, armed: false, moved: false } : null;
+      Sch.render();
+      return;
+    }
+    if (Sch.selLabel){ Sch.selLabel = null; Sch.render(); }
+
+    const c = Sch.hit(mx, my);
+    if (c){
+      if (Sch.boxSel.includes(c)){
+        Sch.drag = { kind: "group", group: Sch.boxSel.map(g => ({ c: g, dx: mx - g.schX, dy: my - g.schY })), armed: false, moved: false, clickComp: c, shift: e.shiftKey };
+      } else {
+        Sch.boxSel = [];
+        Sch.drag = { kind: "comp", comp: c, dx: mx - c.schX, dy: my - c.schY, armed: false, moved: false, clickComp: c, shift: e.shiftKey };
+      }
+      return;
+    }
     // wire under the cursor? select it (Delete removes)
-    const w = e.button === 0 ? schWireHit(p.x, p.y) : null;
+    const w = schWireHit(p.x, p.y);
     if (w){ Sch.selWire = w; Sch.drag = null; Sch.render(); return; }
-    if (Sch.selWire){ Sch.selWire = null; Sch.render(); }
-    Sch.drag = { pan: true, sx: p.x, sy: p.y, px: Sch.panX, py: Sch.panY };
+    if (Sch.selWire){ Sch.selWire = null; }
+    // empty space: box select (left-drag pan is gone — pan with wheel-click / Space)
+    Sch.boxSel = [];
+    UI.select(null);
+    Sch.drag = { kind: "marquee", sx: mx, sy: my, x: mx, y: my, moved: false };
+    Sch.render();
   });
 
   cv.addEventListener("pointermove", (e) => {
     const p = pt(e);
-    if (Sch.mode === "wire"){
-      const d = Sch.wireDraft;
-      if (d){
-        const last = d.points[d.points.length - 1];
-        const pin = schFindPin(p.x, p.y);
-        const prevDir = d.points.length > 1 ? schSegDir(d.points[d.points.length-2], last) : null;
-        const target = pin ? pin.pos : { x: schSnap(schS2X(p.x)), y: schSnap(schS2Y(p.y)) };
-        d.preview = schOrthoPath(last, target, prevDir);
-        Sch.requestRender();
-      }
-      return;
-    }
-    if (Sch.drag){
-      if (Sch.drag.pan){
-        Sch.panX = Sch.drag.px + (p.x - Sch.drag.sx);
-        Sch.panY = Sch.drag.py + (p.y - Sch.drag.sy);
-        Sch.render();
-        return;
-      }
-      const c = Sch.drag.comp;
-      const nx = schSnap(schS2X(p.x) - Sch.drag.dx);
-      const ny = schSnap(schS2Y(p.y) - Sch.drag.dy);
-      if (nx === c.schX && ny === c.schY) return;
-      if (!Sch.drag.armed){ pushUndo("move schematic symbol"); Sch.drag.armed = true; }
-      Sch.drag.moved = true;
-      c.schX = nx; c.schY = ny;
-      schUpdateWiresFor(c);          // anchored wires travel with their pins
-      Sch.render();
-      return;
-    }
-    const h = Sch.hit(schS2X(p.x), schS2Y(p.y));
-    if (h !== Sch.hover){
-      Sch.hover = h;
-      cv.style.cursor = h ? "move" : "default";
-      Sch.requestRender();
-    }
+    Sch._lastP = p; Sch._lastEvt = e;
+    Sch.onMove(p, e);
+    schUpdateEdgeScroll(p);
   });
 
   const endDrag = (e) => {
+    schStopEdgeScroll();
     if (!Sch.drag) return;
     const d = Sch.drag;
     Sch.drag = null;
-    if (d.comp && !d.moved){
-      // plain click → select (synchronised with the board editor's selection)
-      UI.select({ type: "comp", comp: d.comp });
+    if (d.kind === "pan"){ cv.style.cursor = Sch.mode === "wire" ? "crosshair" : "default"; return; }
+    if (d.kind === "marquee"){
+      if (d.moved){
+        const lx = Math.min(d.sx, d.x), hx = Math.max(d.sx, d.x);
+        const ly = Math.min(d.sy, d.y), hy = Math.max(d.sy, d.y);
+        Sch.boxSel = State.components.filter(c => typeof c.schX === "number" &&
+          c.schX >= lx && c.schX <= hx && c.schY >= ly && c.schY <= hy);
+        UI.toast(Sch.boxSel.length ? Sch.boxSel.length + " symbol" + (Sch.boxSel.length===1?"":"s") + " selected — drag / arrows / wheel-click to move" : "Nothing in the box");
+      }
       Sch.render();
-    } else if (d.comp && d.moved){
+      return;
+    }
+    if ((d.kind === "comp" || d.kind === "group") && !d.moved){
+      if (d.armed) cancelUndo();
+      const c = d.clickComp;
+      if (c && d.shift){ schJumpToVisual(c); return; }
+      if (c){ Sch.boxSel = []; UI.select({ type: "comp", comp: c }); }
+      Sch.render();
+    } else if (d.moved){
       Sch.render();                  // drop the drag highlight
+    } else if (d.kind === "label" && !d.moved && d.armed){
+      cancelUndo();
     }
   };
   cv.addEventListener("pointerup", endDrag);
   cv.addEventListener("pointercancel", endDrag);
+
+  cv.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    const p = pt(e);
+    schContextMenu(e.clientX, e.clientY, p);
+  });
 
   cv.addEventListener("wheel", (e) => {
     e.preventDefault();
@@ -757,13 +1248,16 @@ Sch.wire = () => {
 
   cv.addEventListener("dblclick", (e) => {
     const p = pt(e);
-    if (Sch.mode === "wire"){ Sch.finishWire(null); return; }   // end a wire mid-air
+    if (Sch.mode === "wire"){ Sch.finishWire(null); return; }   // end a wire mid-air (stays red)
+    const lab = schLabelHit(p.x, p.y);
+    if (lab){ Sch.editLabel(lab); return; }
     const c = Sch.hit(schS2X(p.x), schS2Y(p.y));
     if (c) UI.openQuickEdit(c);
   });
 
   // schematic-local keys (capture phase, ahead of the global board hotkeys):
-  // R rotate · W wire mode · Esc cancel/exit · Delete selected wire
+  // R rotate (or toggle wire H/V-first while drafting) · X/Y flip · W wire mode ·
+  // N net label at cursor · arrows nudge selection / pan · Esc · Delete
   window.addEventListener("keydown", (e) => {
     if (EditorTabs.current !== "schematic") return;
     if (e.ctrlKey || e.metaKey || e.altKey) return;
@@ -771,25 +1265,64 @@ Sch.wire = () => {
     if (document.querySelector("dialog[open]")) return;
     const k = e.key;
     if (k === "r" || k === "R"){
-      const c = Sch.hover || (UI.sel && UI.sel.type === "comp" ? UI.sel.comp : null);
-      if (c) Sch.rotate(c);
+      if (Sch.mode === "wire"){
+        // while tracing, R flips which leg is routed first (vertical ⇄ horizontal)
+        Sch.axisPref = Sch.axisPref === "v" ? "h" : "v";
+        UI.toast("Wire routing: " + (Sch.axisPref === "v" ? "vertical" : "horizontal") + " first");
+        if (Sch.wireDraft && Sch._lastP) Sch.onMove(Sch._lastP, e);
+      } else {
+        const t = Sch.targets();
+        if (!t.length){ /* consumed — R must never rotate the BOARD part from this tab */ }
+        else if (t.length === 1) Sch.rotate(t[0]);
+        else {
+          pushUndo("rotate schematic selection");
+          for (const c of t){ c.schRot = (schRotOf(c) + 90) % 360; schUpdateWiresFor(c); }
+          Sch.render();
+        }
+      }
+    } else if (k === "x" || k === "X" || k === "y" || k === "Y"){
+      const vert = (k === "y" || k === "Y");
+      const t = Sch.targets();
+      if (!t.length){ /* consumed — X must not toggle the board X-ray from this tab */ }
+      else if (t.length > 1){
+        pushUndo("flip schematic selection");
+        for (const c of t){ if (vert) c.schFlipV = !c.schFlipV; else c.schFlipH = !c.schFlipH; schUpdateWiresFor(c); }
+        Sch.render();
+      } else Sch.flip(t[0], vert);
+    } else if (k === "n" || k === "N"){
+      if (!Sch._lastP) return;
+      const pin = schFindPin(Sch._lastP.x, Sch._lastP.y, 16);
+      if (pin) Sch.addLabel(pin.comp, pin.pin);
+      else UI.toast("Hover a pin and press N to pin a net label to it");
     } else if (k === "w" || k === "W"){
       Sch.setMode(Sch.mode === "wire" ? "select" : "wire");
       UI.toast(Sch.mode === "wire"
-        ? "Wire mode — click a pin, then click corners (90° snapped); end on a pin. Esc exits."
+        ? "Wire mode — start on a pin, click corners (90° snapped), end on a same-net pin. R flips H/V-first, Esc exits."
         : "Wire mode off");
     } else if (k === "Escape"){
-      if (Sch.wireDraft){ Sch.wireDraft = null; Sch.render(); }
-      else if (Sch.mode === "wire"){ Sch.setMode("select"); }
-      else if (Sch.selWire){ Sch.selWire = null; Sch.render(); }
+      if (Sch.mode === "wire"){ Sch.wireDraft = null; Sch.setMode("select"); UI.toast("Wire mode off"); }
+      else if (Sch.selWire || Sch.selLabel){ Sch.selWire = null; Sch.selLabel = null; Sch.render(); }
+      else if (Sch.boxSel.length){ Sch.boxSel = []; Sch.render(); }
       else return;   // let the global Esc (deselect) run
-    } else if ((k === "Delete" || k === "Backspace") && Sch.selWire){
-      pushUndo("delete schematic wire");
-      State.schWires = State.schWires.filter(w => w !== Sch.selWire);
-      Sch.selWire = null;
-      Sch.render();
+    } else if (k === "Delete" || k === "Backspace"){
+      if (Sch.selLabel){ Sch.deleteLabel(Sch.selLabel); }
+      else if (Sch.selWire){
+        pushUndo("delete schematic wire");
+        State.schWires = State.schWires.filter(w => w !== Sch.selWire);
+        Sch.selWire = null;
+        Sch.render();
+      }
+      // always consumed: Delete on this tab must never delete the part from the BOARD
     } else if (k === "Enter" && Sch.wireDraft){
       Sch.finishWire(null);
+    } else if (k.startsWith("Arrow")){
+      const dx = k === "ArrowLeft" ? -1 : k === "ArrowRight" ? 1 : 0;
+      const dy = k === "ArrowUp" ? -1 : k === "ArrowDown" ? 1 : 0;
+      if (!Sch.nudgeSelection(dx, dy)){
+        // nothing selected → arrows pan the schematic view
+        Sch.panX -= dx * 60; Sch.panY -= dy * 60;
+        Sch.render();
+      }
     } else return;
     e.preventDefault();
     e.stopImmediatePropagation();
@@ -817,6 +1350,14 @@ Sch.wire = () => {
     $("#export-arrange").value = "manual";
     UI.openExport();
   });
+  const auto = $("#sch-autolabels");
+  if (auto){
+    auto.checked = schAutoLabelsOn();
+    auto.addEventListener("change", () => {
+      try { localStorage.setItem("pcbreveng.sch.autoLabels", auto.checked ? "on" : "off"); } catch(e){}
+      Sch.render();
+    });
+  }
 
   window.addEventListener("resize", () => {
     if (EditorTabs.current === "schematic"){ Sch.resize(); Sch.render(); }

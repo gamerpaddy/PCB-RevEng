@@ -20,7 +20,7 @@ Footprints.register({
 });
 
 Footprints.register({
-  id:"free", name:"Freestyle / custom", prefix:"U",
+  id:"free", name:"Freestyle", prefix:"U",   // imported footprints live in "Custom (imported)"
   // "num" (not int) so fractional bodies work — quick-add "free 4.5x5" etc.
   params:[{key:"w",label:"Body W mm",type:"num",def:10,min:1,max:200,step:0.5},
           {key:"h",label:"Body H mm",type:"num",def:10,min:1,max:200,step:0.5}],

@@ -82,6 +82,13 @@ function qaMatchFootprint(t){
   let s = t.toLowerCase().replace(/-+$/, "");
   const num = (re) => { const m = re.exec(s); return m ? parseInt(m[1],10) : null; };
 
+  // user-imported footprint: custom:<part of the stored name>
+  if (s.startsWith("custom:")){
+    const hit = typeof CustomFPs !== "undefined" ? CustomFPs.find(s.slice(7)) : null;
+    if (hit) return { fpId:"customfp", params:{name:hit.name} };
+    return null;
+  }
+
   if (QA_CHIP_SIZES.includes(s)) return { fpId:"chip2", params:{size:s} };
   // prefixed chip size: r0805 / c0603 / l0402 — the letter doubles as the type
   let cm;
@@ -102,9 +109,9 @@ function qaMatchFootprint(t){
   if (/^sm[abc]$/.test(s)) return { fpId:"sod", params:{pkg:s.toUpperCase()} };
 
   if (/^to-?92$/.test(s)) return { fpId:"to92", params:{} };
-  // TO-220 family with optional pin count: to220-5 / to-247 / to3p / to264 / to126
-  if ((m = /^to-?(220|247|264|126|3p)(?:-?([235]))?$/.exec(s))){
-    const pkg = { "220":"TO-220", "247":"TO-247", "264":"TO-264", "126":"TO-126", "3p":"TO-3P" }[m[1]];
+  // TO-220 family with optional pin count: to220-5 / to-247 / to3p / to3 / to264 / to126
+  if ((m = /^to-?(220|247|264|126|3p|3)(?:-?([235]))?$/.exec(s))){
+    const pkg = { "220":"TO-220", "247":"TO-247", "264":"TO-264", "126":"TO-126", "3p":"TO-3P", "3":"TO-3P" }[m[1]];
     const p = { pkg };
     if (m[2]) p.pins = m[2];
     return { fpId:"to220", params:p };
@@ -133,9 +140,12 @@ function qaMatchFootprint(t){
     return { fpId:"ecap_smd", params:p, prefix:"C" };
   }
   if ((m = /^(?:sip|hdr|header|pinheader|pin-header|pinhdr)-?(\d+)?$/.exec(s))) return { fpId:"sip", params: m[1]?{pins:+m[1]}:{} };
-  // dual-row header / IDC: idc10 (total pins) or 2x5 (cols)
+  // dual-row header / IDC: idc10 (total pins) or 2x5 (cols); 1x5 = single-row header
   if ((m = /^idc-?(\d+)?$/.exec(s))) return { fpId:"header2", params: m[1]?{pins:+m[1]}:{} };
+  if ((m = /^1x-?(\d+)$/.exec(s))) return { fpId:"sip", params:{pins:+m[1]} };
   if ((m = /^2x-?(\d+)$/.exec(s))) return { fpId:"header2", params:{pins:2*+m[1]} };
+  // SMD FPC/FFC flex socket: fpc32 p1 / ffc50 p0.5
+  if ((m = /^(?:fpc|ffc)-?(\d+)?$/.exec(s))) return { fpId:"fpc", params: m[1]?{pins:+m[1]}:{}, prefix:"J" };
   // screw terminal block: screw / terminal / tb, optional way count (screw2, terminal-3)
   if ((m = /^(?:screw|terminal|term|tb|klemme)-?(\d+)?$/.exec(s)))
     return { fpId:"screw", params: m[1]?{pins:+m[1]}:{}, prefix:"J" };
@@ -160,6 +170,9 @@ function qaMatchFootprint(t){
   // freestyle component, optional body size: free / free4x5 / free-4.5x5
   if ((m = /^free(?:-?(\d+(?:\.\d+)?)[x×](\d+(?:\.\d+)?))?$/.exec(s)))
     return { fpId:"free", params: m[1]?{w:parseFloat(m[1]), h:parseFloat(m[2])}:{} };
+  // less-strict retry: drop underscores/dots ("sot_23", "to.220") and have another go
+  const s2 = s.replace(/[_.]/g, "");
+  if (s2 !== s) return qaMatchFootprint(s2);
   return null;
 }
 
@@ -325,6 +338,56 @@ function parseQuickQuery(str){
 
 /* ---------------- popup ---------------- */
 
+/* clickable example queries (right panel) */
+const QA_EXAMPLES = [
+  "0805 10k", "cap 0603 100n", "res tht 4k7", "mks 100n",
+  "sot23 npn 2n2222", "to92 bc547", "to220-3 irfz44n", "to3 2n3055",
+  "sod123 schottky", "led 0603", "ecap d8 470u",
+  "soic14 74hc00", "dip8 ne555", "qfp32 atmega328",
+  "1x5", "2x10", "idc16 p2", "sip4 1mm",
+  "fpc32 p1", "ffc50 p0.5", "jst xh 4pin", "screw 3way",
+  "xtal hc49 16mhz", "tp d2", "m3", "free 4x5",
+];
+
+/* last-used queries, newest first (retained per browser, capped at 20) */
+function qaHistory(){
+  try { return JSON.parse(localStorage.getItem("pcbreveng.qaHistory") || "[]"); } catch(e){ return []; }
+}
+function qaPushHistory(q){
+  q = (q || "").trim();
+  if (!q) return;
+  const h = [q, ...qaHistory().filter(x => x !== q)].slice(0, 20);
+  try { localStorage.setItem("pcbreveng.qaHistory", JSON.stringify(h)); } catch(e){}
+}
+
+/* fill the history (left) / examples (right) side panels with clickable entries */
+QuickAdd.renderSides = () => {
+  const fill = (sel, items, emptyText) => {
+    const box = $(sel);
+    if (!box) return;
+    box.innerHTML = "";
+    if (!items.length && emptyText){
+      const d = document.createElement("div");
+      d.className = "panel-hint"; d.textContent = emptyText;
+      box.appendChild(d);
+      return;
+    }
+    for (const q of items){
+      const b = document.createElement("button");
+      b.type = "button"; b.textContent = q; b.title = q;
+      b.addEventListener("click", () => {
+        const inp = $("#qa-input");
+        inp.value = q;
+        QuickAdd.update();
+        inp.focus();
+      });
+      box.appendChild(b);
+    }
+  };
+  fill("#qa-hist-list", qaHistory(), "Placed parts appear here for quick reuse.");
+  fill("#qa-ex-list", QA_EXAMPLES, "");
+};
+
 QuickAdd.open = (w) => {
   QuickAdd.active = true;
   QuickAdd.pos = { x:w.x, y:w.y };
@@ -335,6 +398,7 @@ QuickAdd.open = (w) => {
   inp.value = "";
   $("#qa-info").textContent = QA_PROMPT;
   $("#qa-info").className = "qa-info";
+  QuickAdd.renderSides();
   QuickAdd.updateInfo();
   $("#qa-dialog").showModal();
   QuickAdd.render();
@@ -368,7 +432,7 @@ QuickAdd.update = () => {
   QuickAdd.render(); requestRender();
 };
 
-const QA_PROMPT = "Type e.g.  0805 10k · res tht 01C · sot23 npn 2n2222 · soic14 74hc130 · ecap d8 · mks 100n · screw 3way · jst xh 4pin · free 4x5";
+const QA_PROMPT = "Type e.g.  0805 10k · sot23 npn 2n2222 · soic14 74hc130 · 1x5 · idc16 · fpc32 p1 · custom:name · free 4x5  — or click an example";
 
 /* the "next free" reference for a prefix WITHOUT reserving it (nextRef mutates counters) */
 function qaPreviewRef(prefix){
@@ -507,6 +571,7 @@ QuickAdd.place = () => {
   autoConnectPins(comp);
   UI.select({type:"comp", comp});
   UI.toast("Placed " + ref + " (" + fp.label + ")");
+  qaPushHistory($("#qa-input").value);
   QuickAdd.close();
   requestRender();
 };
