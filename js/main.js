@@ -630,8 +630,9 @@ function wireKeyboard(){
         case "z": e.preventDefault(); if (e.shiftKey ? redo() : undo()) afterHistory(); return;
         case "y": e.preventDefault(); if (redo()) afterHistory(); return;
         case "d": e.preventDefault(); duplicateSelection(); return;
-        case "c": e.preventDefault(); copySelection(); return;
-        case "v": e.preventDefault(); pasteClipboard(); return;
+        // copy/paste is a visual-editor feature only (paste places on the board)
+        case "c": if (EditorTabs.current === "visual"){ e.preventDefault(); copySelection(); } return;
+        case "v": if (EditorTabs.current === "visual"){ e.preventDefault(); pasteClipboard(); } return;
         case "f": e.preventDefault(); UI.openPartsDialog(); return;
         // Guard the browser's Ctrl+W (close tab) / Ctrl+T (new tab) so a mis-hit while
         // routing doesn't nuke the tab. preventDefault is best-effort (most browsers reserve
