@@ -101,6 +101,7 @@ const KEY_GROUPS = [
   ["view.",     "View & dialogs"],
   ["file.",     "File"],
   ["layer.",    "Image layers"],
+  ["sch.",      "Schematic editor"],
   ["quickadd.", "Quick-add popup"],
 ];
 

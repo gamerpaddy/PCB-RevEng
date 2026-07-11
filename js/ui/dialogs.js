@@ -44,10 +44,9 @@ UI.openExport = () => {
    on that row (and may regroup); custom columns store per-part values in component.bom
    and aggregate to a row value (blank when the parts disagree). */
 UI.openBomEditor = () => {
-  const dlg = $("#bom-dialog");
-  if (typeof loadKicadFootprints === "function") loadKicadFootprints(); // for the footprint check
-  UI._renderBomTable();
-  if (!dlg.open) dlg.showModal();
+  // the BOM editor lives in its own tab now — EditorTabs.show("bom") loads the
+  // KiCad footprint list and renders the table
+  EditorTabs.show("bom");
 };
 
 UI._renderBomTable = () => {

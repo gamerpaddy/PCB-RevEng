@@ -456,6 +456,19 @@ function _symKind(c){
 /* the resolved symbol definition for a component, or null when it should stay a box */
 function schSymFor(c){ const k = _symKind(c); return k ? SCH_SYM[k] : null; }
 
+/* rotate a symbol-local point (mm, +y up) by the component's schematic rotation
+   (c.schRot, CCW 90° steps). Shared by the exporter and the Schematic tab. */
+function schRot2d(x, y, rot){
+  switch (((rot || 0) % 360 + 360) % 360){
+    case 90:  return { x: -y, y:  x };
+    case 180: return { x: -x, y: -y };
+    case 270: return { x:  y, y: -x };
+    default:  return { x, y };
+  }
+}
+/* a component's normalized schematic rotation */
+function schRotOf(c){ return ((c.schRot || 0) % 360 + 360) % 360; }
+
 /* the component's "type" for grouping/sorting — the leading letters of its ref
    designator (R, C, U, Q…), upper-cased. */
 function _refType(c){ return (/^[A-Za-z]+/.exec(c.ref)||["U"])[0].toUpperCase(); }
@@ -631,13 +644,44 @@ function schArrangeClosest(geo){
   return pos;
 }
 
-/* dispatch the requested arrangement mode ("closest"|"pcb"|"type"|"name"). */
+/* "Manual" — each component's saved schematic position (c.schX/schY in schematic mm,
+   set by dragging in the Schematic tab). Parts never placed there yet are packed into
+   grid rows BELOW the arranged ones; with no arranged parts at all this degrades to
+   the default grouped grid. Shared by the exporter and the Schematic tab's seeding. */
+function schArrangeManual(geo){
+  const comps = State.components.filter(c => geo.has(c.id));
+  const pos = new Map();
+  const missing = [];
+  let maxY = 0, any = false;
+  for (const c of comps){
+    if (typeof c.schX === "number" && typeof c.schY === "number"){
+      pos.set(c.id, { x: c.schX, y: c.schY });
+      maxY = Math.max(maxY, c.schY + geo.get(c.id).bh/2);
+      any = true;
+    } else missing.push(c);
+  }
+  if (!any) return schArrange("type", geo);
+  if (missing.length){
+    let X = 30, Y = maxY + 25, rowH = 0;
+    for (const c of missing){
+      const g = geo.get(c.id);
+      if (X > 320){ X = 30; Y += rowH + 15; rowH = 0; }
+      rowH = Math.max(rowH, g.bh + 10);
+      pos.set(c.id, { x: X, y: Y });
+      X += g.bw + 15;
+    }
+  }
+  return pos;
+}
+
+/* dispatch the requested arrangement mode ("closest"|"pcb"|"type"|"name"|"manual"). */
 function schArrange(mode, geo){
   const comps = State.components;
   if (!comps.length) return new Map();
   switch (mode){
     case "pcb":     return schArrangePCB(geo);
     case "closest": return schArrangeClosest(geo);
+    case "manual":  return schArrangeManual(geo);
     case "name":    return schGridLayout([...comps].sort((a,b)=> _refCmp(a.ref,b.ref)), geo, null);
     case "type":
     default: {
@@ -743,8 +787,9 @@ function exportKiCadSch(mode){
     const g = geo.get(c.id);
     const p = pos.get(c.id) || { x: 30, y: 30 };
     const X = p.x, Y = p.y;
+    const rot = schRotOf(c);   // manual rotation from the Schematic tab (R key)
     const sym = "REV_" + c.ref + "_" + c.id;
-    L.push('  (symbol (lib_id "reveng:' + sym + '") (at ' + F(X) + ' ' + F(Y) + ' 0) (unit 1) (in_bom yes) (on_board yes)');
+    L.push('  (symbol (lib_id "reveng:' + sym + '") (at ' + F(X) + ' ' + F(Y) + ' ' + rot + ') (unit 1) (in_bom yes) (on_board yes)');
     L.push('    (uuid ' + _uuid() + ')');
     L.push('    (property "Reference" "' + _schEsc(c.ref) + '" (at ' + F(X) + ' ' + F(Y-g.h/2-2.54) + ' 0) (effects (font (size 1.27 1.27))))');
     L.push('    (property "Value" "' + _schEsc(c.value || c.part || "~") + '" (at ' + F(X) + ' ' + F(Y+g.h/2+2.54) + ' 0) (effects (font (size 1.27 1.27))))');
@@ -757,11 +802,14 @@ function exportKiCadSch(mode){
       const net = getNet(p2.netId);
       if (!net) continue;
       const pg = g.pins[i] || { x: -g.w/2-2.54, y: 0, angle: 0 };
-      const onLeft = pg.angle === 0;
-      const px = X + pg.x;
-      const py = Y - pg.y; // schematic y axis points down
-      L.push('  (global_label "' + _schEsc(net.name) + '" (shape passive) (at ' + F(px) + ' ' + F(py) + ' ' + (onLeft?180:0) + ') (fields_autoplaced)');
-    L.push('    (effects (font (size 1.27 1.27)) (justify ' + (onLeft?"right":"left") + '))');
+      const rp = schRot2d(pg.x, pg.y, rot);            // pin offset follows the instance rotation
+      const eff = ((pg.angle || 0) + rot) % 360;       // effective pin direction after rotation
+      const px = X + rp.x;
+      const py = Y - rp.y; // schematic y axis points down
+      const labAngle = (eff + 180) % 360;              // label points away from the body
+      const justRight = labAngle === 180 || labAngle === 270;
+      L.push('  (global_label "' + _schEsc(net.name) + '" (shape passive) (at ' + F(px) + ' ' + F(py) + ' ' + labAngle + ') (fields_autoplaced)');
+    L.push('    (effects (font (size 1.27 1.27)) (justify ' + (justRight?"right":"left") + '))');
       L.push('    (uuid ' + _uuid() + '))');
     }
   }

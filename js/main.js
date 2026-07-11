@@ -262,26 +262,9 @@ function wireSettings(){
   lsel.innerHTML = LAYER_COUNTS.map(n => `<option value="${n}">${n} layer${n>1?"s":""}</option>`).join("");
   lsel.addEventListener("change", ()=> setLayerCount(parseInt(lsel.value,10)));
 
-  // These sliders overwrite EVERY via's r / EVERY trace's width (including sizes carried in
-  // from an import). Snapshot once per drag so one undo restores the original geometry: arm
-  // on the first `input` of a drag, disarm on `change` (pointer release).
+  // Snapshot once per slider drag so one undo restores the original value: arm on the
+  // first `input` of a drag, disarm on `change` (pointer release).
   const armSliderUndo = (el, label) => { if (!el._sliderArmed){ pushUndo(label); el._sliderArmed = true; } };
-  $("#set-via").addEventListener("change", e => { e.target._sliderArmed = false; });
-  $("#set-via").addEventListener("input", e => {
-    armSliderUndo(e.target, "via size (all vias)");
-    State.viaR = +e.target.value;
-    for (const v of State.vias) v.r = State.viaR;
-    $("#set-via-val").textContent = (State.viaR*2/State.pxPerMm).toFixed(2) + " mm";
-    requestRender();
-  });
-  $("#set-trace").addEventListener("change", e => { e.target._sliderArmed = false; });
-  $("#set-trace").addEventListener("input", e => {
-    armSliderUndo(e.target, "trace width (all traces)");
-    State.traceW = +e.target.value;
-    for (const t of State.traces) t.width = State.traceW;
-    $("#set-trace-val").textContent = State.traceW + " px";
-    requestRender();
-  });
   // these settings are persisted project state (diffSnapshots reports them), so they
   // get an undo entry too — otherwise their change is misattributed to the NEXT
   // action's history diff (pushUndo also marks the project dirty via autosave)
@@ -385,10 +368,6 @@ function wireSettings(){
 
 function syncSettings(){
   $("#set-layers").value = String(State.layerCount);
-  $("#set-via").value = State.viaR;
-  $("#set-via-val").textContent = (State.viaR*2/State.pxPerMm).toFixed(2) + " mm";
-  $("#set-trace").value = State.traceW;
-  $("#set-trace-val").textContent = State.traceW + " px";
   $("#set-compview").value = State.compView;
   $("#set-traceview").value = State.traceView;
   $("#set-reftext").value = State.refTextSize;
@@ -859,7 +838,6 @@ function wireDialogs(){
     const f = netlistFor(fmt, $("#export-arrange").value);
     downloadFile((f.base || "netlist") + "." + f.ext, f.text, f.mime);
   });
-  $("#bom-close").addEventListener("click", ()=> $("#bom-dialog").close());
   $("#bom-addcol").addEventListener("click", ()=> UI.addBomColumn());
   $("#bom-export").addEventListener("click", ()=>{
     const f = netlistFor("bom");
@@ -907,11 +885,18 @@ function wireLab(){
     requestRender();
   };
   const qa = $("#lab-quickadd");
-  $("#btn-lab").addEventListener("click", ()=>{ chk.checked = !!View.labViaHi; maxIn.value = View.labViaMax; qa.checked = QuickAdd.enabled(); $("#lab-dialog").showModal(); });
+  const schChk = $("#lab-schematic");
+  $("#btn-lab").addEventListener("click", ()=>{ chk.checked = !!View.labViaHi; maxIn.value = View.labViaMax; qa.checked = QuickAdd.enabled(); schChk.checked = SchEnabled(); $("#lab-dialog").showModal(); });
   $("#lab-close").addEventListener("click", ()=> $("#lab-dialog").close());
   chk.addEventListener("change", apply);
   maxIn.addEventListener("input", apply);
   qa.addEventListener("change", ()=>{ try{ localStorage.setItem("pcbreveng.quickAdd", qa.checked?"on":"off"); }catch(e){} });
+  // schematic-editor tab (schematic.js) — retained like every lab setting
+  schChk.addEventListener("change", ()=>{
+    try { localStorage.setItem("pcbreveng.lab.schematic", schChk.checked ? "on" : "off"); } catch(e){}
+    EditorTabs.refreshLabTab();
+    UI.toast(schChk.checked ? "Schematic tab enabled (top left)" : "Schematic tab disabled");
+  });
 
   // clear/remove-all: bulk-delete every object of the ticked kinds (undoable)
   $("#lab-clear-go").addEventListener("click", () => {

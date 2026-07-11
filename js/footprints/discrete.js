@@ -77,13 +77,22 @@ Footprints.register({
 });
 
 Footprints.register({
-  id:"to220", name:"TO-220 / TO-247", prefix:"Q",
-  params:[{key:"pins",label:"Pins",type:"select",def:"3",options:["2","3","5"]},
-          {key:"pitch",label:"Pitch",type:"select",def:"2.54",options:["1.7","2.54","5.08"]}],
+  id:"to220", name:"TO-220 / 247 / 3P / 264 / 126", prefix:"Q",
+  params:[{key:"pkg",label:"Package",type:"select",def:"TO-220",
+           options:["TO-220","TO-247","TO-3P","TO-264","TO-126"]},
+          {key:"pins",label:"Pins",type:"select",def:"3",options:["2","3","5"]},
+          {key:"pitch",label:"Pitch",type:"select",def:"auto",options:["auto","1.7","2.54","5.08","5.45"]}],
   gen(p){
-    const n=parseInt(p.pins,10), pins=[], pitch=parseFloat(p.pitch);
-    for (let i=0;i<n;i++) pins.push(_pin(i+1,(i-(n-1)/2)*pitch,0,{shape:"circle",w:1.6,h:1.6}));
-    return { label:"TO-220-"+n, pins, body:{w:Math.max(10.2,n*pitch+3),h:4.6},
-      kicad:"Package_TO_SOT_THT:TO-220-"+n+"_Vertical" };
+    // [body W, body H, lead Ø, default pitch] mm per package family
+    const dims = {
+      "TO-220":[10.2,4.6,1.6,2.54], "TO-126":[8.0,3.2,1.4,2.54],
+      "TO-247":[15.9,5.2,2.0,5.45], "TO-3P":[15.5,5.0,2.0,5.45], "TO-264":[20.0,5.6,2.0,5.45] };
+    const [bw,bh,lead,defPitch] = dims[p.pkg] || dims["TO-220"];
+    const n = parseInt(p.pins,10);
+    const pitch = p.pitch === "auto" ? defPitch : parseFloat(p.pitch);
+    const pins = [];
+    for (let i=0;i<n;i++) pins.push(_pin(i+1,(i-(n-1)/2)*pitch,0,{shape:"circle",w:lead,h:lead}));
+    return { label:p.pkg+"-"+n, pins, body:{w:Math.max(bw,n*pitch+3),h:bh},
+      kicad:"Package_TO_SOT_THT:"+p.pkg+"-"+n+"_Vertical" };
   }
 });

@@ -446,3 +446,34 @@ dialog::backdrop{background:rgba(0,0,0,.55);}
 ::-webkit-scrollbar{width:9px; height:9px;}
 ::-webkit-scrollbar-thumb{background:#323c49; border-radius:5px;}
 ::-webkit-scrollbar-track{background:transparent;}
+
+/* ---- editor tabs (Visual / Schematic / BOM) — slim line ABOVE the topbar ---- */
+#editor-tabs{
+  display:flex; gap:2px; padding:3px 10px 0; flex:0 0 auto;
+  background:#0f1216; border-bottom:1px solid var(--line); font-size:12px;
+}
+.ed-tab{
+  background:transparent; border:1px solid transparent; border-bottom:none;
+  color:var(--fg-dim); padding:3px 16px 5px; margin-bottom:-1px;
+  border-radius:6px 6px 0 0; cursor:pointer; font-size:12px; line-height:1.4;
+}
+.ed-tab:hover{color:var(--fg); background:var(--bg3);}
+.ed-tab.active{
+  background:var(--bg2); border-color:var(--line); border-bottom:1px solid var(--bg2);
+  color:var(--fg); font-weight:600;
+}
+
+/* ---- schematic editor pane ---- */
+#schematic-pane{flex:1 1 auto; min-height:0; display:flex; flex-direction:column; background:#0d0f12;}
+#sch-toolbar{
+  display:flex; align-items:center; gap:6px; padding:6px 10px; flex:0 0 auto;
+  background:var(--bg2); border-bottom:1px solid var(--line); font-size:12px;
+}
+#sch-toolbar .panel-hint{margin:0; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+#sch-canvas-wrap{flex:1 1 auto; position:relative; min-height:0;}
+#sch-canvas{position:absolute; inset:0; width:100%; height:100%; cursor:default;}
+
+/* ---- BOM pane ---- */
+#bom-pane{flex:1 1 auto; min-height:0; display:flex; flex-direction:column; padding:8px 12px;}
+#bom-toolbar{display:flex; align-items:center; gap:8px; flex:0 0 auto;}
+#bom-pane #bom-table-wrap{flex:1 1 auto; max-height:none; min-width:0;}

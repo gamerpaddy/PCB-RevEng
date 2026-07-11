@@ -24,34 +24,69 @@ const QA_CHIP_SIZES = ["0201","0402","0406","0603","0612","0805","1206","1210","
 // component-type keywords → refdes prefix (+ optional schematic symbol override).
 // `val:true` = the keyword itself becomes the value (semiconductors: "npn", "diode"…),
 // and value-ish tokens ("2n3337") are treated as PART NUMBERS, not values.
+// `fpHint` = footprint id to fall back on when no package token was given (film caps
+// are always axial THT, connectors default to a pin strip, …).
 const QA_TYPES = [
-  [/^(res|resistor|rs)$/, {prefix:"R"}],
-  [/^(cap|capacitor|kondensator)$/, {prefix:"C"}],
-  [/^(ind|inductor|coil|choke|ferrite|fb)$/, {prefix:"L"}],
+  [/^(res|resistor|rs|widerstand)$/, {prefix:"R"}],
+  [/^(cap|capacitor|kondensator|ker|ceramic|mlcc)$/, {prefix:"C"}],
+  [/^(film|foil|folie|mks|mkp|mkt|fkp|fks|wima)$/, {prefix:"C", fpHint:"axial", tht:true}],  // film/foil caps → axial THT
+  [/^(ind|inductor|coil|spule|drossel|choke|ferrite|fb|bead)$/, {prefix:"L"}],
   [/^npn$/, {prefix:"Q", sym:"npn", val:true}],
   [/^pnp$/, {prefix:"Q", sym:"pnp", val:true}],
-  [/^(nmos|nfet|n-mos|n-fet)$/, {prefix:"Q", sym:"nmos", val:true}],
-  [/^(pmos|pfet|p-mos|p-fet)$/, {prefix:"Q", sym:"pmos", val:true}],
+  [/^(nmos|nfet|n-mos|n-fet|nch)$/, {prefix:"Q", sym:"nmos", val:true}],
+  [/^(pmos|pfet|p-mos|p-fet|pch)$/, {prefix:"Q", sym:"pmos", val:true}],
   [/^(mosfet|fet|transistor|trans|tr)$/, {prefix:"Q", val:true}],
   [/^(diode|di)$/, {prefix:"D", sym:"diode", val:true}],
   [/^led$/, {prefix:"D", sym:"led", val:true}],
   [/^zener$/, {prefix:"D", sym:"zener", val:true}],
   [/^(schottky|sk)$/, {prefix:"D", sym:"schottky", val:true}],
-  [/^(xtal|crystal|resonator|osc)$/, {prefix:"Y"}],
+  [/^(xtal|crystal|quarz|resonator|osc|oscillator)$/, {prefix:"Y"}],
+  [/^(fuse|sicherung|polyfuse|ptc-?fuse)$/, {prefix:"F", sym:"fuse", val:true}],
+  [/^(bat|batt|battery|cell|coincell)$/, {prefix:"BT", sym:"battery", val:true}],
+  [/^(sw|switch|button|btn|tact|taster)$/, {prefix:"SW", fpHint:"sip"}],
+  [/^(con|conn|connector|jack|plug|socket)$/, {prefix:"J", fpHint:"sip"}],
+  [/^(relay|relais)$/, {prefix:"K", fpHint:"dip"}],
+  [/^(ntc|ptc|thermistor)$/, {prefix:"TH"}],   // value stays free (ntc 10k → value 10k)
+  [/^(varistor|mov)$/, {prefix:"RV"}],
   [/^(ic|u|box|generic)$/, {prefix:"U", sym:"box"}],   // generic IC → U prefix + plain box symbol
 ];
 
-// a value-ish token: 10k, 4k7, 100n, 1u, 0R, 223, 10uF, 4.7k, 1M2 …
+// mounting technology keywords, consumed anywhere in the query: "tht" biases every
+// type fallback to its through-hole variant and converts an SMD e-cap / crystal
+const QA_THT_RE = /^(tht|through|throughhole|through-hole|bedrahtet)$/;
+const QA_SMD_RE = /^smd$/;
+
+// a value-ish token: 10k, 4k7, 100n, 1u, 0R, 223, 10uF, 4.7k, 1M2 — plus the SMD
+// resistor code formats the resolver understands: EIA-96 (01C), R/K/M-leading
+// decimal notation (R005, R47, K15) and milliohm notation (5m0, 5mR)
 function qaLooksLikeValue(t){
-  return /^[0-9]+(\.[0-9]+)?[rkmnpuµ]?[0-9]*f?$/i.test(t) && /[0-9]/.test(t);
+  if (/^[0-9]+(\.[0-9]+)?[rkmnpuµ]?[0-9]*f?$/i.test(t) && /[0-9]/.test(t)) return true;
+  if (/^\d{2}[zyrxsabhcdef]$/i.test(t)) return true;      // EIA-96: 01C = 10k
+  if (/^[rkm]\d+$/i.test(t)) return true;                 // R005 / R47 / K15 / M1
+  if (/^\d*m\d*r?$/.test(t) && /\d/.test(t)) return true; // 5m0 / 5mR (milliohms)
+  return false;
 }
 
-/* map one token → {fpId, params, label} footprint, or null */
+/* nearest option of a select param (options are numeric strings like "2.5") */
+function qaNearestOption(options, want){
+  let best = options[0], bd = Infinity;
+  for (const o of options){ const d = Math.abs(parseFloat(o) - want); if (d < bd){ bd = d; best = o; } }
+  return best;
+}
+
+/* map one token → {fpId, params, prefix?} footprint, or null.
+   A trailing dash ("to220-", "soic-") is tolerated — it's the user mid-typing a
+   suffix like "to220-5", and must not derail the match. `prefix` (optional) is a
+   refdes hint the token itself carries (r0805 → R, c0603 → C). */
 function qaMatchFootprint(t){
-  const s = t.toLowerCase();
+  let s = t.toLowerCase().replace(/-+$/, "");
   const num = (re) => { const m = re.exec(s); return m ? parseInt(m[1],10) : null; };
 
   if (QA_CHIP_SIZES.includes(s)) return { fpId:"chip2", params:{size:s} };
+  // prefixed chip size: r0805 / c0603 / l0402 — the letter doubles as the type
+  let cm;
+  if ((cm = /^([rcl])(\d{4})$/.exec(s)) && QA_CHIP_SIZES.includes(cm[2]))
+    return { fpId:"chip2", params:{size:cm[2]}, prefix:cm[1].toUpperCase() };
 
   // SOT-23 family (optional pin-count suffix: sot23-5 / sot-23-5 / sot235)
   let m;
@@ -67,8 +102,13 @@ function qaMatchFootprint(t){
   if (/^sm[abc]$/.test(s)) return { fpId:"sod", params:{pkg:s.toUpperCase()} };
 
   if (/^to-?92$/.test(s)) return { fpId:"to92", params:{} };
-  // TO-220 / TO-247 with optional pin count: to220-5 / to-220-5 / to2205
-  if ((m = /^to-?(220|247)(?:-?([235]))?$/.exec(s))) return { fpId:"to220", params: m[2]?{pins:m[2]}:{} };
+  // TO-220 family with optional pin count: to220-5 / to-247 / to3p / to264 / to126
+  if ((m = /^to-?(220|247|264|126|3p)(?:-?([235]))?$/.exec(s))){
+    const pkg = { "220":"TO-220", "247":"TO-247", "264":"TO-264", "126":"TO-126", "3p":"TO-3P" }[m[1]];
+    const p = { pkg };
+    if (m[2]) p.pins = m[2];
+    return { fpId:"to220", params:p };
+  }
 
   if ((m = /^(?:soic|so|sop)-?(\d+)$/.exec(s))) return { fpId:"soic", params:{pins:+m[1]} };
   if ((m = /^tssop-?(\d+)$/.exec(s))) return { fpId:"soic", params:{pins:+m[1], pitch:"0.65", width:"4.4"} };
@@ -81,11 +121,42 @@ function qaMatchFootprint(t){
   if (/^bga$/.test(s)) return { fpId:"grid", params:{} };
 
   if ((m = /^melf-?(0102|0204|0207)?$/.exec(s))) return { fpId:"melf", params: m[1]?{size:m[1]}:{} };
-  if (/^axial$/.test(s)) return { fpId:"axial", params:{} };
-  if (/^(radial)$/.test(s)) return { fpId:"radial", params:{} };
-  if (/^(ecap|e-cap|electrolytic|elec)$/.test(s)) return { fpId:"ecap_smd", params:{} };
-  if ((m = /^(?:sip|hdr|header)-?(\d+)?$/.exec(s))) return { fpId:"sip", params: m[1]?{pins:+m[1]}:{} };
+  if (/^(axial|ax)$/.test(s)) return { fpId:"axial", params:{}, prefix:"R" };
+  if (/^(radial|rad)$/.test(s)) return { fpId:"radial", params:{}, prefix:"C" };
+  // electrolytic cap, optional diameter suffix: ecap8 / elko6.3 (dNN also works as a modifier)
+  if ((m = /^(?:ecap|e-cap|electrolytic|elec|elko)(\d+(?:\.\d+)?)?$/.exec(s))){
+    const p = {};
+    if (m[1]){
+      const def = getFootprintDef("ecap_smd");
+      p.dia = qaNearestOption(def.params.find(pr => pr.key === "dia").options, parseFloat(m[1]));
+    }
+    return { fpId:"ecap_smd", params:p, prefix:"C" };
+  }
+  if ((m = /^(?:sip|hdr|header|pinheader|pin-header|pinhdr)-?(\d+)?$/.exec(s))) return { fpId:"sip", params: m[1]?{pins:+m[1]}:{} };
+  // dual-row header / IDC: idc10 (total pins) or 2x5 (cols)
+  if ((m = /^idc-?(\d+)?$/.exec(s))) return { fpId:"header2", params: m[1]?{pins:+m[1]}:{} };
+  if ((m = /^2x-?(\d+)$/.exec(s))) return { fpId:"header2", params:{pins:2*+m[1]} };
+  // screw terminal block: screw / terminal / tb, optional way count (screw2, terminal-3)
+  if ((m = /^(?:screw|terminal|term|tb|klemme)-?(\d+)?$/.exec(s)))
+    return { fpId:"screw", params: m[1]?{pins:+m[1]}:{}, prefix:"J" };
+  // JST family (+ bare series names) → JST/Molex 1×N; pitch follows the series
+  if ((m = /^(?:jst-?)?(xh|ph|zh|sh|eh|gh|vh)?(?:-?(\d+))?$/.exec(s)) && /^jst|^(xh|ph|zh|sh|eh|gh|vh)/.test(s)){
+    const series = m[1];
+    const pitchOf = { xh:2.5, eh:2.5, vh:2.5, ph:2.0, zh:1.5, sh:1.25, gh:1.25 };
+    const p = {};
+    if (series){
+      const def = getFootprintDef("jstxh");
+      p.pitch = qaNearestOption(def.params.find(pr => pr.key === "pitch").options, pitchOf[series] || 2.5);
+    }
+    if (m[2]) p.pins = +m[2];
+    return { fpId:"jstxh", params:p, prefix:"J" };
+  }
+  if (/^molex$/.test(s)) return { fpId:"jstxh", params:{}, prefix:"J" };
   if (/^(xtal|crystal|resonator|osc)$/.test(s)) return { fpId:"crystal", params:{} };
+  if (/^hc-?49$/.test(s)) return { fpId:"crystal", params:{pkg:"HC-49"}, prefix:"Y" };
+  if (/^(tp|testpoint|test-point)$/.test(s)) return { fpId:"pad1", params:{} };
+  if ((m = /^(?:mount|mounting|hole)$/.exec(s))) return { fpId:"mount", params:{} };
+  if ((m = /^m(2(?:\.5)?|3|4|5)$/.exec(s))) return { fpId:"mount", params:{size:"M"+m[1]} };
   // freestyle component, optional body size: free / free4x5 / free-4.5x5
   if ((m = /^free(?:-?(\d+(?:\.\d+)?)[x×](\d+(?:\.\d+)?))?$/.exec(s)))
     return { fpId:"free", params: m[1]?{w:parseFloat(m[1]), h:parseFloat(m[2])}:{} };
@@ -93,16 +164,55 @@ function qaMatchFootprint(t){
 }
 
 /* package-modifier tokens applied AFTER the footprint is known (pin counts, lead form,
-   freestyle body size). Returns true when the token was consumed. */
+   freestyle body size, diameters, pitch shorthand). Returns true when consumed. */
 function qaApplyModifier(fp, t){
   const s = t.toLowerCase();
+  const def = getFootprintDef(fp.fpId);
+  const param = (key) => def && def.params.find(p => p.key === key);
   let m;
-  // pin count as its own token: "5pin" / "5p" / "14pins" — for any footprint with a pins param
-  if ((m = /^(\d+)(?:p|pin|pins)$/.exec(s))){
-    const def = getFootprintDef(fp.fpId);
-    const pr = def && def.params.find(p => p.key === "pins");
+  // pin count as its own token: "5pin" / "5p" / "14pins" / "3way" — any footprint with a pins param
+  if ((m = /^(\d+)(?:p|pin|pins|way|ways)$/.exec(s))){
+    const pr = param("pins");
     if (pr){ fp.params.pins = pr.type === "select" ? String(+m[1]) : +m[1]; return true; }
     return false;
+  }
+  // pitch shorthand: "p3" / "p2.54" — any footprint with a pitch (or axial span) param
+  if ((m = /^p(\d+(?:\.\d+)?)$/.exec(s))){
+    const want = parseFloat(m[1]);
+    const pr = param("pitch") || param("span");
+    if (pr){ fp.params[pr.key] = pr.type === "select" ? qaNearestOption(pr.options, want) : want; return true; }
+    return false;
+  }
+  // diameter: "d8" / "d6.3" — e-cap size; on a radial THT cap it picks the pitch that
+  // yields roughly that body diameter (body ≈ pitch × 1.8)
+  if ((m = /^d(\d+(?:\.\d+)?)$/.exec(s))){
+    const want = parseFloat(m[1]);
+    if (fp.fpId === "ecap_smd"){ fp.params.dia = qaNearestOption(param("dia").options, want); return true; }
+    if (fp.fpId === "radial"){ fp.params.pitch = qaNearestOption(param("pitch").options, want/1.8); return true; }
+    if (fp.fpId === "pad1"){ fp.params.dia = want; return true; }
+    return false;
+  }
+  // radial cap body shape: round vs square (film/foil box caps)
+  if (fp.fpId === "radial"){
+    if (/^round$/.test(s)){ fp.params.shape = "Round"; return true; }
+    if (/^(square|box|foil|film)$/.test(s)){ fp.params.shape = "Square (foil)"; return true; }
+    if (/^(bipolar|np|non-?polar(ized)?)$/.test(s)){ fp.params.polarized = false; return true; }
+  }
+  // crystal package names
+  if (fp.fpId === "crystal"){
+    if (/^hc-?49$/.test(s)){ fp.params.pkg = "HC-49"; return true; }
+    if (/^3225$/.test(s)){ fp.params.pkg = "3225 SMD"; return true; }
+    if (/^5032$/.test(s)){ fp.params.pkg = "5032 SMD"; return true; }
+  }
+  // mounting-hole screw size
+  if (fp.fpId === "mount" && (m = /^m(2(?:\.5)?|3|4|5)$/.exec(s))){
+    fp.params.size = "M" + m[1]; return true;
+  }
+  // JST series name as its own token ("jst xh 4pin") → the series' pitch
+  if (fp.fpId === "jstxh" && (m = /^(xh|ph|zh|sh|eh|gh|vh)$/.exec(s))){
+    const pitchOf = { xh:2.5, eh:2.5, vh:2.5, ph:2.0, zh:1.5, sh:1.25, gh:1.25 };
+    fp.params.pitch = qaNearestOption(param("pitch").options, pitchOf[m[1]]);
+    return true;
   }
   // TO-92 lead form: "tri" / "triangle" / "wide" vs "inline" / "straight"
   if (fp.fpId === "to92"){
@@ -118,19 +228,25 @@ function qaApplyModifier(fp, t){
 }
 
 /* parse the whole query → placement values, or null if nothing recognised.
-   Two passes: 1) find the footprint + type keyword anywhere in the query,
-   2) classify the remaining tokens (modifiers / pitch / value / part) with that context. */
+   Two passes: 1) find the footprint, its modifiers, tht/smd and the type keyword
+   anywhere in the query, 2) classify the remaining tokens (pitch / value / part). */
 function parseQuickQuery(str){
   const toks = (str||"").trim().split(/\s+/).filter(Boolean);
   if (!toks.length) return null;
-  let fp = null, type = null;
+  let fp = null, type = null, tht = false;
   const rest = [];
   for (const t of toks){
+    const low = t.toLowerCase();
     if (!fp){ const f = qaMatchFootprint(t); if (f){ fp = f; continue; } }
+    // modifiers must run before type keywords: "radial foil" should set the radial
+    // cap's square body, not switch the type to a film cap
+    if (fp && qaApplyModifier(fp, t)) continue;
+    if (QA_THT_RE.test(low)){ tht = true; continue; }
+    if (QA_SMD_RE.test(low)){ tht = false; continue; }
     if (!type){
       let hit = null;
-      for (const [re, info] of QA_TYPES) if (re.test(t.toLowerCase())){ hit = {...info, tok:t.toLowerCase()}; break; }
-      if (hit){ type = hit; continue; }
+      for (const [re, info] of QA_TYPES) if (re.test(low)){ hit = {...info, tok:low}; break; }
+      if (hit){ type = hit; if (hit.tht) tht = true; continue; }
     }
     rest.push(t);
   }
@@ -140,8 +256,8 @@ function parseQuickQuery(str){
   const semi = !!(type && type.val);
   let value = "", pitchMm = null, partParts = [];
   for (const t of rest){
-    if (fp && qaApplyModifier(fp, t)) continue;   // "5pin", "triangle", "4.5x5" …
-    // a pitch token: 1mm / 0.8mm / 50mil (applied to footprints that have a pitch param)
+    if (fp && qaApplyModifier(fp, t)) continue;   // modifiers of a late footprint token
+    // a pitch token: 1mm / 0.8mm / 50mil (applied to footprints with a pitch/span param)
     let pm;
     if (pitchMm === null && (pm = /^(\d+(?:\.\d+)?)(mm|mil)$/i.exec(t))){
       pitchMm = pm[2].toLowerCase() === "mil" ? parseFloat(pm[1]) * 0.0254 : parseFloat(pm[1]);
@@ -153,34 +269,51 @@ function parseQuickQuery(str){
   if (type && type.val) value = type.tok;   // "npn" / "diode" / "led" … as the value
   if (!fp && !type && !value && pitchMm === null && !partParts.length) return null;
 
-  // fall back to a sensible footprint if only a value/type was given
+  // "tht" converts an explicitly-SMD package where a THT twin exists
+  if (fp && tht){
+    if (fp.fpId === "ecap_smd"){                     // SMD e-cap → radial THT, keeping ~the body Ø
+      const p = {};
+      if (fp.params.dia){
+        const pr = getFootprintDef("radial").params.find(x => x.key === "pitch");
+        p.pitch = qaNearestOption(pr.options, parseFloat(fp.params.dia) / 1.8);
+      }
+      fp = { fpId:"radial", params:p, prefix:"C" };
+    }
+    else if (fp.fpId === "crystal" && !fp.params.pkg) fp.params.pkg = "2-pin THT";
+    else if (fp.fpId === "pad1") fp.params.tht = true;
+  }
+
+  // fall back to a sensible footprint if only a value/type was given — honouring "tht"
+  // (res tht → axial, cap tht → radial, q tht → TO-92, diode tht → axial). Pure free
+  // text (no footprint, no type, no value) resolves to NOTHING — guessing a random
+  // SOIC here used to place surprise parts for half-typed package names.
   if (!fp){
-    if (type && (type.prefix === "R" || type.prefix === "C" || type.prefix === "L")) fp = { fpId:"chip2", params:{size:"0805"} };
-    else if (type && (type.prefix === "Q")) fp = { fpId:"sot23", params:{} };
-    else if (type && type.prefix === "D") fp = { fpId:"sod", params:{} };
-    else if (type && type.prefix === "Y") fp = { fpId:"crystal", params:{} };
-    else if (value) fp = { fpId:"chip2", params:{size:"0805"} };
-    else fp = { fpId:"soic", params:{} };
+    if (type && type.fpHint) fp = { fpId:type.fpHint, params: type.fpHint==="sip" ? {pins:2} : {} };
+    else if (type && (type.prefix === "R" || type.prefix === "L" || type.prefix === "TH" || type.prefix === "RV" || type.prefix === "F"))
+      fp = tht ? { fpId:"axial", params:{} } : { fpId:"chip2", params:{size:"0805"} };
+    else if (type && type.prefix === "C") fp = tht ? { fpId:"radial", params:{} } : { fpId:"chip2", params:{size:"0805"} };
+    else if (type && type.prefix === "Q") fp = tht ? { fpId:"to92", params:{} } : { fpId:"sot23", params:{} };
+    else if (type && type.prefix === "D") fp = tht ? { fpId:"axial", params:{} } : { fpId:"sod", params:{} };
+    else if (type && type.prefix === "Y") fp = { fpId:"crystal", params: tht ? {pkg:"2-pin THT"} : {} };
+    else if (type && type.prefix === "BT") fp = { fpId:"radial", params:{polarized:true} };
+    else if (type) fp = tht ? { fpId:"dip", params:{} } : { fpId:"soic", params:{} };
+    else if (value) fp = tht ? { fpId:"axial", params:{} } : { fpId:"chip2", params:{size:"0805"} };
+    else return null;
   }
 
   const def = getFootprintDef(fp.fpId);
-  // apply a parsed pitch to any footprint that exposes a "pitch" param (grid/soic/qfp/sip…)
-  if (pitchMm !== null && def && def.params.some(pr => pr.key === "pitch")){
-    const pr = def.params.find(p => p.key === "pitch");
-    if (pr.type === "select" && pr.options){
-      // snap to the nearest offered option (e.g. 1mm → "1.0")
-      let best = pr.options[0], bd = Infinity;
-      for (const o of pr.options){ const d = Math.abs(parseFloat(o) - pitchMm); if (d < bd){ bd = d; best = o; } }
-      fp.params.pitch = best;
-    } else {
-      fp.params.pitch = pitchMm;
-    }
+  // apply a parsed pitch to any footprint exposing a "pitch" (or axial "span") param
+  const pitchPr = def && (def.params.find(pr => pr.key === "pitch") || def.params.find(pr => pr.key === "span"));
+  if (pitchMm !== null && pitchPr){
+    fp.params[pitchPr.key] = (pitchPr.type === "select" && pitchPr.options)
+      ? qaNearestOption(pitchPr.options, pitchMm)   // snap to the nearest offered option
+      : pitchMm;
   }
-  let prefix = type ? type.prefix : (def && def.prefix) || "U";
+  let prefix = type ? type.prefix : fp.prefix || (def && def.prefix) || "U";
   // chip2 with a plain value but no explicit type: resistor by default (matches board convention)
   const sym = type ? (type.sym || null) : null;
 
-  // resolve bare resistor codes (223 → 22k) only for resistors
+  // resolve bare resistor codes (223 → 22k, 01C → 10k, R005 → 5m) only for resistors
   let val = value;
   if (val && prefix === "R" && typeof autoResolveValue === "function") val = autoResolveValue(val);
 
@@ -235,7 +368,7 @@ QuickAdd.update = () => {
   QuickAdd.render(); requestRender();
 };
 
-const QA_PROMPT = "Type e.g.  0805 10k · sot23 npn 2n2222 · soic14 74hc130 · ic sot23 ref30 · to-220-5 · free 4x5";
+const QA_PROMPT = "Type e.g.  0805 10k · res tht 01C · sot23 npn 2n2222 · soic14 74hc130 · ecap d8 · mks 100n · screw 3way · jst xh 4pin · free 4x5";
 
 /* the "next free" reference for a prefix WITHOUT reserving it (nextRef mutates counters) */
 function qaPreviewRef(prefix){
@@ -348,6 +481,7 @@ QuickAdd.rotate = (deg) => {
 QuickAdd.place = () => {
   const p = QuickAdd.parsed, fp = QuickAdd.fp;
   if (!p || !fp){ UI.toast("Nothing to place — type a component first"); return; }
+  if (!fp.pins.length && p.fpId !== "free"){ UI.toast("That footprint has no pads — check the query"); return; }
   const w = QuickAdd.pos;
   const rNew = Math.hypot(fp.body.w, fp.body.h)/2 * State.pxPerMm;
   for (const o of State.components){

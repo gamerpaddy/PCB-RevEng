@@ -56,6 +56,14 @@ const KeyActions = [
   { id:"file.bom",       label:"BOM editor",                    def:"",       btn:"#btn-bom",        run:clickBtn("#btn-bom") },
   { id:"layer.add",      label:"Add image layer",               def:"",       btn:"#btn-add-layer",  run:clickBtn("#btn-add-layer") },
   { id:"layer.addurl",   label:"Add image from URL",            def:"",       btn:"#btn-add-url",    run:clickBtn("#btn-add-url") },
+  // editor tabs (schematic.js) + schematic-pane buttons
+  { id:"view.tabvisual",    label:"Tab: Visual editor",         def:"",       btn:"#tab-visual",     run:clickBtn("#tab-visual") },
+  { id:"view.tabschematic", label:"Tab: Schematic editor",      def:"",       btn:"#tab-schematic",  run:clickBtn("#tab-schematic") },
+  { id:"view.tabbom",       label:"Tab: BOM editor",            def:"",       btn:"#tab-bom",        run:clickBtn("#tab-bom") },
+  { id:"sch.arrange",    label:"Schematic: apply auto-arrangement", def:"",   btn:"#sch-arrange-go", run:clickBtn("#sch-arrange-go") },
+  { id:"sch.fit",        label:"Schematic: zoom to fit",        def:"",       btn:"#sch-fit",        run:clickBtn("#sch-fit") },
+  { id:"sch.wiretool",   label:"Schematic: wire tool (extra key — W is fixed)", def:"", btn:"#sch-wire", run:clickBtn("#sch-wire") },
+  { id:"sch.export",     label:"Schematic: export dialog",      def:"",       btn:"#sch-export",     run:clickBtn("#sch-export") },
   // Quick-add popup (experimental) — used only while that dialog is open; defaults are a
   // bare-modifier tap / Enter so they don't clash with typing the part name in the field
   { id:"quickadd.rotcw", label:"Quick-add: rotate clockwise",     def:"Shift",   local:true, run:()=>{ if (QuickAdd.active) QuickAdd.rotate(90); } },

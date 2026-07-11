@@ -49,6 +49,7 @@ const State = {
   vias: [],             // {id,x,y,netId,r}
   traces: [],           // {id,side,netId,points:[{x,y}],width}
   notes: [],            // {id,x,y,text,color} — freeform sticky-note annotations pinned to board coords
+  schWires: [],         // schematic-editor wires: {id,netId,points:[{x,y}mm],a:{comp,pin}|null,b:{comp,pin}|null}
   nets: [],             // {id,name,color,auto}
   bomColumns: [],       // custom BOM column names (MPN, Supplier, …); per-part values live in component.bom
   _id: 1,
@@ -301,6 +302,7 @@ function snapshot(){
     vias: State.vias,
     traces: State.traces,
     notes: State.notes,
+    schWires: State.schWires,
     nets: State.nets,
     bomColumns: State.bomColumns,
     _id: State._id,
@@ -351,6 +353,7 @@ function applySnapshot(json){
   State.vias = s.vias;
   State.traces = s.traces;
   State.notes = s.notes || [];
+  State.schWires = s.schWires || [];
   State.nets = s.nets;
   State.bomColumns = s.bomColumns || [];
   State._id = s._id;
@@ -396,9 +399,9 @@ function selectiveUndo(i){
   // stays a single clean "revert: <action>".
   pushUndo("revert: " + entry.label.replace(/^revert:\s*/, ""));
   Undo.stack[Undo.stack.length - 1].isRevert = true;
-  for (const col of ["components","vias","traces","notes","nets"]){
-    const bm = new Map(before[col].map(o => [o.id, o]));
-    const am = new Map(after[col].map(o => [o.id, o]));
+  for (const col of ["components","vias","traces","notes","schWires","nets"]){
+    const bm = new Map((before[col] || []).map(o => [o.id, o]));
+    const am = new Map((after[col] || []).map(o => [o.id, o]));
     const cur = State[col];
     // objects created by that action → remove
     for (const id of am.keys()){
@@ -457,6 +460,7 @@ function _compAspects(b, a){
   if ((b.part ||"") !== (a.part ||""))          out.push("part");
   if ((b.kicad||"") !== (a.kicad||"") || b.fpId !== a.fpId) out.push("footprint");
   if (b.x !== a.x || b.y !== a.y || b.rot !== a.rot)        out.push("moved");
+  if (b.schX !== a.schX || b.schY !== a.schY)    out.push("schematic pos");
   if (b.side !== a.side)                         out.push("flipped");
   const pinNets = c => (c.pins||[]).map(p => p.netId || 0).join(",");
   if (pinNets(b) !== pinNets(a))                 out.push("net");
@@ -506,7 +510,7 @@ function diffSnapshots(beforeJson, afterJson){
   });
 
   // vias, traces & notes — counts only (no useful per-object name)
-  for (const [col, noun] of [["vias","via"], ["traces","trace"], ["notes","note"]]){
+  for (const [col, noun] of [["vias","via"], ["traces","trace"], ["notes","note"], ["schWires","schematic wire"]]){
     const d = diffColl(col);
     if (d.added.length)   parts.push("added "   + d.added.length   + " " + noun + (d.added.length>1?"s":""));
     if (d.removed.length) parts.push("removed " + d.removed.length + " " + noun + (d.removed.length>1?"s":""));
@@ -556,6 +560,7 @@ function serializeProject(){
     vias: State.vias,
     traces: State.traces,
     notes: State.notes,
+    schWires: State.schWires,
     layers: State.layers.map(l => ({
       // hosted (URL) layers persist only their link, never the bytes; uploaded layers
       // persist their dataURL as before
@@ -591,6 +596,7 @@ function loadProject(json, done){
   State.vias = s.vias || [];
   State.traces = s.traces || [];
   State.notes = s.notes || [];
+  State.schWires = s.schWires || [];
   State.layers = [];
   Undo.stack.length = 0; Undo.redo.length = 0;
   _imgVault.clear(); _imgVaultSeq = 1;   // fresh project → drop any cached bitmaps
@@ -647,6 +653,7 @@ function resetProject(){
   State.vias = [];
   State.traces = [];
   State.notes = [];
+  State.schWires = [];
   State.nets = [];
   State.bomColumns = [];
   State._id = 1;
