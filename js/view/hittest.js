@@ -71,8 +71,10 @@ function distToSeg(px,py,a,b){
    SMD pads only their own side. "any" (via tool) snaps to everything;
    omitted/null disables trace snapping. */
 function snapToConductor(wx, wy, traceSide, tightTrace, traceWidth, exclude){
-  const tol = 8 / View.zoom;         // vias
-  const traceTol = 42 / View.zoom;   // generous reach for dragging an anchor onto a trace
+  // user-set snap distance multiplier (Options → Input & snap) scales every reach below
+  const sf = (typeof UI !== "undefined" && UI.snapFactor) ? UI.snapFactor() : 1;
+  const tol = 8 * sf / View.zoom;         // vias
+  const traceTol = 42 * sf / View.zoom;   // generous reach for dragging an anchor onto a trace
   // when a trace width is supplied (drawing / moving an anchor) pads only snap when the
   // cursor is right at the pad CENTRE — no edge grabbing. The reach scales with the pad's
   // own size, clamped to 0.5×…2× the trace width, so tiny pads snap tight while big pads
@@ -82,7 +84,7 @@ function snapToConductor(wx, wy, traceSide, tightTrace, traceWidth, exclude){
   const filterPads = traceSide && traceSide !== "any";
   // widest distance a pad can still snap from, so a component whose bounding circle is
   // farther than that from the cursor can be skipped without touching its pads
-  const padReach = padCenter ? Math.max(tol, (traceWidth || 0) * 2) : tol;
+  const padReach = padCenter ? Math.max(tol, (traceWidth || 0) * 2 * sf) : tol;
   for (const c of State.components){
     if (Math.hypot(wx - c.x, wy - c.y) > compRadius(c) + padReach) continue; // quick reject
     const fp = compFootprint(c);
@@ -98,7 +100,7 @@ function snapToConductor(wx, wy, traceSide, tightTrace, traceWidth, exclude){
       if (padCenter){
         wp = pinWorldPos(c, fpin); d = Math.hypot(wx-wp.x, wy-wp.y);     // to pad centre
         const padR = Math.min(fpin.w, fpin.h) * s / 2;                   // pad's narrow half-extent
-        ptol = Math.max(traceWidth * 0.5, Math.min(padR, traceWidth * 2));
+        ptol = Math.max(traceWidth * 0.5, Math.min(padR, traceWidth * 2)) * sf;
       } else { d = pinEdgeDist(c, fpin, wx, wy); ptol = tol; }            // to pad edge (via tool)
       if (d <= ptol && d < bestD){ if (!wp) wp = pinWorldPos(c, fpin); bestD=d; best={x:wp.x,y:wp.y,attach:{type:"pin",comp:c,pinIdx:pi},netId:c.pins[pi].netId}; }
     }
@@ -110,7 +112,7 @@ function snapToConductor(wx, wy, traceSide, tightTrace, traceWidth, exclude){
     // should snap — whether DRAWING a trace onto it or dragging an anchor over it. So the
     // reach is the via's own radius (plus the small fixed tol), even in tight-draw mode.
     // Otherwise a large via/PTH would only connect on its tiny inner hole, not its ring.
-    const vtol = Math.max(tol, (v.r || State.viaR || 0));
+    const vtol = Math.max(tol, (v.r || State.viaR || 0) * sf);
     if (d <= vtol && d < bestD){ bestD=d; best={x:v.x,y:v.y,attach:{type:"via",via:v},netId:v.netId}; }
   }
   if (traceSide){
@@ -124,7 +126,7 @@ function snapToConductor(wx, wy, traceSide, tightTrace, traceWidth, exclude){
       // never snap onto a trace that isn't currently drawn (hidden, or on a copper side
       // that's filtered out by the trace-view setting) — X-ray shows all, so it snaps there
       if (!traceVisible(t)) continue;
-      const ttol = tightTrace ? ((t.width||3)/2 + 2/View.zoom) : traceTol;
+      const ttol = tightTrace ? ((t.width||3)/2 + 2/View.zoom) * sf : traceTol;
       for (let k=0; k<t.points.length-1; k++){
         const pr = projectOnSeg(wx, wy, t.points[k], t.points[k+1]);
         if (pr.d <= ttol && pr.d < tBestD){

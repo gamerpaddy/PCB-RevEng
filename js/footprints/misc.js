@@ -21,8 +21,9 @@ Footprints.register({
 
 Footprints.register({
   id:"free", name:"Freestyle / custom", prefix:"U",
-  params:[{key:"w",label:"Body W mm",type:"int",def:10,min:1,max:200,step:1},
-          {key:"h",label:"Body H mm",type:"int",def:10,min:1,max:200,step:1}],
+  // "num" (not int) so fractional bodies work — quick-add "free 4.5x5" etc.
+  params:[{key:"w",label:"Body W mm",type:"num",def:10,min:1,max:200,step:0.5},
+          {key:"h",label:"Body H mm",type:"num",def:10,min:1,max:200,step:0.5}],
   gen(p){
     const pins = (p.pinList || []).map(pl => {
       const shape = pl.shape || "circle";          // "circle" = round pad, "rect" = SMD rectangle
@@ -33,7 +34,8 @@ Footprints.register({
       // defaults to through-hole (with a drill), which is what a hand-placed round pad means
       return _pin(pl.num, pl.x, pl.y, { shape, w, h, tht: pl.tht });
     });
-    return { label:"Free-"+pins.length, pins, body:{w:p.w, h:p.h}, kicad:"" };
+    return { label:"Free-"+pins.length, pins,
+      body:{w:parseFloat(p.w)||10, h:parseFloat(p.h)||10}, kicad:"" };
   }
 });
 

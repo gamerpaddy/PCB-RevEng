@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PCB RevEng - Reverse Engineering Workbench</title>
 
-<link rel="stylesheet" href="css/style.css?v=75">
+<link rel="stylesheet" href="css/style.css?v=76">
 
 </head>
 <body>
@@ -163,8 +163,9 @@
     <div class="dlg-title">Quick add component</div>
     <div class="qa-body">
       <canvas id="qa-preview" width="240" height="180"></canvas>
-      <input id="qa-input" placeholder="e.g. 0805 10k · sot-23 npn · soic14 74hc130" autocomplete="off">
+      <input id="qa-input" placeholder="e.g. 0805 10k · sot23 npn 2n2222 · ic sot23 ref30 · to-220-5 · free 4x5" autocomplete="off">
       <div id="qa-info" class="qa-info"></div>
+      <div id="qa-facts" class="qa-facts" style="display:none"></div>
       <div class="qa-keys">Arrows nudge · Shift rotate CW · Ctrl rotate CCW · Enter place · Esc cancel  <span style="opacity:.7">(keys editable in the hotkey editor)</span></div>
       <div class="dlg-buttons">
         <button id="qa-full" type="button" title="Open the full footprint selector">Full selector…</button>
@@ -223,121 +224,160 @@
   <!-- ======= OPTIONS ======= -->
   <dialog id="options-dialog">
     <div class="dlg-title">Options</div>
+    <div id="settings-tabs" class="dlg-tabs">
+      <button type="button" class="dlg-tab active" data-tab="board">Board</button>
+      <button type="button" class="dlg-tab" data-tab="display">Display</button>
+      <button type="button" class="dlg-tab" data-tab="input">Input &amp; snap</button>
+      <button type="button" class="dlg-tab" data-tab="general">General</button>
+    </div>
     <div id="settings-panel">
-      <div class="set-row">
-        <label for="set-layers" title="Copper layer count of the board — adds inner layers to the side selectors">Copper layers</label>
-        <select id="set-layers"></select>
+
+      <!-- ---- Board: physical board properties (saved in the project) ---- -->
+      <div class="set-tab active" data-tab="board">
+        <div class="set-hint">Physical board properties — these are saved in the project file.</div>
+        <div class="set-row">
+          <label for="set-layers" title="Copper layer count of the board — adds inner layers to the side selectors">Copper layers</label>
+          <select id="set-layers"></select>
+          <div class="set-hint">Adds Inner 1…N to the draw-side selectors and via spans.</div>
+        </div>
+        <div class="set-row">
+          <label for="set-copper" title="Outer-layer (F.Cu/B.Cu) copper foil weight — feeds the trace current estimate for traces on the outer layers (IPC-2221)">Copper (outer)</label>
+          <select id="set-copper">
+            <option value="0.5">0.5 oz (17 µm)</option>
+            <option value="1">1 oz (35 µm)</option>
+            <option value="2">2 oz (70 µm)</option>
+            <option value="3">3 oz (105 µm)</option>
+          </select>
+        </div>
+        <div class="set-row">
+          <label for="set-copper-inner" title="Inner-layer copper foil weight — inner planes/traces are usually lighter (often 0.5 oz). Used for the current estimate on inner-layer traces.">Copper (inner)</label>
+          <select id="set-copper-inner">
+            <option value="0.5">0.5 oz (17 µm)</option>
+            <option value="1">1 oz (35 µm)</option>
+            <option value="2">2 oz (70 µm)</option>
+            <option value="3">3 oz (105 µm)</option>
+          </select>
+          <div class="set-hint">Copper weights feed the IPC-2221 trace current estimate in the inspector.</div>
+        </div>
+        <div class="set-row">
+          <label for="set-via" title="Display size of all vias — overwrites every via, one undo step">Via size <span id="set-via-val"></span></label>
+          <input type="range" id="set-via" min="3" max="40" step="1">
+        </div>
+        <div class="set-row">
+          <label for="set-trace" title="Display width of all traces — overwrites every trace, one undo step">Trace width <span id="set-trace-val"></span></label>
+          <input type="range" id="set-trace" min="1" max="30" step="1">
+          <div class="set-hint">⚠ These two overwrite EVERY via / trace on the board (imported sizes too). One undo restores them.</div>
+        </div>
       </div>
-      <div class="set-row">
-        <label for="set-via" title="Display size of all vias">Via size <span id="set-via-val"></span></label>
-        <input type="range" id="set-via" min="3" max="40" step="1">
+
+      <!-- ---- Display: what is drawn and how ---- -->
+      <div class="set-tab" data-tab="display">
+        <div class="set-hint">What is drawn and how. Nothing here changes the data.</div>
+        <div class="set-row">
+          <label for="set-compview" title="Hide component bodies that are on the far side of the board (their through-hole pads and vias stay visible)">Component bodies</label>
+          <select id="set-compview">
+            <option value="side">Viewed side only</option>
+            <option value="both">Both sides</option>
+          </select>
+        </div>
+        <div class="set-row">
+          <label for="set-traceview" title="Hide traces that are not on the active draw side (vias and pads stay visible)">Traces shown</label>
+          <select id="set-traceview">
+            <option value="active">Active side only</option>
+            <option value="all">All sides</option>
+          </select>
+        </div>
+        <div class="set-row">
+          <label for="set-reftext" title="Component reference label size">Reference text <span id="set-reftext-val"></span></label>
+          <input type="range" id="set-reftext" min="8" max="28" step="1">
+        </div>
+        <div class="set-row">
+          <label for="set-focusdim" title="Opacity of non-selected traces/pads/parts when a net is selected or hovered. Lower = the rest fades more so the focused net stands out.">Non-selected opacity <span id="set-focusdim-val"></span></label>
+          <input type="range" id="set-focusdim" min="0" max="80" step="1">
+          <div class="set-hint">How much everything else fades when a net is selected or hovered.</div>
+        </div>
+        <div class="set-row">
+          <label for="set-units" title="Units for the position readout, measure tool and footprint grid">Units</label>
+          <select id="set-units">
+            <option value="mm">Millimetres (mm)</option>
+            <option value="mil">Mils / thou (mil)</option>
+          </select>
+        </div>
       </div>
-      <div class="set-row">
-        <label for="set-trace" title="Display width of all traces">Trace width <span id="set-trace-val"></span></label>
-        <input type="range" id="set-trace" min="1" max="30" step="1">
+
+      <!-- ---- Input & snap: mouse, keys, snapping, edge scroll ---- -->
+      <div class="set-tab" data-tab="input">
+        <div class="set-hint">Mouse, keyboard and snapping behaviour (per-browser preferences).</div>
+        <div class="set-row">
+          <label for="set-zoomsens" title="How much the view zooms per mouse-wheel notch. Lower = finer, slower zoom.">Zoom sensitivity <span id="set-zoomsens-val"></span></label>
+          <input type="range" id="set-zoomsens" min="5" max="200" step="5">
+        </div>
+        <div class="set-row">
+          <label for="set-snapfactor" title="Multiplier on every snap radius: trace/via/pad snapping while drawing and dragging anchors, endpoint weld reach, junction adherence. 100% = the built-in distances.">Snap distance <span id="set-snapfactor-val"></span></label>
+          <input type="range" id="set-snapfactor" min="25" max="400" step="5">
+          <div class="set-hint">Scales every snap radius — pads, vias, traces, anchor weld/junction reach. 100% = default, lower = snap only when closer.</div>
+        </div>
+        <div class="set-row">
+          <label for="set-keymode" title="What the number keys 1…9, 0 do (in split view they set the left half, Shift the right half)">Keys 1…0</label>
+          <select id="set-keymode">
+            <option value="switch">Switch view to layer</option>
+            <option value="toggle">Toggle layer visibility</option>
+          </select>
+        </div>
+        <div class="set-row">
+          <label for="set-edgescroll" title="Automatically pan the view when you drag a part / place a component near the edge of the window (handy on a touchpad).">Edge auto-scroll</label>
+          <select id="set-edgescroll">
+            <option value="on">On</option>
+            <option value="off">Off</option>
+          </select>
+          <div class="set-hint">Pans the view when a drag nears the window border (touchpad-friendly).</div>
+        </div>
+        <div class="set-row" id="set-edge-margin-row">
+          <label for="set-edge-margin" title="How far from the border edge auto-scroll begins. Bigger = it starts sooner and ramps up more gently.">Edge scroll margin <span id="set-edge-margin-val"></span></label>
+          <input type="range" id="set-edge-margin" min="20" max="400" step="10">
+        </div>
+        <div class="set-row" id="set-edge-speed-row">
+          <label for="set-edge-speed" title="Top auto-scroll speed, reached at the very border (pixels per frame).">Edge scroll speed <span id="set-edge-speed-val"></span></label>
+          <input type="range" id="set-edge-speed" min="2" max="40" step="1">
+        </div>
       </div>
-      <div class="set-row">
-        <label for="set-compview" title="Hide component bodies that are on the far side of the board (their through-hole pads and vias stay visible)">Components</label>
-        <select id="set-compview">
-          <option value="side">Viewed side only</option>
-          <option value="both">Both sides</option>
-        </select>
+
+      <!-- ---- General: checks, undo, autosave, options file ---- -->
+      <div class="set-tab" data-tab="general">
+        <div class="set-hint">Checks, history and saving.</div>
+        <div class="set-row">
+          <label for="set-overlap" title="Warn when a moved pad overlaps copper of another net">Overlap check</label>
+          <select id="set-overlap">
+            <option value="on">On</option>
+            <option value="off">Off</option>
+          </select>
+          <div class="set-hint">After a move: warns when a pad lands on copper of a different net.</div>
+        </div>
+        <div class="set-row">
+          <label for="set-histlen" title="How many actions the undo timeline keeps">History length <span id="set-histlen-val"></span></label>
+          <input type="range" id="set-histlen" min="5" max="200" step="5">
+        </div>
+        <div class="set-row">
+          <label for="set-autosave" title="How long after a change the board is autosaved to this browser. Autosave never runs while you are dragging something.">Autosave after</label>
+          <select id="set-autosave">
+            <option value="1000">1 second</option>
+            <option value="2500">2.5 seconds</option>
+            <option value="5000">5 seconds</option>
+            <option value="10000">10 seconds</option>
+            <option value="30000">30 seconds</option>
+            <option value="0">Off</option>
+          </select>
+        </div>
+        <div class="set-row" title="Options (hotkeys, units, view toggles, panel sizes…) are stored per-browser, not in the project file. Export them to move your setup to another browser or machine.">
+          <label>Options file</label>
+          <span class="opt-io-btns">
+            <button id="opt-export" type="button">Export…</button>
+            <button id="opt-import" type="button">Import…</button>
+          </span>
+          <div class="set-hint">Hotkeys, units &amp; view preferences live in this browser — export/import to move them.</div>
+        </div>
       </div>
-      <div class="set-row">
-        <label for="set-traceview" title="Hide traces that are not on the active draw side (vias and pads stay visible)">Traces</label>
-        <select id="set-traceview">
-          <option value="active">Active side only</option>
-          <option value="all">All sides</option>
-        </select>
-      </div>
-      <div class="set-row">
-        <label for="set-reftext" title="Component reference label size">Reference text <span id="set-reftext-val"></span></label>
-        <input type="range" id="set-reftext" min="8" max="28" step="1">
-      </div>
-      <div class="set-row">
-        <label for="set-copper" title="Outer-layer (F.Cu/B.Cu) copper foil weight — feeds the trace current estimate for traces on the outer layers (IPC-2221)">Copper (outer)</label>
-        <select id="set-copper">
-          <option value="0.5">0.5 oz (17 µm)</option>
-          <option value="1">1 oz (35 µm)</option>
-          <option value="2">2 oz (70 µm)</option>
-          <option value="3">3 oz (105 µm)</option>
-        </select>
-      </div>
-      <div class="set-row">
-        <label for="set-copper-inner" title="Inner-layer copper foil weight — inner planes/traces are usually lighter (often 0.5 oz). Used for the current estimate on inner-layer traces.">Copper (inner)</label>
-        <select id="set-copper-inner">
-          <option value="0.5">0.5 oz (17 µm)</option>
-          <option value="1">1 oz (35 µm)</option>
-          <option value="2">2 oz (70 µm)</option>
-          <option value="3">3 oz (105 µm)</option>
-        </select>
-      </div>
-      <div class="set-row">
-        <label for="set-focusdim" title="Opacity of non-selected traces/pads/parts when a net is selected or hovered. Lower = the rest fades more so the focused net stands out.">Non-sel. opacity <span id="set-focusdim-val"></span></label>
-        <input type="range" id="set-focusdim" min="0" max="80" step="1">
-      </div>
-      <div class="set-row">
-        <label for="set-overlap" title="Warn when a moved pad overlaps copper of another net">Overlap check</label>
-        <select id="set-overlap">
-          <option value="on">On</option>
-          <option value="off">Off</option>
-        </select>
-      </div>
-      <div class="set-row">
-        <label for="set-histlen" title="How many actions the undo timeline keeps">History length <span id="set-histlen-val"></span></label>
-        <input type="range" id="set-histlen" min="5" max="200" step="5">
-      </div>
-      <div class="set-row">
-        <label for="set-autosave" title="How long after a change the board is autosaved to this browser. Autosave never runs while you are dragging something.">Autosave after</label>
-        <select id="set-autosave">
-          <option value="1000">1 second</option>
-          <option value="2500">2.5 seconds</option>
-          <option value="5000">5 seconds</option>
-          <option value="10000">10 seconds</option>
-          <option value="30000">30 seconds</option>
-          <option value="0">Off</option>
-        </select>
-      </div>
-      <div class="set-row">
-        <label for="set-units" title="Units for the position readout, measure tool and footprint grid">Units</label>
-        <select id="set-units">
-          <option value="mm">Millimetres (mm)</option>
-          <option value="mil">Mils / thou (mil)</option>
-        </select>
-      </div>
-      <div class="set-row">
-        <label for="set-keymode" title="What the number keys 1…9, 0 do (in split view they set the left half, Shift the right half)">Keys 1…0</label>
-        <select id="set-keymode">
-          <option value="switch">Switch view to layer</option>
-          <option value="toggle">Toggle layer visibility</option>
-        </select>
-      </div>
-      <div class="set-row">
-        <label for="set-zoomsens" title="How much the view zooms per mouse-wheel notch. Lower = finer, slower zoom.">Zoom sensitivity <span id="set-zoomsens-val"></span></label>
-        <input type="range" id="set-zoomsens" min="5" max="200" step="5">
-      </div>
-      <div class="set-row">
-        <label for="set-edgescroll" title="Automatically pan the view when you drag a part / place a component near the edge of the window (handy on a touchpad).">Edge auto-scroll</label>
-        <select id="set-edgescroll">
-          <option value="on">On</option>
-          <option value="off">Off</option>
-        </select>
-      </div>
-      <div class="set-row" id="set-edge-margin-row">
-        <label for="set-edge-margin" title="How far from the border edge auto-scroll begins. Bigger = it starts sooner and ramps up more gently.">Edge scroll margin <span id="set-edge-margin-val"></span></label>
-        <input type="range" id="set-edge-margin" min="20" max="400" step="10">
-      </div>
-      <div class="set-row" id="set-edge-speed-row">
-        <label for="set-edge-speed" title="Top auto-scroll speed, reached at the very border (pixels per frame).">Edge scroll speed <span id="set-edge-speed-val"></span></label>
-        <input type="range" id="set-edge-speed" min="2" max="40" step="1">
-      </div>
-      <div class="set-row" title="Options (hotkeys, units, view toggles, panel sizes…) are stored per-browser, not in the project file. Export them to move your setup to another browser or machine.">
-        <label>Options file</label>
-        <span class="opt-io-btns">
-          <button id="opt-export" type="button">Export…</button>
-          <button id="opt-import" type="button">Import…</button>
-        </span>
-      </div>
+
     </div>
     <div class="dlg-buttons"><button id="options-close" class="primary">Close</button></div>
   </dialog>
@@ -502,8 +542,8 @@
   <!-- ======= HOTKEY EDITOR ======= -->
   <dialog id="keys-dialog">
     <div class="dlg-title">Hotkey editor</div>
-    <div class="panel-hint" style="margin-bottom:8px">Click a binding, then press the new key. Esc cancels.
-      Ctrl-shortcuts, Esc, Enter, Space and 1–9 are fixed.
+    <div class="panel-hint" style="margin-bottom:8px">Click a binding, then press the new key (bare Shift/Ctrl/Alt taps and combos work too). Esc cancels.
+      Fixed keys that can't be rebound: Ctrl-shortcuts, Esc, Enter, Space, Tab and the digits 1–0.
       Tip: right-click any toolbar button to set or clear its hotkey directly.</div>
     <div id="keys-list"></div>
     <div class="dlg-buttons">
@@ -580,41 +620,41 @@
 <script src="js/footprints/discrete.js?v=49"></script>
 <script src="js/footprints/connectors.js?v=49"></script>
 <script src="js/footprints/ics.js?v=50"></script>
-<script src="js/footprints/misc.js?v=54"></script>
+<script src="js/footprints/misc.js?v=55"></script>
 <script src="js/imagetiles.js?v=1"></script>
 <script src="js/view/core.js?v=89"></script>
 <script src="js/view/geom.js?v=89"></script>
-<script src="js/view/hittest.js?v=89"></script>
+<script src="js/view/hittest.js?v=90"></script>
 <script src="js/view/render.js?v=99"></script>
 <script src="js/view/draw.js?v=96"></script>
 <script src="js/view/overlays.js?v=89"></script>
 <script src="js/layerstack.js?v=55"></script>
 <script src="js/tools/core.js?v=121"></script>
-<script src="js/tools/select.js?v=112"></script>
-<script src="js/tools/trace.js?v=116"></script>
+<script src="js/tools/select.js?v=113"></script>
+<script src="js/tools/trace.js?v=117"></script>
 <script src="js/tools/via.js?v=116"></script>
 <script src="js/tools/checker.js?v=111"></script>
 <script src="js/tools/ops.js?v=116"></script>
 <script src="js/align.js?v=60"></script>
-<script src="js/keymap.js?v=60"></script>
+<script src="js/keymap.js?v=61"></script>
 <script src="js/resolver.js?v=49"></script>
 <script src="js/netlist.js?v=70"></script>
 <script src="js/eagle.js?v=4"></script>
 <script src="js/easyeda.js?v=4"></script>
 <script src="js/gencad.js?v=5"></script>
 <script src="js/gerber.js?v=1"></script>
-<script src="js/ui/core.js?v=105"></script>
+<script src="js/ui/core.js?v=106"></script>
 <script src="js/ui/layers.js?v=105"></script>
 <script src="js/ui/nets.js?v=104"></script>
 <script src="js/ui/parts.js?v=103"></script>
 <script src="js/ui/inspector.js?v=111"></script>
 <script src="js/ui/dialogs.js?v=105"></script>
-<script src="js/ui/misc.js?v=106"></script>
+<script src="js/ui/misc.js?v=107"></script>
 <script src="js/kicadsearch.js?v=51"></script>
 <script src="js/fpdialog.js?v=57"></script>
-<script src="js/quickadd.js?v=6"></script>
+<script src="js/quickadd.js?v=10"></script>
 <script src="js/autosave.js?v=53"></script>
-<script src="js/main.js?v=114"></script>
+<script src="js/main.js?v=115"></script>
 
 </body>
 </html>

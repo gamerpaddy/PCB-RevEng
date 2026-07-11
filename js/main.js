@@ -250,6 +250,14 @@ function afterHistory(){
 
 /* ---------------- board / display settings ---------------- */
 function wireSettings(){
+  // tab strip: Board / Display / Input & snap / General
+  document.querySelectorAll("#settings-tabs .dlg-tab").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll("#settings-tabs .dlg-tab").forEach(b => b.classList.toggle("active", b === btn));
+      document.querySelectorAll("#settings-panel .set-tab").forEach(p => p.classList.toggle("active", p.dataset.tab === btn.dataset.tab));
+    });
+  });
+
   const lsel = $("#set-layers");
   lsel.innerHTML = LAYER_COUNTS.map(n => `<option value="${n}">${n} layer${n>1?"s":""}</option>`).join("");
   lsel.addEventListener("change", ()=> setLayerCount(parseInt(lsel.value,10)));
@@ -344,6 +352,11 @@ function wireSettings(){
     try { localStorage.setItem("pcbreveng.zoomSens", String(v)); } catch(ex){}
     $("#set-zoomsens-val").textContent = v + "%";
   });
+  $("#set-snapfactor").addEventListener("input", e => {
+    const v = Math.max(25, Math.min(400, parseInt(e.target.value, 10) || 100));
+    try { localStorage.setItem("pcbreveng.snapFactor", String(v)); } catch(ex){}
+    $("#set-snapfactor-val").textContent = v + "%";
+  });
   $("#set-edgescroll").addEventListener("change", e => {
     try { localStorage.setItem("pcbreveng.edgeScroll", e.target.value === "off" ? "off" : "on"); } catch(ex){}
     syncEdgeScrollRows();
@@ -389,6 +402,7 @@ function syncSettings(){
   $("#set-histlen").value = Undo.max;
   $("#set-histlen-val").textContent = Undo.max;
   { const zs = UI.zoomSens(); $("#set-zoomsens").value = zs; $("#set-zoomsens-val").textContent = zs + "%"; }
+  { const sf = Math.round(UI.snapFactor()*100); $("#set-snapfactor").value = sf; $("#set-snapfactor-val").textContent = sf + "%"; }
   $("#set-edgescroll").value = UI.edgeScrollOn() ? "on" : "off";
   { const em = UI.edgeMargin(); $("#set-edge-margin").value = em; $("#set-edge-margin-val").textContent = em + " px"; }
   { const es = UI.edgeSpeed();  $("#set-edge-speed").value  = es; $("#set-edge-speed-val").textContent  = es + " px"; }

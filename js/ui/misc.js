@@ -94,16 +94,46 @@ UI.openKeysDialog = () => {
   $("#keys-dialog").showModal();
 };
 
+/* hotkey-editor grouping: id prefix → section title, in this display order */
+const KEY_GROUPS = [
+  ["tool.",     "Tools"],
+  ["edit.",     "Editing"],
+  ["view.",     "View & dialogs"],
+  ["file.",     "File"],
+  ["layer.",    "Image layers"],
+  ["quickadd.", "Quick-add popup"],
+];
+
 UI.buildKeysList = () => {
   const box = $("#keys-list");
   box.innerHTML = "";
-  for (const a of KeyActions){
+  const addRow = (a) => {
     const row = document.createElement("div");
     row.className = "hk key-row";
     const key = Keymap.keyFor(a.id);
     row.innerHTML = `<span>${a.label}</span>
       <button class="key-btn" data-id="${a.id}"><kbd>${key || "unbound"}</kbd></button>`;
     box.appendChild(row);
+  };
+  const grouped = new Set();
+  for (const [pre, title] of KEY_GROUPS){
+    const acts = KeyActions.filter(a => a.id.startsWith(pre))
+      .sort((a, b) => a.label.localeCompare(b.label));
+    if (!acts.length) continue;
+    const h = document.createElement("h3");
+    h.className = "keys-group-h";
+    h.textContent = title;
+    box.appendChild(h);
+    for (const a of acts){ grouped.add(a.id); addRow(a); }
+  }
+  // future-proof: anything whose id matches no known prefix still shows up
+  const misc = KeyActions.filter(a => !grouped.has(a.id));
+  if (misc.length){
+    const h = document.createElement("h3");
+    h.className = "keys-group-h";
+    h.textContent = "Other";
+    box.appendChild(h);
+    misc.sort((a, b) => a.label.localeCompare(b.label)).forEach(addRow);
   }
   box.querySelectorAll(".key-btn").forEach(btn => btn.addEventListener("click", () => {
     // capture next key press

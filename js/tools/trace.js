@@ -148,7 +148,7 @@ function traceEndpointSnap(snap, side){
   const t = snap.attach.trace;
   if (t.side !== side) return null;
   const p0 = t.points[0], pL = t.points[t.points.length-1];
-  const tol = Math.max(2, (t.width||3)*0.75);
+  const tol = Math.max(2, (t.width||3)*0.75) * (UI.snapFactor ? UI.snapFactor() : 1);
   const d0 = Math.hypot(snap.x-p0.x, snap.y-p0.y);
   const dL = Math.hypot(snap.x-pL.x, snap.y-pL.y);
   if (d0 <= tol && d0 <= dL) return { trace:t, end:0 };

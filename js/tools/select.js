@@ -29,11 +29,14 @@ function selectDown(w, pt, e){
       if (Math.hypot(w.x-t.points[i].x, w.y-t.points[i].y) <= hr){
         pushUndo("move trace point");
         // grab coincident junction vertices on OTHER traces so the connection holds
-        // (adheres) when this anchor is moved again
-        const px = t.points[i].x, py = t.points[i].y, jtol = Math.max((t.width||3)*0.6, 2/View.zoom);
+        // (adheres) when this anchor is moved again. SAME SIDE ONLY: a top and a bottom
+        // anchor happening to coincide (e.g. both routed to a since-deleted THT pad) are
+        // NOT a junction — copper on different layers only joins through a via/pad.
+        const px = t.points[i].x, py = t.points[i].y;
+        const jtol = Math.max((t.width||3)*0.6, 2/View.zoom) * (UI.snapFactor ? UI.snapFactor() : 1);
         const linked = [];
         for (const ot of State.traces){
-          if (ot === t) continue;
+          if (ot === t || ot.side !== t.side) continue;
           for (let j=0;j<ot.points.length;j++)
             if (Math.hypot(ot.points[j].x-px, ot.points[j].y-py) <= jtol) linked.push({ pts:ot.points, i:j, trace:ot });
         }

@@ -1,9 +1,12 @@
 /* ===== quickadd.js — experimental "quick component" popup =====
    With the component tool active (C) and no footprint armed, clicking the board opens
    a small popup: a preview of the clicked area + a text field. Type things like
-   "sot-23 npn", "soic14 74hc130", "0805 10k", "cap 0603 10n", "0805 223 res" and it
-   resolves the footprint / value / part / refdes prefix, live-previewing the ghost.
-   Arrow keys nudge, Space rotates (Shift+Space counter), Enter places, Esc cancels. */
+   "sot-23 npn", "sot23 npn 2n2222" (npn = value, 2n2222 = part), "ic sot23 ref30"
+   (U prefix + generic box symbol), "soic14 74hc130", "0805 10k", "cap 0603 10n",
+   "to-220-5" / "to220 5pin", "to92 triangle", "free 4.5x5" (freestyle body) and it
+   resolves footprint / value / part / refdes prefix, live-previewing the ghost.
+   Arrow keys nudge (the preview stays centred on the part — the board scrolls under
+   it and is re-cropped every move), rotate/place keys are in the hotkey editor. */
 "use strict";
 
 const QuickAdd = {
@@ -18,21 +21,24 @@ QuickAdd.enabled = () => { try { return localStorage.getItem("pcbreveng.quickAdd
 
 const QA_CHIP_SIZES = ["0201","0402","0406","0603","0612","0805","1206","1210","2010","2512"];
 
-// component-type keywords → refdes prefix (+ optional schematic symbol override)
+// component-type keywords → refdes prefix (+ optional schematic symbol override).
+// `val:true` = the keyword itself becomes the value (semiconductors: "npn", "diode"…),
+// and value-ish tokens ("2n3337") are treated as PART NUMBERS, not values.
 const QA_TYPES = [
   [/^(res|resistor|rs)$/, {prefix:"R"}],
   [/^(cap|capacitor|kondensator)$/, {prefix:"C"}],
   [/^(ind|inductor|coil|choke|ferrite|fb)$/, {prefix:"L"}],
-  [/^npn$/, {prefix:"Q", sym:"npn"}],
-  [/^pnp$/, {prefix:"Q", sym:"pnp"}],
-  [/^(nmos|nfet|n-mos|n-fet)$/, {prefix:"Q", sym:"nmos"}],
-  [/^(pmos|pfet|p-mos|p-fet)$/, {prefix:"Q", sym:"pmos"}],
-  [/^(mosfet|fet|transistor|trans)$/, {prefix:"Q"}],
-  [/^(diode|di)$/, {prefix:"D", sym:"diode"}],
-  [/^led$/, {prefix:"D", sym:"led"}],
-  [/^zener$/, {prefix:"D", sym:"zener"}],
-  [/^(schottky|sk)$/, {prefix:"D", sym:"schottky"}],
+  [/^npn$/, {prefix:"Q", sym:"npn", val:true}],
+  [/^pnp$/, {prefix:"Q", sym:"pnp", val:true}],
+  [/^(nmos|nfet|n-mos|n-fet)$/, {prefix:"Q", sym:"nmos", val:true}],
+  [/^(pmos|pfet|p-mos|p-fet)$/, {prefix:"Q", sym:"pmos", val:true}],
+  [/^(mosfet|fet|transistor|trans|tr)$/, {prefix:"Q", val:true}],
+  [/^(diode|di)$/, {prefix:"D", sym:"diode", val:true}],
+  [/^led$/, {prefix:"D", sym:"led", val:true}],
+  [/^zener$/, {prefix:"D", sym:"zener", val:true}],
+  [/^(schottky|sk)$/, {prefix:"D", sym:"schottky", val:true}],
   [/^(xtal|crystal|resonator|osc)$/, {prefix:"Y"}],
+  [/^(ic|u|box|generic)$/, {prefix:"U", sym:"box"}],   // generic IC → U prefix + plain box symbol
 ];
 
 // a value-ish token: 10k, 4k7, 100n, 1u, 0R, 223, 10uF, 4.7k, 1M2 …
@@ -47,9 +53,9 @@ function qaMatchFootprint(t){
 
   if (QA_CHIP_SIZES.includes(s)) return { fpId:"chip2", params:{size:s} };
 
-  // SOT-23 family (optional pin-count suffix: sot23-5)
+  // SOT-23 family (optional pin-count suffix: sot23-5 / sot-23-5 / sot235)
   let m;
-  if ((m = /^sot-?23(?:-([356]))?$/.exec(s))) return { fpId:"sot23", params:{pkg:"SOT-23", pins:m[1]||"3"} };
+  if ((m = /^sot-?23(?:-?([356]))?$/.exec(s))) return { fpId:"sot23", params:{pkg:"SOT-23", pins:m[1]||"3"} };
   if (/^sot-?323$/.test(s)) return { fpId:"sot23", params:{pkg:"SOT-323"} };
   if (/^sot-?523$/.test(s)) return { fpId:"sot23", params:{pkg:"SOT-523"} };
   if (/^sot-?723$/.test(s)) return { fpId:"sot23", params:{pkg:"SOT-723"} };
@@ -61,7 +67,8 @@ function qaMatchFootprint(t){
   if (/^sm[abc]$/.test(s)) return { fpId:"sod", params:{pkg:s.toUpperCase()} };
 
   if (/^to-?92$/.test(s)) return { fpId:"to92", params:{} };
-  if (/^to-?(220|247)$/.test(s)) return { fpId:"to220", params:{} };
+  // TO-220 / TO-247 with optional pin count: to220-5 / to-220-5 / to2205
+  if ((m = /^to-?(220|247)(?:-?([235]))?$/.exec(s))) return { fpId:"to220", params: m[2]?{pins:m[2]}:{} };
 
   if ((m = /^(?:soic|so|sop)-?(\d+)$/.exec(s))) return { fpId:"soic", params:{pins:+m[1]} };
   if ((m = /^tssop-?(\d+)$/.exec(s))) return { fpId:"soic", params:{pins:+m[1], pitch:"0.65", width:"4.4"} };
@@ -73,44 +80,85 @@ function qaMatchFootprint(t){
   if ((m = /^bga-?(\d+)$/.exec(s))){ const n = Math.round(Math.sqrt(+m[1])); return { fpId:"grid", params:{rows:n, cols:n} }; }
   if (/^bga$/.test(s)) return { fpId:"grid", params:{} };
 
-  if ((m = /^melf-?(\d+)?$/.exec(s))) return { fpId:"melf", params:{} };
+  if ((m = /^melf-?(0102|0204|0207)?$/.exec(s))) return { fpId:"melf", params: m[1]?{size:m[1]}:{} };
   if (/^axial$/.test(s)) return { fpId:"axial", params:{} };
   if (/^(radial)$/.test(s)) return { fpId:"radial", params:{} };
   if (/^(ecap|e-cap|electrolytic|elec)$/.test(s)) return { fpId:"ecap_smd", params:{} };
   if ((m = /^(?:sip|hdr|header)-?(\d+)?$/.exec(s))) return { fpId:"sip", params: m[1]?{pins:+m[1]}:{} };
   if (/^(xtal|crystal|resonator|osc)$/.test(s)) return { fpId:"crystal", params:{} };
+  // freestyle component, optional body size: free / free4x5 / free-4.5x5
+  if ((m = /^free(?:-?(\d+(?:\.\d+)?)[x×](\d+(?:\.\d+)?))?$/.exec(s)))
+    return { fpId:"free", params: m[1]?{w:parseFloat(m[1]), h:parseFloat(m[2])}:{} };
   return null;
 }
 
-/* parse the whole query → placement values, or null if nothing recognised */
+/* package-modifier tokens applied AFTER the footprint is known (pin counts, lead form,
+   freestyle body size). Returns true when the token was consumed. */
+function qaApplyModifier(fp, t){
+  const s = t.toLowerCase();
+  let m;
+  // pin count as its own token: "5pin" / "5p" / "14pins" — for any footprint with a pins param
+  if ((m = /^(\d+)(?:p|pin|pins)$/.exec(s))){
+    const def = getFootprintDef(fp.fpId);
+    const pr = def && def.params.find(p => p.key === "pins");
+    if (pr){ fp.params.pins = pr.type === "select" ? String(+m[1]) : +m[1]; return true; }
+    return false;
+  }
+  // TO-92 lead form: "tri" / "triangle" / "wide" vs "inline" / "straight"
+  if (fp.fpId === "to92"){
+    if (/^(tri|triangle|wide)$/.test(s)){ fp.params.layout = "Triangle"; return true; }
+    if (/^(inline|line|straight)$/.test(s)){ fp.params.layout = "Inline"; return true; }
+  }
+  // freestyle body size as its own token: "4x5" / "4.5x5"
+  if (fp.fpId === "free" && (m = /^(\d+(?:\.\d+)?)[x×](\d+(?:\.\d+)?)$/.exec(s))){
+    fp.params.w = parseFloat(m[1]); fp.params.h = parseFloat(m[2]);
+    return true;
+  }
+  return false;
+}
+
+/* parse the whole query → placement values, or null if nothing recognised.
+   Two passes: 1) find the footprint + type keyword anywhere in the query,
+   2) classify the remaining tokens (modifiers / pitch / value / part) with that context. */
 function parseQuickQuery(str){
   const toks = (str||"").trim().split(/\s+/).filter(Boolean);
   if (!toks.length) return null;
-  let fp = null, type = null, value = "", pitchMm = null, partParts = [];
+  let fp = null, type = null;
+  const rest = [];
   for (const t of toks){
     if (!fp){ const f = qaMatchFootprint(t); if (f){ fp = f; continue; } }
+    if (!type){
+      let hit = null;
+      for (const [re, info] of QA_TYPES) if (re.test(t.toLowerCase())){ hit = {...info, tok:t.toLowerCase()}; break; }
+      if (hit){ type = hit; continue; }
+    }
+    rest.push(t);
+  }
+
+  // semiconductors (Q/D) don't have R/C-style values: value-ish tokens ("2n3337") are
+  // part numbers there, and the type keyword itself becomes the value ("npn", "diode")
+  const semi = !!(type && type.val);
+  let value = "", pitchMm = null, partParts = [];
+  for (const t of rest){
+    if (fp && qaApplyModifier(fp, t)) continue;   // "5pin", "triangle", "4.5x5" …
     // a pitch token: 1mm / 0.8mm / 50mil (applied to footprints that have a pitch param)
     let pm;
     if (pitchMm === null && (pm = /^(\d+(?:\.\d+)?)(mm|mil)$/i.exec(t))){
       pitchMm = pm[2].toLowerCase() === "mil" ? parseFloat(pm[1]) * 0.0254 : parseFloat(pm[1]);
       continue;
     }
-    if (!type){
-      let hit = null;
-      for (const [re, info] of QA_TYPES) if (re.test(t.toLowerCase())){ hit = info; break; }
-      if (hit){ type = hit; continue; }
-    }
-    if (!value && qaLooksLikeValue(t)){ value = t; continue; }
+    if (!value && !semi && qaLooksLikeValue(t)){ value = t; continue; }
     partParts.push(t);   // leftover = part number / free text
   }
+  if (type && type.val) value = type.tok;   // "npn" / "diode" / "led" … as the value
   if (!fp && !type && !value && pitchMm === null && !partParts.length) return null;
 
   // fall back to a sensible footprint if only a value/type was given
   if (!fp){
-    if (type && type.prefix === "R") fp = { fpId:"chip2", params:{size:"0805"} };
-    else if (type && type.prefix === "C") fp = { fpId:"chip2", params:{size:"0805"} };
+    if (type && (type.prefix === "R" || type.prefix === "C" || type.prefix === "L")) fp = { fpId:"chip2", params:{size:"0805"} };
     else if (type && (type.prefix === "Q")) fp = { fpId:"sot23", params:{} };
     else if (type && type.prefix === "D") fp = { fpId:"sod", params:{} };
+    else if (type && type.prefix === "Y") fp = { fpId:"crystal", params:{} };
     else if (value) fp = { fpId:"chip2", params:{size:"0805"} };
     else fp = { fpId:"soic", params:{} };
   }
@@ -152,8 +200,9 @@ QuickAdd.open = (w) => {
   QuickAdd.fp = null; QuickAdd.parsed = null;
   const inp = $("#qa-input");
   inp.value = "";
-  $("#qa-info").textContent = "Type e.g.  0805 10k · sot-23 npn · soic14 74hc130 · cap 0603 10n";
+  $("#qa-info").textContent = QA_PROMPT;
   $("#qa-info").className = "qa-info";
+  QuickAdd.updateInfo();
   $("#qa-dialog").showModal();
   QuickAdd.render();
   requestRender();
@@ -173,24 +222,62 @@ QuickAdd.update = () => {
   const info = $("#qa-info");
   if (!parsed){
     QuickAdd.fp = null;
-    info.textContent = $("#qa-input").value.trim() ? "not recognised — keep typing…"
-      : "Type e.g.  0805 10k · sot-23 npn · soic14 74hc130 · cap 0603 10n";
+    info.textContent = $("#qa-input").value.trim() ? "not recognised — keep typing…" : QA_PROMPT;
     info.className = "qa-info";
+    QuickAdd.updateInfo();
     QuickAdd.render(); requestRender(); return;
   }
   const fp = generateFootprint(parsed.fpId, parsed.params);
   QuickAdd.fp = fp;
-  const ref = parsed.prefix + "?";
-  const bits = [ref, fp.label];
-  if (parsed.value) bits.push("= " + parsed.value);
-  if (parsed.part) bits.push("[" + parsed.part + "]");
-  if (parsed.symOverride) bits.push("sym:" + parsed.symOverride);
-  info.textContent = bits.join("   ");
+  info.textContent = "✓ " + fp.label;
   info.className = "qa-info ok";
+  QuickAdd.updateInfo();
   QuickAdd.render(); requestRender();
 };
 
-/* draw the clicked board area + the resolved footprint ghost into the preview canvas */
+const QA_PROMPT = "Type e.g.  0805 10k · sot23 npn 2n2222 · soic14 74hc130 · ic sot23 ref30 · to-220-5 · free 4x5";
+
+/* the "next free" reference for a prefix WITHOUT reserving it (nextRef mutates counters) */
+function qaPreviewRef(prefix){
+  let n = (State.refCounters[prefix] || 0) + 1;
+  while (refExists(prefix + n)) n++;
+  return prefix + n;
+}
+
+/* structured facts grid under the input: footprint, pins, pitch, body size, value,
+   part, symbol, KiCad name, placement side/rotation — refreshed on every keystroke,
+   nudge and rotate (not a single bracket line any more) */
+QuickAdd.updateInfo = () => {
+  const facts = $("#qa-facts");
+  if (!facts) return;
+  const p = QuickAdd.parsed, fp = QuickAdd.fp;
+  if (!p || !fp){ facts.style.display = "none"; facts.innerHTML = ""; return; }
+  const rows = [];
+  const add = (k, v) => { if (v !== "" && v != null) rows.push(
+    `<div class="qa-k">${escAttr(k)}</div><div class="qa-v">${v}</div>`); };
+  const esc = (s) => escAttr(String(s));
+  const mmFmt = (n) => (+n).toFixed(2).replace(/\.?0+$/, "") + " mm";
+
+  add("Reference", esc(qaPreviewRef(p.prefix || "U")) + ` <span class="qa-dim">(auto, prefix ${esc(p.prefix||"U")})</span>`);
+  add("Footprint", esc(fp.label));
+  add("Pins", String(fp.pins.length));
+  if (fp.params && fp.params.rows && fp.params.cols) add("Grid", esc(fp.params.rows + " × " + fp.params.cols));
+  if (fp.params && fp.params.pitch) add("Pitch", esc(mmFmt(fp.params.pitch)));
+  if (fp.body) add("Body", esc(mmFmt(fp.body.w) + " × " + mmFmt(fp.body.h)));
+  add("Value", p.value ? esc(p.value) : `<span class="qa-dim">—</span>`);
+  add("Part name", p.part ? esc(p.part) : `<span class="qa-dim">—</span>`);
+  if (p.symOverride) add("Symbol", esc((typeof SYM_LABELS !== "undefined" && SYM_LABELS[p.symOverride]) || p.symOverride));
+  if (fp.kicad) add("KiCad", esc(fp.kicad));
+  add("Place on", esc((SIDE_LABELS[QuickAdd.side] || QuickAdd.side) + " · " + QuickAdd.rot + "°"));
+  facts.innerHTML = rows.join("");
+  facts.style.display = "";
+};
+
+/* draw the board area under the part into the preview: the footprint ghost stays pinned to the
+   centre of the preview and the board itself re-centres on the part every nudge, so the board
+   scrolls beneath a fixed part and the preview always shows real board content (never black).
+   We re-render the board straight from the model (drawWorld) at a preview-specific pan/zoom
+   rather than sampling the on-screen canvas, so we're not limited to what's currently in view. */
 QuickAdd.render = () => {
   const cv = $("#qa-preview"); if (!cv) return;
   const ctx = cv.getContext("2d");
@@ -207,31 +294,39 @@ QuickAdd.render = () => {
   // choose the preview scale so the WHOLE footprint (+ margin) always fits, regardless of
   // the board zoom — small parts (SOT-23) and big ICs (SOIC-14) both frame nicely
   const fp = QuickAdd.fp;
+  const fx = View.flip ? -1 : 1;
   let extMm = 3;   // fallback framing radius when nothing is resolved yet (~6 mm across)
   if (fp){
     extMm = Math.max(fp.body.w, fp.body.h) / 2;
     for (const p of fp.pins) extMm = Math.max(extMm, Math.hypot(p.xmm, p.ymm) + Math.max(p.w, p.h)/2);
   }
-  // preview px per mm — the footprint spans ~40% of the shorter side, leaving board context
-  // around it so you can see the part travel across the PCB while nudging (crop follows pos)
+  // preview device-px per mm — the footprint spans ~40% of the shorter side, board context around
   const pxPerMm = Math.min(PW, PH) / (extMm * 2 * 2.6);
-  // magnification of the board crop = preview px-per-world ÷ board backing px-per-world
-  const M = (pxPerMm / State.pxPerMm) / (View.zoom * dpr);
 
-  const sc = worldToScreen(QuickAdd.pos.x, QuickAdd.pos.y); // CSS px on the main canvas
-  const srcW = PW / M, srcH = PH / M;
-  const sx = sc.x*dpr - srcW/2, sy = sc.y*dpr - srcH/2;
-  try { ctx.drawImage(View.canvas, sx, sy, srcW, srcH, 0, 0, PW, PH); } catch(e){}
+  // re-render the board into the preview at our own pan/zoom (centred on the part). drawWorld
+  // reads View.zoom / View.panX / View.panY, so temporarily override them and restore after.
+  const prevZoom = View.zoom, prevPanX = View.panX, prevPanY = View.panY, prevPaneDX = View._paneDX;
+  // world→device factor is dpr*zoom; we want pxPerMm device px per mm and State.pxPerMm px per mm
+  const pvZoom = pxPerMm / (State.pxPerMm * dpr);
+  // place the part's world point at the preview centre (base transform below scales by dpr)
+  View.zoom = pvZoom; View._paneDX = 0;
+  View.panX = (PW/2)/dpr - QuickAdd.pos.x * pvZoom * fx;
+  View.panY = (PH/2)/dpr - QuickAdd.pos.y * pvZoom;
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  try { drawWorld(ctx); } catch(e){}
+  View.zoom = prevZoom; View.panX = prevPanX; View.panY = prevPanY; View._paneDX = prevPaneDX;
 
-  // crosshair at the placement point
-  ctx.strokeStyle = "rgba(255,210,77,0.5)"; ctx.lineWidth = 1*dpr;
+  ctx.setTransform(1,0,0,1,0,0);
+  // crosshair at the placement point (always the preview centre — the board follows the part)
+  ctx.strokeStyle = "rgba(255,210,77,0.7)"; ctx.lineWidth = 1*dpr;
   ctx.beginPath(); ctx.moveTo(PW/2-8*dpr,PH/2); ctx.lineTo(PW/2+8*dpr,PH/2);
   ctx.moveTo(PW/2,PH/2-8*dpr); ctx.lineTo(PW/2,PH/2+8*dpr); ctx.stroke();
 
-  // overlay the footprint framed to fit the preview (pxPerMm computed above)
+  // overlay the footprint, pinned to the preview centre
   if (fp){
     ctx.save();
     ctx.translate(PW/2, PH/2);
+    ctx.scale(fx, 1);
     ctx.rotate(QuickAdd.rot * Math.PI/180);
     if (QuickAdd.side === "back") ctx.scale(-1,1);
     drawFootprintShape(ctx, fp, pxPerMm, {alpha:0.85, zoom:1});
@@ -241,11 +336,12 @@ QuickAdd.render = () => {
 
 QuickAdd.nudge = (dx, dy) => {
   QuickAdd.pos.x += dx; QuickAdd.pos.y += dy;
-  QuickAdd.render(); requestRender();
+  QuickAdd.render(); requestRender();   // render() re-crops the preview around the new pos
 };
 
 QuickAdd.rotate = (deg) => {
   QuickAdd.rot = ((QuickAdd.rot + deg) % 360 + 360) % 360;
+  QuickAdd.updateInfo();   // keep the "Place on … °" fact current
   QuickAdd.render(); requestRender();
 };
 

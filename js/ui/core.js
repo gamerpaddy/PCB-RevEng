@@ -105,6 +105,12 @@ UI.layerKeyMode = () => localStorage.getItem("pcbreveng.layerKeyMode") || "switc
 UI.zoomSens = () => { const v = parseInt(localStorage.getItem("pcbreveng.zoomSens"), 10);
   return (v >= 5 && v <= 200) ? v : 100; };
 
+/* global snap-distance multiplier (0.25–4, default 1). Scales EVERY snap radius:
+   snapToConductor (pads/vias/traces while drawing & dragging anchors), the trace
+   endpoint weld reach, and coincident-junction adherence. Options "Snap distance". */
+UI.snapFactor = () => { const v = parseInt(localStorage.getItem("pcbreveng.snapFactor"), 10);
+  return (v >= 25 && v <= 400) ? v/100 : 1; };
+
 /* edge auto-scroll while dragging/placing near the viewport border (see tools.js).
    Preferences (per-browser, ride along with Options export/import):
    · on/off (default OFF) · margin px where it starts · max speed px/frame at the edge */
