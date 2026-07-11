@@ -182,34 +182,263 @@ function schPlacement(c){
     R0.forEach((idx,slot)=> place[idx] = { side:1, slot });
     return { place, leftN: L0.length, rightN: R0.length };
   }
+  if (rowsY.length === 1){
+    // single physical row (pin header / connector) → one vertical column on the LEFT,
+    // ordered by pin number (pin 1 at top), matching KiCad's Conn_01xNN symbols
+    const order = [...Array(n).keys()].sort((a,b)=> (parseInt(pins[a].num,10)||1e9) - (parseInt(pins[b].num,10)||1e9));
+    order.forEach((idx,slot)=> place[idx] = { side:0, slot });
+    return { place, leftN: n, rightN: 0 };
+  }
   const left = Math.ceil(n/2);
   for (let i=0;i<n;i++) place[i] = (i<left) ? {side:0, slot:i} : {side:1, slot:i-left};
   return { place, leftN: left, rightN: n-left };
 }
 
-/* KiCad's own body geometry for common 2-pin parts, taken from Device.kicad_sym.
-   R/C/L are rotated +90deg so pin 1 sits on the LEFT and pin 2 on the RIGHT, matching
-   the IC-box layout's left/right pin convention (D is already horizontal). `len` is the
-   pin length that puts each pin's outer connection point at x = +/-3.81. */
-const SCH_PRIMS = {
-  R: { len: 1.27, g: [
-    '(rectangle (start -2.54 -1.016) (end 2.54 1.016) (stroke (width 0) (type default)) (fill (type none)))'
-  ]},
-  C: { len: 2.794, g: [
-    '(polyline (pts (xy -0.762 -2.032) (xy -0.762 2.032)) (stroke (width 0) (type default)) (fill (type none)))',
-    '(polyline (pts (xy 0.762 -2.032) (xy 0.762 2.032)) (stroke (width 0) (type default)) (fill (type none)))'
-  ]},
-  L: { len: 1.27, g: [
-    '(arc (start -2.54 0) (mid -1.905 0.6323) (end -1.27 0) (stroke (width 0) (type default)) (fill (type none)))',
-    '(arc (start -1.27 0) (mid -0.635 0.6323) (end 0 0) (stroke (width 0) (type default)) (fill (type none)))',
-    '(arc (start 0 0) (mid 0.635 0.6323) (end 1.27 0) (stroke (width 0) (type default)) (fill (type none)))',
-    '(arc (start 1.27 0) (mid 1.905 0.6323) (end 2.54 0) (stroke (width 0) (type default)) (fill (type none)))'
-  ]},
-  D: { len: 2.54, g: [
-    '(polyline (pts (xy -1.27 1.27) (xy -1.27 -1.27)) (stroke (width 0) (type default)) (fill (type none)))',
-    '(polyline (pts (xy 1.27 1.27) (xy 1.27 -1.27) (xy -1.27 0) (xy 1.27 1.27)) (stroke (width 0) (type default)) (fill (type none)))'
-  ]}
+/* ---------- IEC 60617 / KiCad schematic symbol library ----------
+   Real graphic bodies (resistor rectangle, capacitor plates, diode triangle,
+   transistors, etc.) so the exported schematic shows recognisable symbols instead
+   of anonymous boxes. Geometry is in KiCad symbol-local mm (Device.kicad_sym style):
+   +y is up, the body sits at the origin, and each terminal's OUTER connection point
+   is at the listed (x,y) with the pin stub travelling toward the body along `angle`
+   (0 = +x / body to the right, 180 = -x, 90 = +y / body above, 270 = -y).
+
+   2-pin symbols keep their two terminals on the fixed left/right pads at x = -/+3.81
+   (schGeometry decides which physical pin lands on which side, as for the box layout).
+   3-pin symbols list their terminals in [base/gate, collector/drain, emitter/source]
+   order and map to the component's pins by index. Connectivity still comes from the
+   global net labels, so the symbol shape is purely visual — a mis-guessed transistor
+   flavour never affects the netlist. */
+const _SS = '(stroke (width 0) (type default))';
+function _pl(pts, fill){ return '(polyline (pts ' + pts.map(p => '(xy ' + p[0] + ' ' + p[1] + ')').join(' ') + ') ' + _SS + ' (fill (type ' + (fill || 'none') + ')))'; }
+function _rc(x1, y1, x2, y2, fill){ return '(rectangle (start ' + x1 + ' ' + y1 + ') (end ' + x2 + ' ' + y2 + ') ' + _SS + ' (fill (type ' + (fill || 'none') + ')))'; }
+function _ac(sx, sy, mx, my, ex, ey){ return '(arc (start ' + sx + ' ' + sy + ') (mid ' + mx + ' ' + my + ') (end ' + ex + ' ' + ey + ') ' + _SS + ' (fill (type none)))'; }
+/* two fixed left/right terminals for a 2-pin symbol, connection points at x = -/+3.81 */
+const _T2 = (len) => [ { x:-3.81, y:0, angle:0, len }, { x:3.81, y:0, angle:180, len } ];
+
+/* diode triangle+bar shared by diode/led/zener/schottky (anode on the right, cathode bar left) */
+const _DIODE_BODY = [
+  _pl([[-1.27,1.27],[-1.27,-1.27]]),
+  _pl([[1.27,1.27],[1.27,-1.27],[-1.27,0],[1.27,1.27]]),
+];
+
+const SCH_SYM = {
+  resistor:  { w:7.62, h:5.08, hideNums:true, hideNames:true, term:_T2(1.27),
+    body:[ _rc(-2.54,-1.016,2.54,1.016) ] },
+  capacitor: { w:7.62, h:5.08, hideNums:true, hideNames:true, term:_T2(2.794),
+    body:[ _pl([[-1.016,0],[-0.762,0]]), _pl([[-0.762,-2.032],[-0.762,2.032]]),
+           _pl([[0.762,-2.032],[0.762,2.032]]), _pl([[0.762,0],[1.016,0]]) ] },
+  cap_pol:   { w:7.62, h:5.08, hideNums:true, hideNames:true, term:_T2(2.794),
+    body:[ _pl([[-1.016,0],[-0.762,0]]), _pl([[-0.762,-2.032],[-0.762,2.032]]),
+           _ac(0.762,-2.032,1.016,0,0.762,2.032),
+           _pl([[-2.2,1.5],[-1.4,1.5]]), _pl([[-1.8,1.1],[-1.8,1.9]]) ] },  // + sign
+  inductor:  { w:7.62, h:5.08, hideNums:true, hideNames:true, term:_T2(1.27),
+    body:[ _ac(-2.54,0,-1.905,0.6323,-1.27,0), _ac(-1.27,0,-0.635,0.6323,0,0),
+           _ac(0,0,0.635,0.6323,1.27,0), _ac(1.27,0,1.905,0.6323,2.54,0) ] },
+  diode:     { w:7.62, h:5.08, hideNums:true, hideNames:true, term:_T2(2.54),
+    body: _DIODE_BODY },
+  led:       { w:7.62, h:6.35, hideNums:true, hideNames:true, term:_T2(2.54),
+    body: _DIODE_BODY.concat([
+      _pl([[0.5,1.4],[1.7,2.6]]), _pl([[1.05,2.55],[1.7,2.6],[1.6,1.95]]),
+      _pl([[1.4,0.8],[2.6,2.0]]), _pl([[1.95,1.95],[2.6,2.0],[2.5,1.35]]) ]) },
+  zener:     { w:7.62, h:5.08, hideNums:true, hideNames:true, term:_T2(2.54),
+    body: _DIODE_BODY.concat([ _pl([[-1.27,1.27],[-0.68,1.86]]), _pl([[-1.27,-1.27],[-1.86,-1.86]]) ]) },
+  schottky:  { w:7.62, h:5.08, hideNums:true, hideNames:true, term:_T2(2.54),
+    body: _DIODE_BODY.concat([ _pl([[-1.86,1.27],[-1.27,1.27],[-1.27,0.68]]),
+                               _pl([[-0.68,-1.27],[-1.27,-1.27],[-1.27,-0.68]]) ]) },
+  crystal:   { w:7.62, h:5.08, hideNums:true, hideNames:true, term:_T2(2.032),
+    body:[ _rc(-1.143,-2.032,1.143,2.032), _pl([[-1.778,-2.032],[-1.778,2.032]]),
+           _pl([[1.778,-2.032],[1.778,2.032]]) ] },
+  fuse:      { w:7.62, h:5.08, hideNums:true, hideNames:true, term:_T2(1.27),
+    body:[ _rc(-2.54,-0.762,2.54,0.762), _pl([[-2.54,0],[2.54,0]]) ] },
+  battery:   { w:7.62, h:5.08, hideNums:true, hideNames:true, term:_T2(2.54),
+    body:[ _pl([[-1.27,-1.905],[-1.27,1.905]]), _pl([[-0.4,-0.9],[-0.4,0.9]]),
+           _pl([[0.4,-1.905],[0.4,1.905]]),     _pl([[1.27,-0.9],[1.27,0.9]]),
+           _pl([[-2.2,1.4],[-1.6,1.4]]), _pl([[-1.9,1.1],[-1.9,1.7]]) ] },   // + sign
+  // 3-pin: terminals [base/gate, collector/drain, emitter/source]
+  // 3-pin: terminals [base/gate, collector/drain, emitter/source]. `tab` (optional) lets a
+  // 4-pad package (SOT-223/DPAK/TO-252/SOT-89…) map its tab pad — internally tied to the
+  // collector/drain — onto that terminal as a branch stub, so a 4-pad part isn't stuck as a box.
+  npn: { w:7.62, h:10.16, hideNums:false, hideNames:true,
+    term:[ {x:-5.08,y:0,angle:0,len:3.81}, {x:2.54,y:5.08,angle:270,len:2.54}, {x:2.54,y:-5.08,angle:90,len:2.54} ],
+    tab:{ term:1, pin:{x:6.35,y:2.54,angle:180,len:2.54}, line:[[2.54,2.54],[3.81,2.54]] },
+    body:[ _pl([[-1.27,1.905],[-1.27,-1.905]]), _pl([[-1.27,0.635],[2.54,2.54]]),
+           _pl([[-1.27,-0.635],[2.54,-2.54]]),
+           _pl([[1.397,-1.969],[0.793,-1.165],[0.391,-1.969],[1.397,-1.969]],'outline') ] },
+  pnp: { w:7.62, h:10.16, hideNums:false, hideNames:true,
+    term:[ {x:-5.08,y:0,angle:0,len:3.81}, {x:2.54,y:5.08,angle:270,len:2.54}, {x:2.54,y:-5.08,angle:90,len:2.54} ],
+    tab:{ term:1, pin:{x:6.35,y:2.54,angle:180,len:2.54}, line:[[2.54,2.54],[3.81,2.54]] },
+    body:[ _pl([[-1.27,1.905],[-1.27,-1.905]]), _pl([[-1.27,0.635],[2.54,2.54]]),
+           _pl([[-1.27,-0.635],[2.54,-2.54]]),
+           _pl([[-0.127,-1.207],[0.879,-1.207],[0.477,-2.011],[-0.127,-1.207]],'outline') ] },
+  nmos: { w:10.16, h:10.16, hideNums:false, hideNames:true,
+    term:[ {x:-5.08,y:0,angle:0,len:2.54}, {x:1.27,y:5.08,angle:270,len:3.81}, {x:1.27,y:-5.08,angle:90,len:3.81} ],
+    tab:{ term:1, pin:{x:5.08,y:1.27,angle:180,len:2.54}, line:[[1.27,1.27],[2.54,1.27]] },
+    body:[ _pl([[-2.54,1.905],[-2.54,-1.905]]),                       // gate electrode
+           _pl([[-1.27,1.905],[-1.27,0.635]]), _pl([[-1.27,0.508],[-1.27,-0.508]]), _pl([[-1.27,-0.635],[-1.27,-1.905]]),
+           _pl([[-1.27,1.27],[1.27,1.27]]), _pl([[-1.27,-1.27],[1.27,-1.27]]),   // drain/source leads
+           _pl([[1.27,-1.27],[1.27,0],[-1.27,0]]),                    // body tie
+           _pl([[-1.27,0],[-0.5,0.4],[-0.5,-0.4],[-1.27,0]],'outline') ] },      // arrow → gate (N)
+  pmos: { w:10.16, h:10.16, hideNums:false, hideNames:true,
+    term:[ {x:-5.08,y:0,angle:0,len:2.54}, {x:1.27,y:5.08,angle:270,len:3.81}, {x:1.27,y:-5.08,angle:90,len:3.81} ],
+    tab:{ term:1, pin:{x:5.08,y:1.27,angle:180,len:2.54}, line:[[1.27,1.27],[2.54,1.27]] },
+    body:[ _pl([[-2.54,1.905],[-2.54,-1.905]]),
+           _pl([[-1.27,1.905],[-1.27,0.635]]), _pl([[-1.27,0.508],[-1.27,-0.508]]), _pl([[-1.27,-0.635],[-1.27,-1.905]]),
+           _pl([[-1.27,1.27],[1.27,1.27]]), _pl([[-1.27,-1.27],[1.27,-1.27]]),
+           _pl([[1.27,-1.27],[1.27,0],[-1.27,0]]),
+           _pl([[-0.5,0],[-1.27,0.4],[-1.27,-0.4],[-0.5,0]],'outline') ] },      // arrow → source (P)
 };
+
+/* human-readable names + canonical pin names for each symbol kind, used by the
+   inspector's "Schematic sym" picker (labels) and its pin-name auto-fill (SYM_PINNAMES,
+   in the same terminal order schGeometry maps component pins to). */
+const SYM_LABELS = {
+  resistor:"Resistor", capacitor:"Capacitor", cap_pol:"Capacitor (polarized)",
+  inductor:"Inductor / ferrite", diode:"Diode", led:"LED", zener:"Zener diode",
+  schottky:"Schottky diode", crystal:"Crystal / resonator", fuse:"Fuse",
+  battery:"Battery / cell", npn:"Transistor NPN", pnp:"Transistor PNP",
+  nmos:"MOSFET N-channel", pmos:"MOSFET P-channel",
+};
+// terminal-SLOT letters, aligned with each symbol's drawn geometry (sym.term order:
+// [base/gate, collector/drain, emitter/source]). Used to map a pin NAME → the terminal it drives.
+const SYM_PINNAMES = {
+  resistor:["1","2"], capacitor:["1","2"], cap_pol:["+","-"], inductor:["1","2"],
+  diode:["A","K"], led:["A","K"], zener:["A","K"], schottky:["A","K"],
+  crystal:["1","2"], fuse:["1","2"], battery:["+","-"],
+  npn:["B","C","E"], pnp:["B","C","E"], nmos:["G","D","S"], pmos:["G","D","S"],
+};
+// default letter for each pin by PIN NUMBER (rank), i.e. the package's standard pinout — this is
+// NOT the terminal-slot order above. Keyed by pin count because packages differ:
+//   3 pins = SOT-23/SC-59/SOT-323 → 1=B/G, 2=E/S, 3=C/D  (lone pad = collector/drain)
+//   4 pins = SOT-223/DPAK/TO-252  → 1=B/G, 2=C/D, 3=E/S, tab=C/D (tab tied to pin 2)
+// TO-92 etc. vary wildly — the user fixes those by renaming a pin (naming drives the geometry).
+const SYM_PINORDER = {
+  npn:  { 3:["B","E","C"], 4:["B","C","E","C"] },
+  pnp:  { 3:["B","E","C"], 4:["B","C","E","C"] },
+  nmos: { 3:["G","S","D"], 4:["G","D","S","D"] },
+  pmos: { 3:["G","S","D"], 4:["G","D","S","D"] },
+};
+/* does symbol kind `k` fit a part with n pins? Exact terminal-count match, or a tab-capable
+   3-terminal semi driving a 4-pad package (one extra tab pad tied to the collector/drain). */
+function symFitsPinCount(k, n){
+  const s = SCH_SYM[k];
+  return !!s && (s.term.length === n || (s.tab && s.term.length === n - 1));
+}
+/* symbol kinds selectable for a part with n pins (drives the picker's option list) */
+function symKindsForPinCount(n){
+  return Object.keys(SCH_SYM).filter(k => symFitsPinCount(k, n));
+}
+/* the canonical pin names for kind `k` on an n-pin part (or null if it doesn't fit). For a
+   tab package the extra pad inherits the collector/drain name (they're the same node). */
+function symPinNames(k, n){
+  const ord = SYM_PINORDER[k];               // package pin-number order wins for the semis
+  if (ord && ord[n]) return ord[n].slice();
+  const base = SYM_PINNAMES[k]; if (!base) return null;
+  if (base.length === n) return base.slice();
+  const s = SCH_SYM[k];
+  if (s && s.tab && base.length === n - 1) return base.concat(base[s.tab.term]);
+  return null;
+}
+
+/* first significant letter of a pin name, uppercased (for name→terminal matching) */
+function _pinLetter(name){ const m = /[A-Za-z]/.exec(name || ""); return m ? m[0].toUpperCase() : null; }
+/* numeric value of a pin number for ordering (non-numeric / tab pads sort last) */
+function _pinNumVal(num){ const n = parseInt(num, 10); return isFinite(n) ? n : 1e9; }
+
+/* fill a component's pin NAMES with the chosen symbol's canonical names, assigned in ascending
+   pin-NUMBER order (imports don't guarantee array order matches pin numbering). Nets untouched.
+   No-op for kinds without canonical names (e.g. "auto"/"box"). Returns true if it named anything. */
+function applySymPinNames(c, kind){
+  const names = symPinNames(kind, c.pins.length);
+  if (!names) return false;
+  const order = c.pins.map((_, i) => i).sort((a, b) => _pinNumVal(c.pins[a].num) - _pinNumVal(c.pins[b].num));
+  order.forEach((idx, k) => c.pins[idx].name = names[k]);
+  return true;
+}
+
+/* map a multi-terminal symbol's terminals onto a component's pins. Honours the pin NAMES first
+   (so correcting "center pin = C" actually moves it to the collector/drain), then falls back to
+   ascending pin-number order. A lone extra pad (SOT-223/DPAK tab, same letter as collector/drain)
+   lands on the tab stub. Returns { pins:[{x,y,angle,len}], extra:[body sexpr] }. */
+function assignSymTerminals(c, kind, sym){
+  const letters = SYM_PINNAMES[kind];              // terminal-slot letters ["B","C","E"] / ["G","D","S"]
+  const nt = sym.term.length;
+  const out = new Array(c.pins.length);
+  const usedT = new Array(nt).fill(false);
+  let tabUsed = false; const extra = [];
+  const order = c.pins.map((_, i) => i).sort((a, b) => _pinNumVal(c.pins[a].num) - _pinNumVal(c.pins[b].num));
+  // the terminal letter each pin WANTS: its explicit name letter if recognised, else the
+  // package-standard letter for its pin-number rank (SOT-23 lone pad → C, SOT-223 tab → C/D…)
+  const defOrder = symPinNames(kind, c.pins.length) || [];
+  const want = new Array(c.pins.length);
+  order.forEach((idx, rank) => {
+    const L = _pinLetter(c.pins[idx].name);
+    want[idx] = (L && letters.indexOf(L) >= 0) ? L : (defOrder[rank] || null);
+  });
+  const leftover = [];
+  for (const i of order){                          // pass 1: place by wanted letter
+    const L = want[i];
+    const t = L ? letters.indexOf(L) : -1;
+    if (t >= 0 && !usedT[t]){ usedT[t] = true; out[i] = { ...sym.term[t] }; }
+    else if (t >= 0 && sym.tab && letters[sym.tab.term] === L && !tabUsed){
+      tabUsed = true; out[i] = { ...sym.tab.pin }; extra.push(_pl(sym.tab.line));   // duplicate C/D letter → tab
+    } else leftover.push(i);
+  }
+  const freeT = []; for (let t = 0; t < nt; t++) if (!usedT[t]) freeT.push(t);
+  for (const i of leftover){                       // pass 2: fill remaining terminals, then tab
+    if (freeT.length){ const t = freeT.shift(); usedT[t] = true; out[i] = { ...sym.term[t] }; }
+    else if (sym.tab && !tabUsed){ tabUsed = true; out[i] = { ...sym.tab.pin }; extra.push(_pl(sym.tab.line)); }
+    else out[i] = { ...(sym.tab ? sym.tab.pin : sym.term[nt - 1]) };                // overflow (rare)
+  }
+  return { pins: out, extra };
+}
+
+/* auto-classify a component into a symbol kind (or null → generic box) from the ref-des
+   letter, pin count, and value/part keywords. `_symKind` layers the manual override on top. */
+function _autoSymKind(c){
+  const rl = (/^[A-Za-z]+/.exec(c.ref) || ["U"])[0].toUpperCase();
+  const n = c.pins.length;
+  const val = ((c.value || "") + " " + (c.part || "")).toLowerCase();
+  if (n === 2){
+    switch (rl){
+      case "R": case "RN": case "RV": case "VR": case "TH": return "resistor";
+      case "C": return "capacitor";
+      case "CP": case "CE": return "cap_pol";
+      case "L": case "FB": case "FL": return "inductor";
+      case "LED": return "led";
+      case "D":
+        if (/\bled\b/.test(val)) return "led";
+        if (/zener|zdiode|bzx|zpd|zmm/.test(val)) return "zener";
+        if (/schottky|\bbat\d|\bss\d|mbr|1n58/.test(val)) return "schottky";
+        return "diode";
+      case "Y": case "X": case "XTAL": case "OSC": case "QZ": return "crystal";
+      case "F": return "fuse";
+      case "BT": case "BAT": return "battery";
+    }
+    return null;
+  }
+  if (n === 3 && (rl === "Q" || rl === "T" || rl === "TR" || rl === "M")){
+    if (/pnp/.test(val)) return "pnp";
+    if (/npn/.test(val)) return "npn";
+    if (/p.?mos|pfet|pch|p-?ch/.test(val)) return "pmos";
+    if (/n.?mos|nfet|nch|n-?ch/.test(val)) return "nmos";
+    if (/mos|fet/.test(val)) return "nmos";
+    return "npn";
+  }
+  return null;
+}
+
+/* the effective symbol kind: the user's manual override (`comp.symOverride`) when set and
+   valid for this pin count, else the auto guess. "box" forces a generic box (returns null). */
+function _symKind(c){
+  const ov = c && c.symOverride;
+  if (ov){
+    if (ov === "box") return null;
+    if (symFitsPinCount(ov, c.pins.length)) return ov;   // ignore an override that no longer fits
+  }
+  return _autoSymKind(c);
+}
+/* the resolved symbol definition for a component, or null when it should stay a box */
+function schSymFor(c){ const k = _symKind(c); return k ? SCH_SYM[k] : null; }
 
 /* the component's "type" for grouping/sorting — the leading letters of its ref
    designator (R, C, U, Q…), upper-cased. */
@@ -223,24 +452,33 @@ function schGeometry(){
   const geo = new Map();
   for (const c of State.components){
     const pl = schPlacement(c);
-    const refLetter = (/^[A-Za-z]+/.exec(c.ref)||["U"])[0];
-    // 2-pin R/C/L/D render as KiCad's real primitive shape; everything else is a
-    // sized box (KiCad draws ICs as background-filled boxes, so that stays consistent).
-    const prim = c.pins.length === 2 ? SCH_PRIMS[refLetter.toUpperCase()] : null;
-    let w, h, pins, body, hide;
-    if (prim){
-      hide = true;
-      w = 7.62; h = 5.08;
-      // place this part's two pins on the fixed left/right primitive pads
-      let ri = c.pins.findIndex((_,i)=> pl.place[i] && pl.place[i].side === 1);
-      if (ri < 0) ri = 1;
-      const li = ri === 0 ? 1 : 0;
+    // R/C/L/D, transistors, LEDs, crystals… render as their real IEC/KiCad symbol;
+    // everything else (ICs, multi-pin parts) stays a sized box, which is how KiCad
+    // itself draws ICs (a background-filled rectangle with named pins).
+    const kind = _symKind(c);
+    const sym = kind ? SCH_SYM[kind] : null;
+    let w, h, pins, body, hideNums, hideNames;
+    if (sym){
+      w = sym.w; h = sym.h; body = sym.body;
+      hideNums = sym.hideNums; hideNames = sym.hideNames;
       pins = new Array(c.pins.length);
-      pins[li] = { x: -3.81, y: 0, angle: 0,   len: prim.len };
-      pins[ri] = { x:  3.81, y: 0, angle: 180, len: prim.len };
-      body = prim.g;
+      if (c.pins.length === 2){
+        // 2-pin symbol: put the part's two pins on the fixed left/right terminals,
+        // honouring which physical pin the footprint placed on the right (side 1)
+        let ri = c.pins.findIndex((_,i)=> pl.place[i] && pl.place[i].side === 1);
+        if (ri < 0) ri = 1;
+        const li = ri === 0 ? 1 : 0;
+        pins[li] = { ...sym.term[0] };   // left
+        pins[ri] = { ...sym.term[1] };   // right
+      } else {
+        // multi-terminal symbol (transistor/MOSFET): map pins to terminals by name (falling
+        // back to pin-number order), routing a lone tab pad onto the collector/drain stub
+        const a = assignSymTerminals(c, kind, sym);
+        pins = a.pins;
+        if (a.extra.length) body = sym.body.concat(a.extra);
+      }
     } else {
-      hide = false;
+      hideNums = false; hideNames = false;
       h = Math.max(pl.leftN, pl.rightN, 1) * 2.54 + 2.54;
       let lmax = 0, rmax = 0;
       for (let i=0;i<c.pins.length;i++){
@@ -271,7 +509,7 @@ function schGeometry(){
     }
     const bw = w + 2 * Math.max(leftExt, rightExt);   // symmetric envelope (de-overlap tests centred boxes)
     const bh = h + 2 * 2.54;                           // ref/value text above and below the box
-    geo.set(c.id, { w, h, pins, body, hide, bw, bh });
+    geo.set(c.id, { w, h, pins, body, hideNums, hideNames, bw, bh });
   }
   return geo;
 }
@@ -464,8 +702,9 @@ function exportKiCadSch(mode){
     // include the component id so duplicate refdes (common in imported boards) don't
     // collide on one shared symbol definition — each part gets its own lib symbol
     const sym = "REV_" + c.ref + "_" + c.id;
-    const { w, h, pins, body, hide } = g;
-    L.push('    (symbol "reveng:' + sym + '"' + (hide ? ' (pin_numbers (hide yes)) (pin_names (hide yes))' : '') + ' (in_bom yes) (on_board yes)');
+    const { w, h, pins, body, hideNums, hideNames } = g;
+    const hdr = (hideNums ? ' (pin_numbers (hide yes))' : '') + (hideNames ? ' (pin_names (hide yes))' : '');
+    L.push('    (symbol "reveng:' + sym + '"' + hdr + ' (in_bom yes) (on_board yes)');
     L.push('      (property "Reference" "' + _schEsc(refLetter) + '" (at 0 ' + F(h/2+1.27) + ' 0) (effects (font (size 1.27 1.27))))');
     L.push('      (property "Value" "' + _schEsc(c.value || c.part || "~") + '" (at 0 ' + F(-h/2-1.27) + ' 0) (effects (font (size 1.27 1.27))))');
     L.push('      (symbol "' + sym + '_0_1"');

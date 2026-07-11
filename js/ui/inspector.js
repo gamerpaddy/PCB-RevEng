@@ -147,6 +147,15 @@ UI.inspectComponent = (c, selPin) => {
   const box = $("#inspector");
   const fp = compFootprint(c);
   const isR = isResistorRef(c.ref);
+  // "Schematic sym" picker: Auto (shows what auto-detect resolves to) · every symbol whose
+  // terminal count matches this part's pin count · Box/IC. Drives the KiCad schematic export.
+  const symCur = c.symOverride || "auto";
+  const symAuto = _autoSymKind(c);
+  const symOpts = [`<option value="auto"${symCur==="auto"?" selected":""}>Auto (${symAuto?SYM_LABELS[symAuto]:"box / IC"})</option>`]
+    .concat(symKindsForPinCount(c.pins.length).map(k =>
+      `<option value="${k}"${symCur===k?" selected":""}>${SYM_LABELS[k]}</option>`))
+    .concat(`<option value="box"${symCur==="box"?" selected":""}>Box / IC (generic)</option>`)
+    .join("");
   const sec = document.createElement("div");
   sec.className = "insp-section";
   sec.innerHTML = `
@@ -162,6 +171,7 @@ UI.inspectComponent = (c, selPin) => {
       : `<input id="i-val" value="${escAttr(c.value)}">`)}
     ${inspRow("Part name", `<input id="i-part" value="${escAttr(c.part)}">`)}
     ${inspRow("KiCad fp", `<input id="i-kicad" value="${escAttr(c.kicad)}" placeholder="lib:footprint">`)}
+    ${inspRow("Schematic sym", `<select id="i-sym" title="Symbol used in the KiCad schematic export. Picking a type also fills in its standard pin names.">${symOpts}</select>`)}
     ${inspRow("Side", `<select id="i-side"><option value="front">Front</option><option value="back">Back</option></select>`)}
     ${inspRow("Rotation", `<input id="i-rot" type="number" step="any" value="${c.rot.toFixed(1)}"> °`)}
     ${inspRow("Scale ×", `<input id="i-scale" type="number" step="0.05" min="0.1" value="${(c.scale||1).toFixed(2)}">`)}
@@ -205,6 +215,15 @@ UI.inspectComponent = (c, selPin) => {
   });
   bindLive(sec.querySelector("#i-part"), "edit part", v => { c.part = v; });
   bindLive(sec.querySelector("#i-kicad"), "edit footprint name", v => { c.kicad = v.trim(); });
+  sec.querySelector("#i-sym").addEventListener("change", e => {
+    const v = e.target.value;
+    pushUndo("symbol type " + c.ref);
+    c.symOverride = (v === "auto") ? null : v;
+    // auto-fill this symbol's standard pin NAMES (by pin number; a SOT-223-style tab pad
+    // inherits the collector/drain name) — nets are untouched
+    applySymPinNames(c, v);
+    UI.refreshInspector(); UI.refreshNets(); requestRender();
+  });
   sec.querySelector("#i-side").addEventListener("change", e => commit(()=>{ c.side = e.target.value; }));
   sec.querySelector("#i-rot").addEventListener("change", e => commit(()=>{ c.rot = parseFloat(e.target.value)||0; }));
   sec.querySelector("#i-scale").addEventListener("change", e => commit(()=>{ c.scale = Math.max(0.1, parseFloat(e.target.value)||1); }));

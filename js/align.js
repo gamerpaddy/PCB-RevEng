@@ -140,7 +140,8 @@ function startCrop(){
   const layer = UI.activeLayer();
   if (!layer || !layer.img){ UI.toast("Select an image layer in the Layers panel first"); return; }
   if (layer.locked){ UI.toast("Layer is locked"); return; }
-  if (!confirmRewarpIfPopulated(layer, "Cropping")) return;
+  // NOTE: cropping bakes the current on-screen pixels in place (see applyCrop) — it does
+  // NOT move the image relative to placed elements, so no re-warp warning is needed here.
   setTool("crop");
   Tools.cropLayer = layer;                 // capture now; setTool cleared it first
   Tools.cropA = Tools.cropB = null;

@@ -38,8 +38,11 @@ function componentDown(w, e){
     kicad: p.kicad || fp.kicad || "",
     x: w.x, y: w.y, rot: Tools.ghostRot, side: Tools.ghostSide,
     scale: 1,
+    symOverride: p.symOverride || null,
     pins: fp.pins.map(fpin => ({ num:fpin.num, name:fpin.name||"", netId:null })),
   };
+  // a concrete symbol pick fills in its standard pin names
+  if (comp.symOverride && comp.symOverride !== "box") applySymPinNames(comp, comp.symOverride);
   State.components.push(comp);
   autoConnectPins(comp);   // pins dropped on existing copper inherit its net (e.g. plated mounting hole over a trace)
   p.ref = ""; // subsequent placements auto-number

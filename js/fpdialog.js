@@ -18,6 +18,12 @@ function fpLoadLast(){
 
 UI.openFootprintDialog = (editComp) => {
   FPD.editComp = editComp || null;
+  FPD.symOverride = editComp ? (editComp.symOverride || "auto") : "auto";
+  // wire the schematic-symbol picker once (the <select> is static; its options are rebuilt)
+  if (!FPD._symWired){
+    const s = $("#fp-sym");
+    if (s){ s.addEventListener("change", e => { FPD.symOverride = e.target.value; }); FPD._symWired = true; }
+  }
   const dlg = $("#fp-dialog");
   if (editComp){
     FPD.catId = editComp.fpId;
@@ -220,17 +226,38 @@ function drawFpPreview(){
     ? (fp.body.w/0.0254).toFixed(0) + "×" + (fp.body.h/0.0254).toFixed(0) + " mil"
     : fp.body.w.toFixed(1) + "×" + fp.body.h.toFixed(1) + " mm", 6, 14);
   $("#fp-kicad").placeholder = fp.kicad || "lib:name";
+  buildFpSymRow(fp);
+}
+
+/* populate the "Schematic symbol" picker from the current footprint's pin count — the symbol
+   options depend on how many pins the (live) footprint has, so it rebuilds on every change.
+   Hidden when no symbol fits the pin count. */
+function buildFpSymRow(fp){
+  const row = $("#fp-sym-row"), sel = $("#fp-sym");
+  if (!row || !sel) return;
+  const n = fp ? fp.pins.length : 0;
+  const kinds = symKindsForPinCount(n);
+  if (!kinds.length){ row.style.display = "none"; return; }
+  const cur = FPD.symOverride || "auto";
+  sel.innerHTML = [`<option value="auto"${cur==="auto"?" selected":""}>Auto (detect)</option>`]
+    .concat(kinds.map(k => `<option value="${k}"${cur===k?" selected":""}>${SYM_LABELS[k]}</option>`))
+    .concat(`<option value="box"${cur==="box"?" selected":""}>Box / IC (generic)</option>`)
+    .join("");
+  row.style.display = "";
 }
 
 UI.confirmFootprint = () => {
   const fp = generateFootprint(FPD.catId, FPD.params);
   if (!fp) return;
+  // "auto" (or unset) → no override; a concrete kind / "box" is stored on the component
+  const symOv = (!FPD.symOverride || FPD.symOverride === "auto") ? null : FPD.symOverride;
   const vals = {
     fpId: FPD.catId, fpParams: {...fp.params},
     ref: $("#fp-ref").value.trim(),
     value: $("#fp-value").value.trim(),
     part: $("#fp-part").value.trim(),
     kicad: $("#fp-kicad").value.trim() || fp.kicad,
+    symOverride: symOv,
   };
   if (!FPD.editComp) fpSaveLast(); // remember category/params/value for next time
   $("#fp-dialog").close();
@@ -240,6 +267,7 @@ UI.confirmFootprint = () => {
     const c = FPD.editComp;
     c.fpId = vals.fpId; c.fpParams = vals.fpParams; c._fp = null;
     c.value = vals.value; c.part = vals.part; c.kicad = vals.kicad;
+    c.symOverride = vals.symOverride;
     // rebuild pin states, keep nets + no-connect flags by pin number where possible
     const old = c.pins;
     const nfp = compFootprint(c);
@@ -248,6 +276,8 @@ UI.confirmFootprint = () => {
       return { num: fpin.num, name: prev?prev.name:(fpin.name||""), netId: prev?prev.netId:null,
                nc: prev ? prev.nc : undefined };
     });
+    // a concrete symbol pick fills in its standard pin names (nets/NC preserved above)
+    if (vals.symOverride && vals.symOverride !== "box") applySymPinNames(c, vals.symOverride);
     pruneNets();
     UI.select({type:"comp", comp:c});
     UI.refreshNets(); requestRender();
