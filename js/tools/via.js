@@ -228,20 +228,29 @@ function viaDown(w, e){
    over empty board it clears the pending net so new vias start unnetted. */
 function viaNetPick(){
   const w = Tools.cursor;
-  let over = false, netId = null;
+  let over = false, netId = null, overVia = null;
   if (w){
+    // check for a via under the cursor first so probing one copies its size + drill too
+    const h = hitTest(w.x, w.y);
+    if (h && h.type === "via") overVia = h.via;
     const snap = snapToConductor(w.x, w.y, "any");
     if (snap && snap.attach){ over = true; netId = snap.netId; }
-    else {
-      const h = hitTest(w.x, w.y);
-      if (h && h.type === "pin"){ over = true; netId = h.comp.pins[h.pinIdx].netId; }
-      else if (h && h.type === "via"){ over = true; netId = h.via.netId; }
-      else if (h && h.type === "trace"){ over = true; netId = h.trace.netId; }
-    }
+    else if (h && h.type === "pin"){ over = true; netId = h.comp.pins[h.pinIdx].netId; }
+    else if (h && h.type === "via"){ over = true; netId = h.via.netId; }
+    else if (h && h.type === "trace"){ over = true; netId = h.trace.netId; }
+  }
+  // probing an existing via adopts its physical size (and drill, if it carries one) as the
+  // defaults for the next vias placed — not just its net
+  if (overVia){
+    State.viaR = overVia.r || State.viaR;
+    if (overVia.hole != null) State.viaHole = overVia.hole;
   }
   if (over && netId){
     Tools.lastViaNet = getNet(netId)?.name || null;
-    UI.toast("Via net picked → “" + (Tools.lastViaNet || "?") + "” (new vias join it)");
+    const sizeTxt = overVia ? " · size " + (State.viaR*2/State.pxPerMm).toFixed(2) + " mm" : "";
+    UI.toast("Via net picked → “" + (Tools.lastViaNet || "?") + "”" + sizeTxt + " (new vias match)");
+  } else if (overVia){
+    UI.toast("Via size picked → " + (State.viaR*2/State.pxPerMm).toFixed(2) + " mm (new vias match)");
   } else {
     Tools.lastViaNet = null;
     UI.toast("Via net cleared — new vias start unnetted");

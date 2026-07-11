@@ -872,6 +872,26 @@ function wireLab(){
   $("#lab-close").addEventListener("click", ()=> $("#lab-dialog").close());
   chk.addEventListener("change", apply);
   maxIn.addEventListener("input", apply);
+
+  // clear/remove-all: bulk-delete every object of the ticked kinds (undoable)
+  $("#lab-clear-go").addEventListener("click", () => {
+    const comp = $("#lab-clear-comp").checked, via = $("#lab-clear-via").checked, trace = $("#lab-clear-trace").checked;
+    if (!comp && !via && !trace){ UI.toast("Tick at least one kind to remove"); return; }
+    const counts = [];
+    if (comp)  counts.push(State.components.length + " components");
+    if (via)   counts.push(State.vias.length + " vias");
+    if (trace) counts.push(State.traces.length + " traces");
+    if (!confirm("Remove ALL of: " + counts.join(", ") + "?\nThis clears them from the whole board (undoable).")) return;
+    pushUndo("clear all (" + [comp?"comp":"", via?"via":"", trace?"trace":""].filter(Boolean).join("/") + ")");
+    if (comp)  State.components = [];
+    if (via)   State.vias = [];
+    if (trace) State.traces = [];
+    UI.select(null);
+    pruneNets();
+    UI.refreshNets(); UI.refreshInspector(); UI.refreshParts(); requestRender();
+    UI.toast("Removed " + counts.join(", "));
+    $("#lab-clear-comp").checked = $("#lab-clear-via").checked = $("#lab-clear-trace").checked = false;
+  });
 }
 
 /* ---------------- file I/O ---------------- */

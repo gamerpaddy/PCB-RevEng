@@ -8,6 +8,7 @@ UI.refreshInspector = () => {
   box.innerHTML = "";
   if (UI.pinSel.length){ UI.inspectMultiPins(); return; }
   if (UI.traceSel.length){ UI.inspectMultiTraces(); return; }
+  if (UI.boxSel && UI.boxSel.length){ UI.inspectBoxSel(); return; }
   if (!sel){
     // via tool active → show the retained defaults for newly placed vias (size + drill)
     if (typeof Tools !== "undefined" && Tools.name === "via"){ UI.inspectViaTool(); return; }
@@ -34,6 +35,25 @@ UI.refreshInspector = () => {
 function inspRow(label, inputHtml){
   return `<div class="insp-row"><label>${label}</label>${inputHtml}</div>`;
 }
+
+/* marquee (box) selection panel: object counts + a mass Delete */
+UI.inspectBoxSel = () => {
+  const box = $("#inspector");
+  const n = { comp:0, via:0, trace:0, note:0 };
+  for (const s of UI.boxSel) n[s.type]++;
+  const parts = [];
+  if (n.comp)  parts.push(n.comp + " component" + (n.comp===1?"":"s"));
+  if (n.via)   parts.push(n.via + " via" + (n.via===1?"":"s"));
+  if (n.trace) parts.push(n.trace + " trace" + (n.trace===1?"":"s"));
+  if (n.note)  parts.push(n.note + " note" + (n.note===1?"":"s"));
+  const sec = document.createElement("div");
+  sec.className = "insp-sec";
+  sec.innerHTML = `<div class="insp-title">Box selection (${UI.boxSel.length})</div>
+    <div class="panel-hint">${parts.join(" · ") || "nothing"}</div>
+    <div class="insp-actions"><button id="i-box-del" class="danger">Delete all</button></div>`;
+  box.appendChild(sec);
+  sec.querySelector("#i-box-del").addEventListener("click", () => deleteBoxSelection());
+};
 
 /* shift-click multi-pin panel: one net field for all selected pins */
 UI.inspectMultiPins = () => {
@@ -218,10 +238,17 @@ UI.inspectComponent = (c, selPin) => {
   sec.querySelector("#i-sym").addEventListener("change", e => {
     const v = e.target.value;
     pushUndo("symbol type " + c.ref);
+    const prevKind = _symKind(c);            // resolved symbol BEFORE the switch
     c.symOverride = (v === "auto") ? null : v;
-    // auto-fill this symbol's standard pin NAMES (by pin number; a SOT-223-style tab pad
-    // inherits the collector/drain name) — nets are untouched
-    applySymPinNames(c, v);
+    if (v === "box"){
+      // generic box has no canonical pin names → drop the ones a concrete symbol
+      // auto-filled (BCE / GDS / …) so they don't linger as wrong labels
+      clearAutoSymNames(c, prevKind);
+    } else {
+      // auto-fill this symbol's standard pin NAMES (by pin number; a SOT-223-style tab pad
+      // inherits the collector/drain name) — nets are untouched
+      applySymPinNames(c, v);
+    }
     UI.refreshInspector(); UI.refreshNets(); requestRender();
   });
   sec.querySelector("#i-side").addEventListener("change", e => commit(()=>{ c.side = e.target.value; }));

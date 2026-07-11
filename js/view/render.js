@@ -397,6 +397,9 @@ function drawWorld(ctx){
     ctx.restore();
   }
 
+  // --- box (marquee) selection: highlight members + draw the rubber-band while dragging ---
+  drawBoxSelection(ctx);
+
   // --- alignment reference points (world-space crosshair at exact location) ---
   if (Tools.alignPts){
     ctx.save();
@@ -417,6 +420,42 @@ function drawWorld(ctx){
   drawResizeLabel(ctx);
   drawPadEditOverlay(ctx);
   drawCropOverlay(ctx);
+}
+
+/* box-select: a cyan highlight on every marquee-selected object, plus the live rubber-band
+   rectangle while the drag is in progress. All world-space (constant screen thickness). */
+function drawBoxSelection(ctx){
+  const col = "#39d0ff";
+  if (UI.boxSel && UI.boxSel.length){
+    ctx.save();
+    ctx.strokeStyle = col; ctx.globalAlpha = 0.95; ctx.lineWidth = 2/View.zoom;
+    for (const s of UI.boxSel){
+      if (s.type === "comp"){
+        const r = compRadius(s.comp) + 3/View.zoom;
+        ctx.strokeRect(s.comp.x - r, s.comp.y - r, r*2, r*2);
+      } else if (s.type === "via"){
+        ctx.beginPath(); ctx.arc(s.via.x, s.via.y, (s.via.r||State.viaR) + 3/View.zoom, 0, Math.PI*2); ctx.stroke();
+      } else if (s.type === "note"){
+        ctx.beginPath(); ctx.arc(s.note.x, s.note.y, 10/View.zoom, 0, Math.PI*2); ctx.stroke();
+      } else if (s.type === "trace"){
+        const t = s.trace;
+        ctx.beginPath(); ctx.moveTo(t.points[0].x, t.points[0].y);
+        for (let i=1;i<t.points.length;i++) ctx.lineTo(t.points[i].x, t.points[i].y);
+        ctx.lineWidth = (t.width||3) + 3/View.zoom; ctx.globalAlpha = 0.5; ctx.stroke();
+        ctx.lineWidth = 2/View.zoom; ctx.globalAlpha = 0.95;
+      }
+    }
+    ctx.restore();
+  }
+  const d = Tools.drag;
+  if (d && d.kind === "box-select" && d.moved){
+    ctx.save();
+    ctx.strokeStyle = col; ctx.fillStyle = "rgba(57,208,255,0.10)";
+    ctx.lineWidth = 1.2/View.zoom; ctx.setLineDash([5/View.zoom, 4/View.zoom]);
+    const x = Math.min(d.sx,d.x), y = Math.min(d.sy,d.y), w = Math.abs(d.x-d.sx), h = Math.abs(d.y-d.sy);
+    ctx.fillRect(x,y,w,h); ctx.strokeRect(x,y,w,h);
+    ctx.restore();
+  }
 }
 
 /* crop tool: dim everything outside the drag rectangle and draw its dashed border, so

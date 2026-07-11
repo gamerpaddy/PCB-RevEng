@@ -357,6 +357,17 @@
       </div>
     </div>
 
+    <div style="border:1px solid #2a3038;border-radius:6px;padding:10px;margin-bottom:10px">
+      <label style="display:flex;align-items:center;gap:8px;font-weight:600">Clear / remove all</label>
+      <div class="panel-hint" style="margin:6px 0 8px">Bulk-delete every object of the ticked kinds from the whole board. Undoable (one step). Image layers and nets are untouched.</div>
+      <div class="dlg-row" style="gap:14px">
+        <label style="width:auto"><input type="checkbox" id="lab-clear-comp"> Components</label>
+        <label style="width:auto"><input type="checkbox" id="lab-clear-via"> Vias</label>
+        <label style="width:auto"><input type="checkbox" id="lab-clear-trace"> Traces</label>
+      </div>
+      <div class="dlg-row" style="margin-top:8px"><button id="lab-clear-go" class="danger">Remove ticked</button></div>
+    </div>
+
     <div class="dlg-buttons"><button id="lab-close" class="primary">Close</button></div>
   </dialog>
 
@@ -550,35 +561,35 @@
 <script src="js/view/core.js?v=89"></script>
 <script src="js/view/geom.js?v=89"></script>
 <script src="js/view/hittest.js?v=89"></script>
-<script src="js/view/render.js?v=96"></script>
+<script src="js/view/render.js?v=97"></script>
 <script src="js/view/draw.js?v=96"></script>
 <script src="js/view/overlays.js?v=89"></script>
 <script src="js/layerstack.js?v=55"></script>
-<script src="js/tools/core.js?v=118"></script>
-<script src="js/tools/select.js?v=111"></script>
+<script src="js/tools/core.js?v=119"></script>
+<script src="js/tools/select.js?v=112"></script>
 <script src="js/tools/trace.js?v=116"></script>
-<script src="js/tools/via.js?v=115"></script>
+<script src="js/tools/via.js?v=116"></script>
 <script src="js/tools/checker.js?v=111"></script>
-<script src="js/tools/ops.js?v=113"></script>
+<script src="js/tools/ops.js?v=114"></script>
 <script src="js/align.js?v=60"></script>
 <script src="js/keymap.js?v=58"></script>
 <script src="js/resolver.js?v=49"></script>
-<script src="js/netlist.js?v=69"></script>
-<script src="js/eagle.js?v=3"></script>
+<script src="js/netlist.js?v=70"></script>
+<script src="js/eagle.js?v=4"></script>
 <script src="js/easyeda.js?v=4"></script>
-<script src="js/gencad.js?v=4"></script>
+<script src="js/gencad.js?v=5"></script>
 <script src="js/gerber.js?v=1"></script>
-<script src="js/ui/core.js?v=104"></script>
+<script src="js/ui/core.js?v=105"></script>
 <script src="js/ui/layers.js?v=105"></script>
 <script src="js/ui/nets.js?v=104"></script>
 <script src="js/ui/parts.js?v=103"></script>
-<script src="js/ui/inspector.js?v=110"></script>
+<script src="js/ui/inspector.js?v=111"></script>
 <script src="js/ui/dialogs.js?v=105"></script>
 <script src="js/ui/misc.js?v=105"></script>
 <script src="js/kicadsearch.js?v=51"></script>
 <script src="js/fpdialog.js?v=57"></script>
 <script src="js/autosave.js?v=53"></script>
-<script src="js/main.js?v=109"></script>
+<script src="js/main.js?v=110"></script>
 
 </body>
 </html>

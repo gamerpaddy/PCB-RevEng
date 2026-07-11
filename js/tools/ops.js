@@ -100,6 +100,11 @@ function noteDown(w, e){
 function deleteSelection(){
   const sel = UI.sel;
   if (!sel){
+    // Delete on a box (marquee) selection = mass-delete every object inside the area
+    if (UI.boxSel && UI.boxSel.length){
+      deleteBoxSelection();
+      return;
+    }
     // Delete on a ctrl/shift multi-trace selection = the inspector's "Delete all"
     if (UI.traceSel.length){
       pushUndo("delete " + UI.traceSel.length + " traces");
@@ -143,6 +148,33 @@ function deleteSelection(){
   pruneNets();
   UI.select(null);
   UI.refreshNets(); requestRender();
+}
+
+/* mass-delete every object in the box (marquee) selection. Edit-locked components are
+   skipped and left selected so nothing is removed behind a lock. */
+function deleteBoxSelection(){
+  const items = UI.boxSel;
+  const comps = items.filter(s => s.type==="comp").map(s => s.comp);
+  const locked = comps.filter(compEditLocked);
+  const delComps = new Set(comps.filter(c => !compEditLocked(c)));
+  const delVias  = new Set(items.filter(s => s.type==="via").map(s => s.via));
+  const delTraces= new Set(items.filter(s => s.type==="trace").map(s => s.trace));
+  const delNotes = new Set(items.filter(s => s.type==="note").map(s => s.note));
+  const total = delComps.size + delVias.size + delTraces.size + delNotes.size;
+  if (!total){ UI.toast(locked.length ? "All boxed parts are edit-locked" : "Nothing to delete"); return; }
+  pushUndo("delete " + total + " objects");
+  if (delComps.size) State.components = State.components.filter(c => !delComps.has(c));
+  if (delVias.size){
+    State.vias = State.vias.filter(v => !delVias.has(v));
+    for (const v of delVias) pruneCollinearAnchors(v.x, v.y);
+  }
+  if (delTraces.size) State.traces = State.traces.filter(t => !delTraces.has(t));
+  if (delNotes.size) State.notes = State.notes.filter(n => !delNotes.has(n));
+  UI.boxSel = [];
+  pruneNets();
+  UI.select(null);
+  UI.refreshNets(); UI.refreshInspector(); requestRender();
+  UI.toast("Deleted " + total + " object" + (total===1?"":"s") + (locked.length ? " (" + locked.length + " locked kept)" : ""));
 }
 
 function rotateSelection(deg){

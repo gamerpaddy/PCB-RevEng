@@ -298,6 +298,13 @@ function onPointerUp(e){
   if (d.kind === "crop-rect"){
     applyCrop();   // bakes the kept region; stays no-op & keeps undo clean if the box was tiny
   }
+  if (d.kind === "box-select"){
+    if (d.moved){
+      applyBoxSelect(d.sx, d.sy, d.x, d.y);
+      const n = UI.boxSelCount();
+      UI.toast(n ? n + " object" + (n===1?"":"s") + " selected — Del to delete" : "Nothing in the box");
+    }
+  }
   requestRender();
 }
 
@@ -419,7 +426,26 @@ function handleDrag(pt, w, e){
       d.moved = true;
       Tools.cropB = { x:w.x, y:w.y };
       break;
+    case "box-select":
+      d.moved = true;
+      d.x = w.x; d.y = w.y;
+      break;
   }
+}
+
+/* collect every selectable object whose position falls inside the world-space box into
+   UI.boxSel (respecting the hide-traces / hide-vias toggles). A component/via/note counts
+   when its centre is inside; a trace when any vertex is inside. */
+function applyBoxSelect(x0, y0, x1, y1){
+  const lx = Math.min(x0,x1), hx = Math.max(x0,x1), ly = Math.min(y0,y1), hy = Math.max(y0,y1);
+  const inside = (x,y) => x >= lx && x <= hx && y >= ly && y <= hy;
+  const out = [];
+  for (const c of State.components) if (inside(c.x, c.y)) out.push({ type:"comp", comp:c });
+  if (!View.hideVias) for (const v of State.vias) if (inside(v.x, v.y)) out.push({ type:"via", via:v });
+  if (!View.hideTraces) for (const t of State.traces) if (t.points.some(p => inside(p.x, p.y))) out.push({ type:"trace", trace:t });
+  for (const n of State.notes) if (inside(n.x, n.y)) out.push({ type:"note", note:n });
+  UI.boxSel = out;
+  UI.refreshInspector();
 }
 
 /* ---------- edge auto-scroll (drag / place near the viewport border → pan) ------

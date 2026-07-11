@@ -124,9 +124,10 @@ function gencadPinPad(padstackName, padstacks, pads){
 function gencadViaRadius(padstackName, padstacks, pads){
   const ps = padstacks.get(padstackName);
   const pad = ps && ps.top ? pads.get(ps.top) : null;
-  if (pad && (pad.w || pad.h)) return { r: Math.max(pad.w, pad.h) / 2, known: true };
-  if (ps && ps.drill > 0) return { r: ps.drill / 2 + 3, known: false };
-  return { r: 8, known: false };
+  const drill = ps && ps.drill > 0 ? ps.drill : 0;   // raw units; 0 = file gave no drill
+  if (pad && (pad.w || pad.h)) return { r: Math.max(pad.w, pad.h) / 2, known: true, drill };
+  if (drill > 0) return { r: drill / 2 + 3, known: false, drill };
+  return { r: 8, known: false, drill: 0 };
 }
 
 /* size vias in world px. Known-size vias keep the file's real radius (just floored so
@@ -235,7 +236,7 @@ function gencadParseRoutes(lines, tracks, padstacks, pads){
       case "TRACK":  { const w = tracks.get(t[1]); if (w != null) width = w; break; }
       case "LINE":   seg(+t[1], +t[2], +t[3], +t[4]); break;
       case "ARC":    seg(+t[1], +t[2], +t[3], +t[4]); break;   // chord approximation
-      case "VIA":    if (net){ const vr = gencadViaRadius(t[1], padstacks, pads); vias.push({ x: +t[2], y: +t[3], net, r: vr.r, known: vr.known }); } break;
+      case "VIA":    if (net){ const vr = gencadViaRadius(t[1], padstacks, pads); vias.push({ x: +t[2], y: +t[3], net, r: vr.r, known: vr.known, drill: vr.drill }); } break;
     }
   }
   return { segsByNet, vias };
@@ -329,10 +330,14 @@ function importGencadCAD(text){
 
   // vias — keep the file's real pad size (no min-clamp inflation); size any that the
   // file leaves unspecified so they don't overlap a neighbour (see gencadFitViaSizes)
-  const vlist = vias.map(v => ({ x: v.x * u * k, y: -v.y * u * k, net: v.net, r: v.r * u * k, known: v.known }));
+  const vlist = vias.map(v => ({ x: v.x * u * k, y: -v.y * u * k, net: v.net, r: v.r * u * k, known: v.known, drill: (v.drill || 0) * u * k }));
   gencadFitViaSizes(vlist, k);
-  for (const v of vlist)
-    State.vias.push({ id: nextId(), x: v.x, y: v.y, netId: netFor(v.net).id, r: v.r, kind: "via" });
+  for (const v of vlist){
+    // keep the padstack's real drill (radius) when the file gave one, clamped under the
+    // pad so it always reads sensibly; else leave hole unset (falls back to proportional)
+    const hole = v.drill > 0 ? Math.min(v.drill / 2, v.r * 0.9) : null;
+    State.vias.push({ id: nextId(), x: v.x, y: v.y, netId: netFor(v.net).id, r: v.r, hole, kind: "via" });
+  }
   pruneNets();
 
   return { components: State.components.length, nets: State.nets.length, traces: traceCount, vias: vlist.length,

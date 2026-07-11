@@ -355,6 +355,22 @@ function applySymPinNames(c, kind){
   return true;
 }
 
+/* When a component is switched to the generic Box / IC symbol, strip the pin NAMES that a
+   concrete symbol had auto-filled (B/C/E, G/D/S, A/K, +/- …) so they don't linger as bogus
+   labels. Only names matching the PREVIOUS symbol's canonical terminal letters are cleared —
+   anything the user typed themselves is left intact. Returns true if it changed anything. */
+function clearAutoSymNames(c, prevKind){
+  const names = prevKind ? symPinNames(prevKind, c.pins.length) : null;
+  if (!names) return false;
+  const set = new Set(names.map(n => (n || "").toUpperCase()));
+  let changed = false;
+  for (const p of c.pins){
+    const up = (p.name || "").toUpperCase();
+    if (up && set.has(up)){ p.name = ""; changed = true; }
+  }
+  return changed;
+}
+
 /* map a multi-terminal symbol's terminals onto a component's pins. Honours the pin NAMES first
    (so correcting "center pin = C" actually moves it to the collector/drain), then falls back to
    ascending pin-number order. A lone extra pad (SOT-223/DPAK tab, same letter as collector/drain)

@@ -35,6 +35,14 @@ UI.toggleTraceSel = (trace) => {
 };
 UI.isTraceSelected = (t) => UI.traceSel.includes(t);
 
+/* box (marquee) selection: a heterogeneous set of hit-style objects
+   {type:"comp",comp} / {type:"via",via} / {type:"trace",trace} / {type:"note",note}
+   dragged out over empty board. Used for mass operations (delete an area). */
+UI.boxSel = [];
+UI.clearBoxSel = () => { UI.boxSel = []; };
+UI.boxSelHas = (kind, obj) => UI.boxSel.some(s => s[kind] === obj);
+UI.boxSelCount = () => UI.boxSel.length;
+
 const $ = (sel) => document.querySelector(sel);
 
 /* ---------------- status bar ---------------- */
@@ -216,6 +224,7 @@ UI.select = (sel) => {
   UI.activeNetId = null;
   UI.pinSel = [];
   UI.traceSel = [];
+  UI.boxSel = [];
   UI.refreshInspector();
   UI.refreshNets();
 };

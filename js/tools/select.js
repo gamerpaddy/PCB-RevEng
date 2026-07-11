@@ -77,7 +77,12 @@ function selectDown(w, pt, e){
     return;
   }
   UI.select(h);
-  if (!h){ requestRender(); return; }
+  if (!h){
+    // drag from empty board = marquee/box select (mass-select an area); a plain click
+    // that never drags just leaves the deselect above in place
+    Tools.drag = { kind:"box-select", sx:w.x, sy:w.y, x:w.x, y:w.y, moved:false };
+    requestRender(); return;
+  }
   if (h.type === "comp" || h.type === "pin"){
     const c = h.comp;
     if (compMoveLocked(c)){ UI.setHint(c.ref + " is move-locked — press " + Keymap.keyFor("edit.lock") + " to unlock"); requestRender(); return; }

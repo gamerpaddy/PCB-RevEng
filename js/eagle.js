@@ -224,7 +224,8 @@ function importEagleBRD(xmlText){
     for (const via of sig.querySelectorAll("via")){
       const drill = parseFloat(via.getAttribute("drill")) || 0.4;
       const v = { id: nextId(), x: (+via.getAttribute("x")) * k, y: (-(+via.getAttribute("y"))) * k,
-                  netId: net.id, r: Math.max((drill / 2 + 0.2) * k, 3), kind: "via" };
+                  netId: net.id, r: Math.max((drill / 2 + 0.2) * k, 3),
+                  hole: (drill / 2) * k, kind: "via" };   // keep the real drill so probing shows it (not the global default)
       // blind/buried via: extent="a-b" gives the copper layers it spans; record from/to
       // only when it's NOT a full outer-to-outer through via
       const m = /(\d+)\s*-\s*(\d+)/.exec(via.getAttribute("extent") || "");
