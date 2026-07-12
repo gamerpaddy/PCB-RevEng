@@ -246,6 +246,10 @@ select:focus,input:focus,textarea:focus{outline:1px solid var(--accent);}
 .bom-delcol:hover{color:#ff6b6b;}
 .bom-table input.bom-badfp{color:#ff8a6a; border-color:#7a3a2a; background:rgba(255,90,60,0.08);}
 .bom-table input.bom-badfp:focus{border-color:#ff8a6a;}
+/* drag the right edge of a BOM header cell to resize that column */
+.bom-resize{position:absolute; top:0; right:0; width:7px; height:100%;
+  cursor:col-resize; user-select:none; touch-action:none;}
+.bom-resize:hover, .bom-resize.dragging{background:rgba(77,163,255,.45);}
 .insp-actions button{font-size:11px; padding:3px 8px;}
 button.danger{color:var(--danger); border-color:#5a2828;}
 
@@ -274,8 +278,12 @@ dialog::backdrop{background:rgba(0,0,0,.55);}
 .qa-side{width:170px; flex:0 0 auto; display:flex; flex-direction:column; gap:6px; min-height:0;}
 .qa-side-h{font-size:10px; text-transform:uppercase; letter-spacing:.04em; color:#8b96a5;}
 .qa-side-list{display:flex; flex-direction:column; gap:3px; overflow-y:auto; max-height:520px;}
-.qa-side-list button{text-align:left; padding:3px 7px; font-size:11.5px;
+.qa-side-list button{text-align:left; padding:2px 6px; font-size:10.5px; line-height:1.5;
   white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.qa-side-h{display:flex; align-items:center; justify-content:space-between;}
+.qa-side-clear{font-size:9.5px; padding:0 5px; color:#8b96a5; background:transparent;
+  border:1px solid #38424f; border-radius:3px; text-transform:none; letter-spacing:0; cursor:pointer;}
+.qa-side-clear:hover{color:#e0e6ee; border-color:#5a6673;}
 #qa-preview{width:100%; height:340px; border:1px solid #38424f; border-radius:5px; background:#0d0f12;}
 #qa-input{font-size:14px; padding:6px 8px;}
 .qa-info{min-height:16px; font-size:12px; color:#8b96a5;}

@@ -104,6 +104,7 @@ UI._renderBomTable = () => {
       UI.refreshInspector(); UI.refreshNets(); requestRender();
     });
   });
+  UI._wireBomColResize(table);
   table.querySelectorAll(".bom-delcol").forEach(btn => {
     btn.addEventListener("click", e => {
       const ci = +e.target.dataset.ci, col = State.bomColumns[ci];
@@ -115,25 +116,81 @@ UI._renderBomTable = () => {
   });
 };
 
-/* References cell → rename the real part designators on the board. Tokens map
-   positionally to the row's parts (which are shown in the same sorted order).
-   Validates the count and rejects internal dups / collisions with other rows
-   before snapshotting, so a bad edit just reverts without polluting undo. */
+/* resizable BOM columns: a grip on each header's right edge; widths are kept for the
+   session (UI._bomColW, keyed by column index) and re-applied on every table rebuild */
+UI._wireBomColResize = (table) => {
+  const ths = [...table.querySelectorAll("thead th")];
+  const saved = UI._bomColW || {};
+  if (Object.keys(saved).length) table.style.tableLayout = "fixed";
+  ths.forEach((th, i) => {
+    if (saved[i]) th.style.width = saved[i] + "px";
+    const grip = document.createElement("span");
+    grip.className = "bom-resize";
+    grip.title = "Drag to resize this column";
+    grip.addEventListener("pointerdown", (e) => {
+      e.preventDefault(); e.stopPropagation();
+      grip.classList.add("dragging");
+      const startX = e.clientX, startW = th.getBoundingClientRect().width;
+      // freeze every column at its current width so only the grabbed one changes
+      table.style.tableLayout = "fixed";
+      ths.forEach(t => { if (!t.style.width) t.style.width = t.getBoundingClientRect().width + "px"; });
+      const mv = (ev) => {
+        const w = Math.max(36, startW + ev.clientX - startX);
+        th.style.width = w + "px";
+        (UI._bomColW || (UI._bomColW = {}))[i] = w;
+      };
+      const up = () => {
+        grip.classList.remove("dragging");
+        window.removeEventListener("pointermove", mv);
+        window.removeEventListener("pointerup", up);
+      };
+      window.addEventListener("pointermove", mv);
+      window.addEventListener("pointerup", up);
+    });
+    th.appendChild(grip);
+  });
+};
+
+/* References cell → rename designators AND move parts between rows. Tokens are
+   matched by name:
+   · a token naming a part already in this row keeps it here;
+   · a token naming a part from ANOTHER row PULLS it into this one (it adopts the
+     row's value / part / footprint) — paste refs into the TARGET row to move them;
+   · an unknown token renames one of this row's remaining parts (positionally).
+   Refs simply removed from the list keep their properties (so they regroup on the
+   same row) — moving is always done by pasting into the destination row. */
 UI._applyBomRefs = (g, raw) => {
   const tokens = (raw || "").split(",").map(s => s.trim()).filter(Boolean);
   const revert = msg => { UI.toast(msg); UI._renderBomTable(); };
-  if (tokens.length !== g.comps.length)
-    return revert("Keep " + g.comps.length + " reference" + (g.comps.length > 1 ? "s" : "") + ", comma-separated");
+  if (!tokens.length)
+    return revert("Row can't be emptied here — paste the refs into the row they should move TO");
   const lower = tokens.map(t => t.toLowerCase());
   if (new Set(lower).size !== lower.length) return revert("Duplicate references in the list");
+  const byRef = new Map(State.components.map(c => [(c.ref || "").trim().toLowerCase(), c]));
   const inGroup = new Set(g.comps);
+  const kept = new Set(), movers = [], newNames = [];
   for (const t of tokens){
-    const clash = State.components.find(x => !inGroup.has(x) && (x.ref || "").trim().toLowerCase() === t.toLowerCase());
-    if (clash) return revert("Reference “" + t + "” is already used by another part");
+    const c = byRef.get(t.toLowerCase());
+    if (c && inGroup.has(c)) kept.add(c);
+    else if (c) movers.push(c);          // exists on another row → move it into this one
+    else newNames.push(t);               // unknown name → rename one of this row's parts
   }
-  if (tokens.every((t, i) => t === g.comps[i].ref)){ UI._renderBomTable(); return; }   // nothing changed
-  pushUndo("rename designators");
-  tokens.forEach((t, i) => { if (g.comps[i].ref !== t){ g.comps[i].ref = t; registerRef(g.comps[i].ref); } });
+  const vacated = g.comps.filter(c => !kept.has(c));
+  if (newNames.length > vacated.length)
+    return revert(newNames.length + " new name" + (newNames.length>1?"s":"") + " but only " +
+                  vacated.length + " part" + (vacated.length===1?"":"s") + " of this row left to rename");
+  if (!movers.length && !newNames.length){
+    if (!vacated.length){ UI._renderBomTable(); return; }   // unchanged
+    return revert("Removing refs here does nothing — paste " + vacated.map(c => c.ref).join(", ") +
+                  " into the TARGET row to move them there");
+  }
+  pushUndo("edit BOM references");
+  newNames.forEach((t, i) => { vacated[i].ref = t; registerRef(t); });
+  for (const c of movers){ c.value = g.value; c.part = g.part; c.kicad = g.footprint; }
+  const note = [];
+  if (movers.length)  note.push(movers.length + " part" + (movers.length>1?"s":"") + " moved into this row");
+  if (newNames.length) note.push(newNames.length + " renamed");
+  UI.toast(note.join(" · "));
   UI._renderBomTable(); UI.refreshInspector(); UI.refreshNets(); requestRender();
 };
 

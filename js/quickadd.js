@@ -12,6 +12,7 @@
 const QuickAdd = {
   active: false, pos: null, side: "front", rot: 0,
   fp: null, parsed: null,
+  pvZoom: 1,      // preview zoom factor (mouse wheel over the preview)
 };
 
 /* experimental toggle (Lab dialog), off by default, retained in localStorage */
@@ -385,8 +386,18 @@ QuickAdd.renderSides = () => {
     }
   };
   fill("#qa-hist-list", qaHistory(), "Placed parts appear here for quick reuse.");
-  fill("#qa-ex-list", QA_EXAMPLES, "");
+  fill("#qa-ex-list", qaShuffled(QA_EXAMPLES), "");
 };
+
+/* a shuffled copy (Fisher–Yates) — the examples come up in a fresh order every open */
+function qaShuffled(arr){
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--){
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
 
 QuickAdd.open = (w) => {
   QuickAdd.active = true;
@@ -394,6 +405,7 @@ QuickAdd.open = (w) => {
   QuickAdd.side = Tools.ghostSide || (UI.copperSide() === "back" ? "back" : "front");
   QuickAdd.rot = Tools.ghostRot || 0;
   QuickAdd.fp = null; QuickAdd.parsed = null;
+  QuickAdd.pvZoom = 1;
   const inp = $("#qa-input");
   inp.value = "";
   $("#qa-info").textContent = QA_PROMPT;
@@ -432,7 +444,7 @@ QuickAdd.update = () => {
   QuickAdd.render(); requestRender();
 };
 
-const QA_PROMPT = "Type e.g.  0805 10k · sot23 npn 2n2222 · soic14 74hc130 · 1x5 · idc16 · fpc32 p1 · custom:name · free 4x5  — or click an example";
+const QA_PROMPT = "Describe the part (package · value · part number) — the Examples list shows the syntax, click one to try it";
 
 /* the "next free" reference for a prefix WITHOUT reserving it (nextRef mutates counters) */
 function qaPreviewRef(prefix){
@@ -497,8 +509,9 @@ QuickAdd.render = () => {
     extMm = Math.max(fp.body.w, fp.body.h) / 2;
     for (const p of fp.pins) extMm = Math.max(extMm, Math.hypot(p.xmm, p.ymm) + Math.max(p.w, p.h)/2);
   }
-  // preview device-px per mm — the footprint spans ~40% of the shorter side, board context around
-  const pxPerMm = Math.min(PW, PH) / (extMm * 2 * 2.6);
+  // preview device-px per mm — the footprint spans ~40% of the shorter side, board context
+  // around; the wheel-zoom factor magnifies on top (big parts: zoom in to align pins)
+  const pxPerMm = Math.min(PW, PH) / (extMm * 2 * 2.6) * (QuickAdd.pvZoom || 1);
 
   // re-render the board into the preview at our own pan/zoom (centred on the part). drawWorld
   // reads View.zoom / View.panX / View.panY, so temporarily override them and restore after.
@@ -618,6 +631,18 @@ QuickAdd.wire = () => {
     if (e.key === c.cw) QuickAdd.rotate(90);
     else if (e.key === c.ccw) QuickAdd.rotate(-90);
     else if (e.key === c.place) QuickAdd.place();
+  });
+  // mouse wheel over the preview zooms it (large parts make pin alignment hard otherwise)
+  $("#qa-preview").addEventListener("wheel", (e) => {
+    e.preventDefault();
+    const f = e.deltaY < 0 ? 1.2 : 1/1.2;
+    QuickAdd.pvZoom = Math.max(0.3, Math.min(10, (QuickAdd.pvZoom || 1) * f));
+    QuickAdd.render();
+  }, { passive:false });
+  const histClear = $("#qa-hist-clear");
+  if (histClear) histClear.addEventListener("click", () => {
+    try { localStorage.removeItem("pcbreveng.qaHistory"); } catch(e){}
+    QuickAdd.renderSides();
   });
   $("#qa-place").addEventListener("click", QuickAdd.place);
   $("#qa-cancel").addEventListener("click", QuickAdd.close);

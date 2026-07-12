@@ -3,9 +3,10 @@
 
 /* ---------------- component tool ---------------- */
 function componentDown(w, e){
-  // no footprint armed → either the experimental quick-add popup (if enabled) or the selector
+  // no footprint armed → the experimental quick-add popup (if enabled) or the selector;
+  // Shift-click always opens the full footprint selector, even with quick-add on
   if (!Tools.pending){
-    if (QuickAdd.enabled()) QuickAdd.open(w); else UI.openFootprintDialog();
+    if (!QuickAdd.enabled() || (e && e.shiftKey)) UI.openFootprintDialog(); else QuickAdd.open(w);
     return;
   }
   const p = Tools.pending;

@@ -48,18 +48,30 @@ function selectDown(w, pt, e){
         return;
       }
     }
+    // grab a SEGMENT of the selected trace (away from any anchor) → slide it: an
+    // axis-aligned segment moves perpendicular only (horizontal → up/down, vertical →
+    // left/right), a diagonal one translates freely. Endpoints move together.
+    const stol = (t.width||3)/2 + 6/View.zoom;
+    for (let k=0;k<t.points.length-1;k++){
+      const pr = projectOnSeg(w.x, w.y, t.points[k], t.points[k+1]);
+      if (pr.d <= stol){
+        pushUndo("move trace segment");
+        const a = t.points[k], b = t.points[k+1];
+        Tools.drag = { kind:"move-seg", trace:t, k, moved:false,
+                       ax:a.x, ay:a.y, bx:b.x, by:b.y, wx:w.x, wy:w.y };
+        requestRender();
+        return;
+      }
+    }
   }
   const h = hitTest(w.x, w.y);
-  // Ctrl+Shift-click pins → multi-select for bulk net assignment (plain shift when the
-  // schematic tab is off — with it on, a plain shift-CLICK jumps to the schematic).
-  // A shift-DRAG on a pad still detaches the part from its traces; the click/drag split
-  // is resolved in onPointerUp.
+  // Shift-click a pad → toggle pin multi-select for bulk net assignment (jumping to
+  // the schematic is the component BODY's shift-click). A shift-DRAG on a pad still
+  // detaches the part from its traces; the click/drag split is resolved in onPointerUp.
   if (e.shiftKey && h && h.type === "pin"){
     const c = h.comp;
-    const multiSel = (e.ctrlKey || e.metaKey) || !SchEnabled();
-    if (multiSel || compMoveLocked(c)){
-      if (multiSel) UI.togglePinSel(c, h.pinIdx);
-      else { EditorTabs.show("schematic"); Sch.focusComp(c); }   // locked part: still jump
+    if (compMoveLocked(c)){
+      UI.togglePinSel(c, h.pinIdx);
       requestRender();
       return;
     }
@@ -370,6 +382,8 @@ function duplicateSelection(){
    a new part (R rotates, B flips side, edge auto-scroll, Esc cancels). Nets are not
    copied (same as Duplicate). */
 function copySelection(){
+  // hard guard: copy/paste exist only in the Visual editor, never in Schematic/BOM
+  if (typeof EditorTabs !== "undefined" && EditorTabs.current !== "visual") return;
   const c = UI.sel && UI.sel.comp;
   if (!c){ UI.toast("Select a component to copy (traces/vias can't be copied)"); return; }
   Tools.clipboard = {

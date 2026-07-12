@@ -547,6 +547,7 @@ function wireCanvas(){
     for (const f of files){
       if (f.type.startsWith("image/")) addImageLayer(f);
       else if (/\.(brd|cad)$/i.test(f.name)) importBoardFile(f);
+      else if (/\.kicad_mod$/i.test(f.name)) importCustomFpFile(f);
       else if (/\.json$/i.test(f.name)) openProjectFile(f);
     }
   });
@@ -722,9 +723,9 @@ function wireKeyboard(){
       return;
     }
 
-    // fixed keys
+    // fixed keys (Backspace intentionally does NOT delete — it's the page-back key in
+    // some browsers; deletion is the rebindable edit.delete action, default Delete)
     switch (e.key){
-      case "Backspace": deleteSelection(); break;
       case "Enter": if (Tools.name==="trace") finishTrace(); break;
       case "Escape":
         if (Tools.padEdit){ Tools.padEdit=null; UI.toast("Pad editing finished"); requestRender(); }
@@ -1106,6 +1107,25 @@ function openProjectFile(file){
       alert("Could not open file: " + err.message);
     }
   };
+  reader.readAsText(file);
+}
+
+/* drop a .kicad_mod file → store it as a custom footprint and go straight into place
+   mode with it armed on the component tool (same mechanics as placing any new part) */
+function importCustomFpFile(file){
+  const reader = new FileReader();
+  reader.onload = () => {
+    const entry = CustomFPs.importKicadMod(file.name, reader.result);
+    if (!entry) return;   // importKicadMod already toasts on failure
+    Tools.pending = { fpId:"customfp", fpParams:{ name: entry.name }, ref:"", value:"", part:"", kicad:"" };
+    Tools.ghostFp = generateFootprint("customfp", { name: entry.name });
+    Tools.ghostRot = 0;
+    Tools.ghostSide = UI.copperSide() === "back" ? "back" : "front";
+    setTool("component");
+    UI.toast("Imported " + entry.name + " — click to place · also in the Custom category & quick-add custom:" + entry.name);
+    if ($("#fp-dialog").open && FPD.catId === "customfp"){ FPD.params.name = entry.name; buildFpParams(); }
+  };
+  reader.onerror = () => UI.toast("Could not read " + file.name);
   reader.readAsText(file);
 }
 

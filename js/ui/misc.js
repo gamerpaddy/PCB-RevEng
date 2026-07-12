@@ -71,7 +71,7 @@ UI.buildHelp = () => {
       [k("edit.side"),"Flip component side front/back"],
       [k("edit.lock"),"Lock / unlock component (blocks move, edit, delete)"],
       [k("edit.padsize"),"Edit selected pad — drag handles to resize / move it"],
-      [k("edit.delete") + " / Backspace","Delete selection"],["Esc","Cancel current action / deselect"],
+      [k("edit.delete"),"Delete selection"],["Esc","Cancel current action / deselect"],
       ["Enter","Finish trace"],["Double-click pad/trace/via","Name its net"],["Shift+double-click via","Set layer span (blind / buried)"],
       ["Shift+drag trace anchor","Detach it (no snapping)"],
       [k("edit.drawside"),"Cycle active draw side (F.Cu/B.Cu/inner)"],[k("edit.net"),"Rename net of selection"],
@@ -136,6 +136,16 @@ UI.buildKeysList = () => {
     box.appendChild(h);
     misc.sort((a, b) => a.label.localeCompare(b.label)).forEach(addRow);
   }
+  // right-click a binding clears it
+  box.querySelectorAll(".key-btn").forEach(btn => btn.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    const id = btn.dataset.id;
+    if (!Keymap.keyFor(id)) return;
+    Keymap.bind(id, "");
+    const a = KeyActions.find(k => k.id === id);
+    UI.afterHotkeyChange("“" + (a ? a.label : id) + "” hotkey cleared");
+    UI.buildKeysList();
+  }));
   box.querySelectorAll(".key-btn").forEach(btn => btn.addEventListener("click", () => {
     // capture next key press
     box.querySelectorAll(".key-btn").forEach(b => b.classList.remove("listening"));

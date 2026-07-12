@@ -1,14 +1,30 @@
 /* ===== fpdialog.js — footprint selector dialog (categories, params, preview) ===== */
 "use strict";
 
-const FPD = { catId: "dip", params: {}, editComp: null, paramCache: {} };
+const FPD = { catId: "dip", params: {}, editComp: null, paramCache: {}, fieldCache: {} };
 
-/* remember the last category/params/value/part across opens */
+/* the dialog's text fields, cached PER CATEGORY (value/part/kicad/ref/symbol travel
+   with the footprint category instead of leaking from one category into the next) */
+function fpFields(){
+  return { value: $("#fp-value").value, part: $("#fp-part").value,
+           kicad: $("#fp-kicad").value, ref: $("#fp-ref").value, sym: FPD.symOverride };
+}
+function fpSetFields(f){
+  f = f || {};
+  $("#fp-value").value = f.value || "";
+  $("#fp-part").value  = f.part  || "";
+  $("#fp-kicad").value = f.kicad || "";
+  $("#fp-ref").value   = f.ref   || "";
+  FPD.symOverride = f.sym || "auto";
+}
+
+/* remember the last category + per-category params/fields across opens */
 function fpSaveLast(){
   try {
+    FPD.fieldCache[FPD.catId] = fpFields();
+    FPD.paramCache[FPD.catId] = {...FPD.params};
     localStorage.setItem("pcbreveng.fpLast", JSON.stringify({
-      catId: FPD.catId, params: FPD.params,
-      value: $("#fp-value").value, part: $("#fp-part").value, kicad: $("#fp-kicad").value
+      catId: FPD.catId, params: FPD.params, fields: FPD.fieldCache
     }));
   } catch(e){}
 }
@@ -34,15 +50,18 @@ UI.openFootprintDialog = (editComp) => {
     $("#fp-kicad").value = editComp.kicad;
     $("#fp-ok").textContent = "Apply to " + editComp.ref;
   } else {
-    // restore the last-used category, params and value/part
+    // restore the last-used category, its params and the per-category text fields
     const last = fpLoadLast();
-    if (last && getFootprintDef(last.catId)){
-      FPD.catId = last.catId;
-      FPD.params = {...last.params};
-      $("#fp-value").value = last.value || "";
-      $("#fp-part").value = last.part || "";
-      $("#fp-kicad").value = last.kicad || "";
+    if (last){
+      if (last.fields) FPD.fieldCache = last.fields;
+      else if (last.value || last.part || last.kicad)   // migrate the old single-set format
+        FPD.fieldCache[last.catId] = { value: last.value, part: last.part, kicad: last.kicad };
+      if (getFootprintDef(last.catId)){
+        FPD.catId = last.catId;
+        FPD.params = {...last.params};
+      }
     }
+    fpSetFields(FPD.fieldCache[FPD.catId]);
     $("#fp-ref").value = ""; // auto-numbered, increments per placement
     $("#fp-ok").textContent = "Place (click on board)";
   }
@@ -73,10 +92,13 @@ function buildFpCats(){
 /* pick a footprint category by id (shared by click + number-key shortcuts) */
 function selectFpCat(id){
   if (!getFootprintDef(id) || id === FPD.catId) return;
-  // remember the params of the category we're leaving, restore those of the one we enter
+  // remember the params AND text fields (value/part/kicad/ref/symbol) of the category
+  // we're leaving, restore those of the one we enter — every setting is per category
   FPD.paramCache[FPD.catId] = {...FPD.params};
+  if (!FPD.editComp) FPD.fieldCache[FPD.catId] = fpFields();
   FPD.catId = id;
   FPD.params = FPD.paramCache[id] ? {...FPD.paramCache[id]} : {};
+  if (!FPD.editComp) fpSetFields(FPD.fieldCache[id]);
   buildFpCats(); buildFpParams();
 }
 
@@ -371,7 +393,7 @@ UI.confirmFootprint = () => {
     else
       UI.setHint("Click on the board to place " + fp.label + " — R rotate, B flip side, Esc cancel");
   }
-  // clear for next time
-  $("#fp-ref").value = ""; $("#fp-value").value = ""; $("#fp-part").value = ""; $("#fp-kicad").value = "";
+  // only the reference clears (auto-numbered); value/part/kicad/symbol stay with the category
+  $("#fp-ref").value = "";
   FPD.editComp = null;
 };

@@ -252,23 +252,23 @@ function onPointerUp(e){
     else cancelUndo();
     requestRender();
   }
-  if (d.kind === "move-comp" || d.kind === "move-via" || d.kind === "move-layer" || d.kind === "rot-layer" || d.kind === "move-vert"){
+  if (d.kind === "move-comp" || d.kind === "move-via" || d.kind === "move-layer" || d.kind === "rot-layer" || d.kind === "move-vert" || d.kind === "move-seg"){
     if (!d.moved){
       cancelUndo(); // no-op drag, drop the snapshot (restores redo — a click mustn't wipe it)
-      // shift-click (no drag) on a pad or component body → show it in the Schematic tab;
-      // with the schematic tab disabled, a pad shift-click falls back to pin multi-select
-      if (d.kind === "move-comp" && d.detach && typeof SchEnabled === "function" && SchEnabled()){
+      // shift-click (no drag) on a pad → toggle pin multi-select; on a component
+      // BODY → show it in the Schematic tab (when that tab is enabled)
+      if (d.shiftPin){ UI.togglePinSel(d.shiftPin.comp, d.shiftPin.pinIdx); requestRender(); }
+      else if (d.kind === "move-comp" && d.detach && typeof SchEnabled === "function" && SchEnabled()){
         EditorTabs.show("schematic");
         Sch.focusComp(d.comp);
       }
-      else if (d.shiftPin){ UI.togglePinSel(d.shiftPin.comp, d.shiftPin.pinIdx); requestRender(); }
       // an align-tool click that never dragged drops the next 4-point marker
       if (d.alignClick){ placeAlignMarker(d.alignClick.x, d.alignClick.y, d.alignClick.thumb); }
     }
     // a real drag must not also register as a double-click (which would delete a point
     // or pop open an editor/menu); flag it so the dblclick that may follow is ignored.
     if (d.moved){
-      if (d.kind === "move-comp" || d.kind === "move-via"){
+      if (d.kind === "move-comp" || d.kind === "move-via" || d.kind === "move-seg"){
         Tools._dragEndedAt = Date.now();
       } else if (d.kind === "move-vert"){
         // only when it genuinely moved or snapped — a stationary double-click still removes the vertex
@@ -363,6 +363,18 @@ function handleDrag(pt, w, e){
       d.trace.points[d.i].y = ny;
       // adhere: carry coincident junction vertices of other traces along
       if (d.linked) for (const L of d.linked){ L.pts[L.i].x = nx; L.pts[L.i].y = ny; }
+      break;
+    }
+    case "move-seg": {
+      // slide a whole trace segment: axis-aligned segments move perpendicular only
+      d.moved = true;
+      const a = d.trace.points[d.k], b = d.trace.points[d.k+1];
+      let dx = w.x - d.wx, dy = w.y - d.wy;
+      const horiz = Math.abs(d.by - d.ay) < 0.001, vert = Math.abs(d.bx - d.ax) < 0.001;
+      if (horiz && !vert) dx = 0;
+      if (vert && !horiz) dy = 0;
+      a.x = d.ax + dx; a.y = d.ay + dy;
+      b.x = d.bx + dx; b.y = d.by + dy;
       break;
     }
     case "move-note":
@@ -465,7 +477,7 @@ function applyBoxSelect(x0, y0, x1, y1){
    we pan the view toward it and keep it under the cursor, so you can move/drop it
    clear across a board that's larger than the screen. Only translation drags and
    component placement qualify (not view-pan / rotate / measure). */
-const EDGE_SCROLL_KINDS = { "move-comp":1, "move-via":1, "move-vert":1, "move-note":1, "move-layer":1 };
+const EDGE_SCROLL_KINDS = { "move-comp":1, "move-via":1, "move-vert":1, "move-seg":1, "move-note":1, "move-layer":1 };
 
 /* true when the current interaction is one that should auto-pan near the edges:
    a translation drag, or the component tool tracking a ghost about to be placed.
@@ -473,7 +485,7 @@ const EDGE_SCROLL_KINDS = { "move-comp":1, "move-via":1, "move-vert":1, "move-no
 function edgeScrollAllowed(){
   if (!UI.edgeScrollOn()) return false;
   if (Tools.drag) return !!EDGE_SCROLL_KINDS[Tools.drag.kind];
-  if (Tools.name === "component") return !!Tools.pending;   // ghost part about to drop
+  if (Tools.name === "component") return true;              // whenever the component tool is armed (like via/trace)
   if (Tools.name === "trace")     return true;              // whenever the trace tool is armed (not just mid-route)
   if (Tools.name === "via")       return true;              // via drops wherever the cursor lands
   return false;

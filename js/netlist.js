@@ -644,6 +644,44 @@ function schArrangeClosest(geo){
   return pos;
 }
 
+/* "Optimized" — barycentric relaxation: every part is repeatedly pulled to the centroid
+   of the parts it shares nets with, then everything is pushed apart until nothing
+   overlaps. Converges on a layout where each net's members sit as close together as
+   the no-overlap constraint allows. Seeded from the PCB layout. */
+function schArrangeOpt(geo){
+  const comps = State.components.filter(c => geo.has(c.id));
+  const n = comps.length;
+  const pos = schArrangePCB(geo);
+  if (n < 2) return pos;
+  const P = comps.map(c => { const p = pos.get(c.id); return { x:p.x, y:p.y }; });
+  // adjacency: parts sharing a net (huge nets like GND excluded — they'd pull everything
+  // into one clump and drown the signal nets)
+  const nets = new Map();
+  comps.forEach((c,i) => { for (const pin of c.pins) if (pin.netId){ let a = nets.get(pin.netId); if (!a) nets.set(pin.netId, a=new Set()); a.add(i); } });
+  const neigh = comps.map(() => new Set());
+  for (const s of nets.values()){
+    const a = [...s];
+    if (a.length < 2 || a.length > 40) continue;
+    for (const i of a) for (const j of a) if (i !== j) neigh[i].add(j);
+  }
+  const rounds = n > 300 ? 10 : 25;
+  for (let r=0; r<rounds; r++){
+    for (let i=0;i<n;i++){
+      const nb = neigh[i];
+      if (!nb.size) continue;
+      let cx=0, cy=0;
+      for (const j of nb){ cx += P[j].x; cy += P[j].y; }
+      P[i].x += (cx/nb.size - P[i].x) * 0.6;
+      P[i].y += (cy/nb.size - P[i].y) * 0.6;
+    }
+    comps.forEach((c,i) => pos.set(c.id, { x:P[i].x, y:P[i].y }));
+    schDeOverlap(pos, geo, 25);
+    comps.forEach((c,i) => { const p = pos.get(c.id); P[i].x = p.x; P[i].y = p.y; });
+  }
+  schDeOverlap(pos, geo);
+  return pos;
+}
+
 /* "Manual" — each component's saved schematic position (c.schX/schY in schematic mm,
    set by dragging in the Schematic tab). Parts never placed there yet are packed into
    grid rows BELOW the arranged ones; with no arranged parts at all this degrades to
@@ -681,6 +719,7 @@ function schArrange(mode, geo){
   switch (mode){
     case "pcb":     return schArrangePCB(geo);
     case "closest": return schArrangeClosest(geo);
+    case "opt":     return schArrangeOpt(geo);
     case "manual":  return schArrangeManual(geo);
     case "name":    return schGridLayout([...comps].sort((a,b)=> _refCmp(a.ref,b.ref)), geo, null);
     case "type":
@@ -751,6 +790,18 @@ function exportKiCadSch(mode){
   const F = (n)=>n.toFixed(2);
   const geo = schGeometry();
   const pos = schArrange(mode || "type", geo);
+  // Manual arrangement: hand-drawn schematic wires (State.schWires) are exported as real
+  // KiCad wires, and nets they FULLY connect skip their global labels (the copper is
+  // carried by the wires, exactly as drawn). Partially-wired nets keep every label so
+  // connectivity survives; power nets always label (they're excluded from wiring).
+  const wiredNets = new Set();
+  const exportWires = mode === "manual" && typeof schNetStatus === "function" &&
+                      State.schWires && State.schWires.length;
+  if (exportWires){
+    const stat = schNetStatus();
+    for (const w of State.schWires)
+      if (w.netId && w.a && w.b && (stat.get(w.netId) || {}).complete) wiredNets.add(w.netId);
+  }
   L.push('(kicad_sch (version 20211123) (generator "pcb-reveng")');
   L.push('  (uuid ' + _uuid() + ')');
   L.push('  (paper "A2")');
@@ -804,6 +855,7 @@ function exportKiCadSch(mode){
     for (let i=0;i<c.pins.length;i++){
       const p2 = c.pins[i];
       if (!p2.netId) continue;
+      if (wiredNets.has(p2.netId)) continue;   // net fully drawn as wires — no label needed
       const net = getNet(p2.netId);
       if (!net) continue;
       const pg = g.pins[i] || { x: -g.w/2-2.54, y: 0, angle: 0 };
@@ -819,6 +871,16 @@ function exportKiCadSch(mode){
       L.push('  (global_label "' + _schEsc(net.name) + '" (shape passive) (at ' + F(px) + ' ' + F(py) + ' ' + labAngle + ') (fields_autoplaced)');
     L.push('    (effects (font (size 1.27 1.27)) (justify ' + (justRight?"right":"left") + '))');
       L.push('    (uuid ' + _uuid() + '))');
+    }
+  }
+  // hand-drawn schematic wires (manual arrangement only) — one KiCad wire per segment
+  if (exportWires) for (const w of State.schWires){
+    if (!w.a || !w.b) continue;                       // dangling drafts don't export
+    for (let i=0; i+1 < w.points.length; i++){
+      const a = w.points[i], b = w.points[i+1];
+      if (Math.abs(a.x-b.x) < 0.001 && Math.abs(a.y-b.y) < 0.001) continue;
+      L.push('  (wire (pts (xy ' + F(a.x) + ' ' + F(a.y) + ') (xy ' + F(b.x) + ' ' + F(b.y) + '))');
+      L.push('    (stroke (width 0) (type default)) (uuid ' + _uuid() + '))');
     }
   }
   L.push(')');

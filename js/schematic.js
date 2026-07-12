@@ -684,8 +684,8 @@ function schUpdateWiresFor(comp){
   }
 }
 
-/* distance (screen px) from a point to a wire, for click-select */
-function schWireHit(sx, sy){
+/* wire + segment index under a screen point (for click-select and segment dragging) */
+function schWireSegHit(sx, sy){
   const tol = 5;
   for (let k = State.schWires.length - 1; k >= 0; k--){
     const w = State.schWires[k];
@@ -698,10 +698,16 @@ function schWireHit(sx, sy){
       let t = ((sx - ax)*dx + (sy - ay)*dy) / len2;
       t = Math.max(0, Math.min(1, t));
       const px = ax + t*dx - sx, py = ay + t*dy - sy;
-      if (px*px + py*py <= tol*tol) return w;
+      if (px*px + py*py <= tol*tol) return { w, i };
     }
   }
   return null;
+}
+
+/* distance (screen px) from a point to a wire, for click-select */
+function schWireHit(sx, sy){
+  const h = schWireSegHit(sx, sy);
+  return h ? h.w : null;
 }
 
 /* manual label under a screen point (uses the rects captured during render) */
@@ -948,7 +954,7 @@ function schEdgeScrollAllowed(){
   if (!UI.edgeScrollOn()) return false;
   if (Sch.mode === "wire") return true;
   const d = Sch.drag;
-  return !!(d && (d.kind === "comp" || d.kind === "group" || d.kind === "label" || d.kind === "marquee"));
+  return !!(d && (d.kind === "comp" || d.kind === "group" || d.kind === "label" || d.kind === "marquee" || d.kind === "wireseg"));
 }
 
 function schUpdateEdgeScroll(p){
@@ -1026,6 +1032,31 @@ Sch.onMove = (p, e) => {
       d.moved = true;
       lab.dx = mx - d.pin.x - d.offX;
       lab.dy = my - d.pin.y - d.offY;
+      Sch.render();
+      return;
+    }
+    if (d.kind === "wireseg"){
+      const pts = d.w.points;
+      const dir = schSegDir(pts[d.i], pts[d.i+1]);
+      if (!dir) return;
+      if (!d.armed){
+        pushUndo("move wire segment");
+        d.armed = true;
+        // pin a copy of an endpoint in place when it can't shift with the segment —
+        // an anchored wire end (stays on its pin) or a COLLINEAR neighbouring segment
+        // (shifting the shared corner would turn it diagonal); the copy becomes a 90° jog
+        if ((d.i === 0 && d.w.a) || (d.i > 0 && schSegDir(pts[d.i-1], pts[d.i]) === dir)){
+          pts.splice(d.i, 0, { x: pts[d.i].x, y: pts[d.i].y });
+          d.i++;
+        }
+        const j = d.i + 1;
+        if ((j === pts.length - 1 && d.w.b) || (j < pts.length - 1 && schSegDir(pts[j], pts[j+1]) === dir))
+          pts.splice(j + 1, 0, { x: pts[j].x, y: pts[j].y });
+      }
+      const A = pts[d.i], B = pts[d.i+1];
+      if (dir === "h"){ const y = schSnap(my); A.y = y; B.y = y; }
+      else            { const x = schSnap(mx); A.x = x; B.x = x; }
+      d.moved = true;
       Sch.render();
       return;
     }
@@ -1199,9 +1230,16 @@ Sch.wire = () => {
       }
       return;
     }
-    // wire under the cursor? select it (Delete removes)
-    const w = schWireHit(p.x, p.y);
-    if (w){ Sch.selWire = w; Sch.drag = null; Sch.render(); return; }
+    // wire under the cursor? select it (Delete removes) and grab the SEGMENT so a
+    // drag slides it perpendicular (horizontal segments move up/down, vertical ones
+    // left/right); anchored ends stay pinned via an inserted corner
+    const ws = schWireSegHit(p.x, p.y);
+    if (ws){
+      Sch.selWire = ws.w;
+      Sch.drag = { kind: "wireseg", w: ws.w, i: ws.i, armed: false, moved: false };
+      Sch.render();
+      return;
+    }
     if (Sch.selWire){ Sch.selWire = null; }
     // empty space: box select (left-drag pan is gone — pan with wheel-click / Space)
     Sch.boxSel = [];
@@ -1238,6 +1276,16 @@ Sch.wire = () => {
         Sch.boxSel = State.components.filter(c => typeof c.schX === "number" &&
           c.schX >= lx && c.schX <= hx && c.schY >= ly && c.schY <= hy);
         UI.toast(Sch.boxSel.length ? Sch.boxSel.length + " symbol" + (Sch.boxSel.length===1?"":"s") + " selected — drag / arrows / wheel-click to move" : "Nothing in the box");
+      }
+      Sch.render();
+      return;
+    }
+    if (d.kind === "wireseg"){
+      if (!d.moved && d.armed) cancelUndo();
+      if (d.moved){
+        // drop zero-length segments a move may have collapsed (keeps the polyline clean)
+        const pts = d.w.points;
+        d.w.points = pts.filter((p, i) => !i || Math.abs(p.x - pts[i-1].x) > 0.001 || Math.abs(p.y - pts[i-1].y) > 0.001);
       }
       Sch.render();
       return;
@@ -1332,7 +1380,7 @@ Sch.wire = () => {
       else if (Sch.selWire || Sch.selLabel){ Sch.selWire = null; Sch.selLabel = null; Sch.render(); }
       else if (Sch.boxSel.length){ Sch.boxSel = []; Sch.render(); }
       else return;   // let the global Esc (deselect) run
-    } else if (k === "Delete" || k === "Backspace"){
+    } else if (k === "Delete"){
       if (Sch.selLabel){ Sch.deleteLabel(Sch.selLabel); }
       else if (Sch.selWire){
         pushUndo("delete schematic wire");

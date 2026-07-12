@@ -15,7 +15,7 @@ const KeyActions = [
   { id:"tool.via",       label:"Via tool (press again = pick/clear net under cursor)", def:"V", btn:"#toolbar .tool[data-tool='via']", run:()=>{ if (Tools.name === "via") viaNetPick(); else setTool("via"); } },
   { id:"tool.cut",       label:"Cut trace tool",                def:"K",      btn:"#toolbar .tool[data-tool='cut']",       run:()=>setTool("cut") },
   { id:"tool.note",      label:"Sticky-note tool",              def:"",       btn:"#toolbar .tool[data-tool='note']",      run:()=>setTool("note") },
-  { id:"tool.align",     label:"Align image layer tool",        def:"G",      run:()=>setTool("align") },
+  { id:"tool.align",     label:"Align image layer tool",        def:"",       run:()=>setTool("align") },
   { id:"tool.measure",   label:"Measure tool",                  def:"M",      btn:"#btn-measure",   run:()=>setTool("measure") },
   { id:"tool.calibrate", label:"Calibrate scale tool",          def:"",       btn:"#btn-calibrate", run:clickBtn("#btn-calibrate") },
   { id:"tool.rotate",    label:"Rotate layer tool",             def:"",       btn:"#btn-rotate",    run:clickBtn("#btn-rotate") },
