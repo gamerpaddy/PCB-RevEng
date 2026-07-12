@@ -254,6 +254,15 @@ UI.openNetPopup = (title, current, onPick) => {
   PROTECTED_NET_NAMES.forEach(n => addBtn(n, true));
   State.nets.filter(n => !n.auto && netMembers(n.id).length).forEach(n => addBtn(n.name, n.protected));
 
+  // typing filters the quick-select buttons live (net search); numbering stays
+  // stable so the 1-9 hotkeys keep meaning the same nets
+  const filterQuick = () => {
+    const q = inp.value.trim().toLowerCase();
+    [...quick.children].forEach((b, i) =>
+      b.style.display = !q || quickNames[i].toLowerCase().includes(q) ? "" : "none");
+  };
+  inp.oninput = filterQuick;
+
   $("#netname-ok").onclick = () => finish(inp.value.trim());
   $("#netname-clear").onclick = () => finish("");
   $("#netname-cancel").onclick = () => { dlg.close(); document.removeEventListener("keydown", keyPick, true); };

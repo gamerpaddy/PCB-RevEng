@@ -273,7 +273,8 @@ function drawComponent(ctx, c, selNet, padsOnly){
       ctx.beginPath(); ctx.arc(x,y,Math.max(w,h)/2+4/View.zoom,0,Math.PI*2); ctx.fill();
     }
     ctx.globalAlpha = padA;
-    const padCol = hasNet ? netColor(st.netId) : (c.side==="back" ? "#41599c" : "#9b8338");
+    // no-connect pads are neutral grey — visually distinct from "no net yet" (side colour)
+    const padCol = st.nc ? "#5c646e" : hasNet ? netColor(st.netId) : (c.side==="back" ? "#41599c" : "#9b8338");
     ctx.fillStyle = padCol;
     const darkNet = hasNet && isDarkHex(padCol);
     if (fpin.shape==="circle"){

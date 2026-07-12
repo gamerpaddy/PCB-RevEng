@@ -57,6 +57,18 @@ function hitTest(wx, wy){
   return null;
 }
 
+/* topmost visible component whose BODY contains the point — regardless of what
+   hitTest would return first (used so shift-click reaches a part through the
+   traces/vias routed across its body) */
+function compBodyAt(wx, wy){
+  for (let i=State.components.length-1; i>=0; i--){
+    const c = State.components[i];
+    if (!compBodyVisible(c)) continue;
+    if (pointInComp(c, wx, wy)) return c;
+  }
+  return null;
+}
+
 function distToSeg(px,py,a,b){
   const dx=b.x-a.x, dy=b.y-a.y;
   const len2 = dx*dx+dy*dy;

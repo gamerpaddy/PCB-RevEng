@@ -161,42 +161,139 @@ function schWiredPinSet(){
   return set;
 }
 
+/* another wire of the same net whose copper the point sits on (mm), or null —
+   the geometric test behind wire→wire junctions (T intersections) */
+function schWireOnPoint(p, except, wires){
+  for (const w of wires){
+    if (w === except) continue;
+    const pts = w.points;
+    for (let i = 0; i + 1 < pts.length; i++)
+      if (distToSeg(p.x, p.y, pts[i], pts[i+1]) <= 0.05) return w;
+  }
+  return null;
+}
+
 /* ---------- net connectivity (wire colouring) ----------
    A net is "fully connected" when every non-power pin on it is joined into ONE
-   group by fully-anchored wires (single-pin nets count as connected). A wire is
-   green only when it has both ends on pins AND its net is fully connected;
-   anything dangling or partial draws red. */
+   group (single-pin nets count as connected). Joins come from: wires anchored to
+   pins, a wire END sitting geometrically on another wire of the same net (a T
+   junction), and pins physically stacked on the same point (touching = connected).
+   A wire is green only when both its ends land on something AND its net is fully
+   connected; anything dangling or partial draws red. */
 function schNetStatus(){
   const stat = new Map();                       // netId -> {complete}
-  const pinsByNet = new Map();                  // netId -> ["compId:pin", ...]
+  const pinsByNet = new Map();                  // netId -> [{key,x,y}]
+  const geo = Sch.geo();
   for (const c of State.components){
     if (typeof c.schX !== "number") continue;
     for (let i = 0; i < c.pins.length; i++){
       const nid = c.pins[i].netId;
       if (!nid || schIsPowerNet(getNet(nid))) continue;
+      const p = schPinPos(c, i, geo); if (!p) continue;
       let a = pinsByNet.get(nid); if (!a) pinsByNet.set(nid, a = []);
-      a.push(c.id + ":" + i);
+      a.push({ key: c.id + ":" + i, x: p.x, y: p.y });
     }
   }
   for (const [nid, pins] of pinsByNet){
     if (pins.length < 2){ stat.set(nid, { complete: true }); continue; }
-    // union-find over the net's pins, unioned by fully-anchored wires
-    const idx = new Map(pins.map((k, i) => [k, i]));
-    const par = pins.map((_, i) => i);
+    // union-find over the net's pins AND wires
+    const idx = new Map(); const par = [];
+    const node = (k) => { let i = idx.get(k); if (i == null){ i = par.length; par.push(i); idx.set(k, i); } return i; };
     const find = (i) => { while (par[i] !== i){ par[i] = par[par[i]]; i = par[i]; } return i; };
+    const union = (a, b) => { par[find(a)] = find(b); };
+    const pinNodes = pins.map(p => node(p.key));
+    // pins stacked on the same point are directly connected (touching)
+    for (let i = 0; i < pins.length; i++)
+      for (let j = i + 1; j < pins.length; j++)
+        if (Math.abs(pins[i].x - pins[j].x) < 0.02 && Math.abs(pins[i].y - pins[j].y) < 0.02)
+          union(pinNodes[i], pinNodes[j]);
+    const wires = State.schWires.filter(w => w.netId === nid);
     let ok = true;
-    for (const w of State.schWires){
-      if (w.netId !== nid) continue;
-      if (!w.a || !w.b){ ok = false; continue; }      // dangling wire on this net
-      const ia = idx.get(w.a.comp + ":" + w.a.pin), ib = idx.get(w.b.comp + ":" + w.b.pin);
-      if (ia == null || ib == null) continue;
-      par[find(ia)] = find(ib);
+    for (const w of wires){
+      const wn = node("w:" + w.id);
+      const ends = [[w.a, w.points[0]], [w.b, w.points[w.points.length - 1]]];
+      for (const [an, p] of ends){
+        if (an){
+          const t = idx.get(an.comp + ":" + an.pin);
+          if (t != null) union(wn, t);
+        } else {
+          const hit = schWireOnPoint(p, w, wires);
+          if (hit) union(wn, node("w:" + hit.id));  // T junction on another wire
+          else ok = false;                          // genuinely dangling end
+        }
+      }
     }
-    const root = find(0);
-    for (let i = 1; i < pins.length && ok; i++) if (find(i) !== root) ok = false;
+    const root = find(pinNodes[0]);
+    for (let i = 1; i < pinNodes.length && ok; i++) if (find(pinNodes[i]) !== root) ok = false;
     stat.set(nid, { complete: ok });
   }
   return stat;
+}
+
+/* nets whose (2+) pins ALL sit stacked on one point — they're connected by contact,
+   so their auto net labels would be pure noise and are suppressed */
+function schFullyTouchingNets(comps, geo){
+  const m = new Map();                          // netId -> {x,y,n,same}
+  for (const c of comps){
+    for (let i = 0; i < c.pins.length; i++){
+      const nid = c.pins[i].netId; if (!nid) continue;
+      const p = schPinPos(c, i, geo); if (!p) continue;
+      const e = m.get(nid);
+      if (!e) m.set(nid, { x: p.x, y: p.y, n: 1, same: true });
+      else { e.n++; if (Math.abs(e.x - p.x) > 0.02 || Math.abs(e.y - p.y) > 0.02) e.same = false; }
+    }
+  }
+  const out = new Set();
+  for (const [nid, e] of m) if (e.same && e.n > 1) out.add(nid);
+  return out;
+}
+
+/* same-net pin pairs that currently sit on the exact same point, where only ONE side
+   is in `moving` — captured at drag start so pulling them apart can leave a wire behind */
+function schTouchingPairs(moving){
+  const geo = Sch.geo();
+  const set = new Set(moving);
+  const out = [];
+  for (const c of moving){
+    if (typeof c.schX !== "number") continue;
+    for (let i = 0; i < c.pins.length; i++){
+      const nid = c.pins[i].netId; if (!nid) continue;
+      const p = schPinPos(c, i, geo); if (!p) continue;
+      for (const o of State.components){
+        if (set.has(o) || typeof o.schX !== "number") continue;   // both moving → stay touching
+        for (let j = 0; j < o.pins.length; j++){
+          if (o.pins[j].netId !== nid) continue;
+          const q = schPinPos(o, j, geo); if (!q) continue;
+          if (Math.abs(p.x - q.x) < 0.02 && Math.abs(p.y - q.y) < 0.02)
+            out.push({ a: { comp: c.id, pin: i }, b: { comp: o.id, pin: j }, netId: nid });
+        }
+      }
+    }
+  }
+  return out;
+}
+
+/* after a drag: touching pairs that were pulled apart get a real wire in their place
+   (part of the move's undo step — pushUndo already ran when the drag armed) */
+function schSpawnTouchWires(pairs){
+  const geo = Sch.geo();
+  let made = 0;
+  const key = (an) => an.comp + ":" + an.pin;
+  for (const t of pairs){
+    const ca = getComp(t.a.comp), cb = getComp(t.b.comp);
+    if (!ca || !cb) continue;
+    const pa = schPinPos(ca, t.a.pin, geo), pb = schPinPos(cb, t.b.pin, geo);
+    if (!pa || !pb) continue;
+    if (Math.abs(pa.x - pb.x) < 0.02 && Math.abs(pa.y - pb.y) < 0.02) continue;   // still touching
+    if (State.schWires.some(w => w.a && w.b &&
+        ((key(w.a) === key(t.a) && key(w.b) === key(t.b)) ||
+         (key(w.a) === key(t.b) && key(w.b) === key(t.a))))) continue;            // already wired
+    const pts = [{ x: pa.x, y: pa.y }];
+    for (const q of schOrthoPath(pa, pb, null)) pts.push({ x: q.x, y: q.y });
+    State.schWires.push({ id: nextId(), netId: t.netId, points: pts, a: { ...t.a }, b: { ...t.b } });
+    made++;
+  }
+  if (made) UI.toast("Touching pins pulled apart — " + made + " wire" + (made === 1 ? "" : "s") + " keep" + (made === 1 ? "s" : "") + " them connected");
 }
 
 const SCH_WIRE_OK  = "#54c66a";
@@ -359,11 +456,19 @@ function schDrawRatlines(ctx, comps, geo){
   const dragComp = Sch.drag && (Sch.drag.comp || (Sch.drag.group && Sch.drag.group[0] && Sch.drag.group[0].c));
   const hotNets = new Set();
   if (dragComp) for (const pin of dragComp.pins) if (pin.netId) hotNets.add(pin.netId);
+  // wire tool: light up the net being routed (draft in progress, else the hovered pin's
+  // net) so the airwires show where the wire still has to go
+  let wireFocus = false;
+  if (Sch.mode === "wire"){
+    const nid = Sch.wireDraft ? (schNetOfAnchor(Sch.wireDraft.a) || Sch.wireDraft.netId)
+              : (Sch.hotPin ? (Sch.hotPin.comp.pins[Sch.hotPin.pin] || {}).netId : null);
+    if (nid){ hotNets.add(nid); wireFocus = true; }
+  }
 
   const pass = (hot) => {
     ctx.strokeStyle = hot ? "#7ec3ff" : "#3f9bff";
     ctx.lineWidth = hot ? 1.8 : 1;
-    ctx.globalAlpha = hot ? 1 : (dragComp ? 0.35 : 0.75);
+    ctx.globalAlpha = hot ? 1 : ((dragComp || wireFocus) ? 0.35 : 0.75);
     ctx.beginPath();
     for (const [netId, pts] of byNet){
       if (hotNets.has(netId) !== hot) continue;
@@ -490,14 +595,18 @@ function schDrawNetLabels(ctx, comps, geo){
   const manual = new Set(State.schLabels.map(l => l.comp + ":" + l.pin));
   const auto = schAutoLabelsOn();
 
-  // auto labels
+  // auto labels — a net whose pins all sit stacked on one point is connected by
+  // contact, so its labels are suppressed (they come back the moment a third pin
+  // elsewhere joins the net or the stack is pulled apart)
   if (auto){
+    const touching = schFullyTouchingNets(comps, geo);
     ctx.fillStyle = "rgba(111,146,184,0.62)";
     for (const c of comps){
       const g = geo.get(c.id);
       for (let i = 0; i < c.pins.length; i++){
         const pin = c.pins[i];
         if (!pin.netId || manual.has(c.id + ":" + i)) continue;
+        if (touching.has(pin.netId)) continue;
         const net = getNet(pin.netId);
         if (!net || schIsPowerNet(net)) continue;
         const pg = g.pins[i]; if (!pg) continue;
@@ -549,7 +658,12 @@ function schDrawWires(ctx){
     const pts = w.points;
     if (!pts || pts.length < 2) continue;
     const sel = w === Sch.selWire;
-    const good = w.a && w.b && (!w.netId || (stat.get(w.netId) || { complete: true }).complete);
+    // an end counts as landed when anchored to a pin OR sitting on another wire
+    // of the same net (T junction — drawn as a filled dot)
+    const sameNet = State.schWires.filter(x => x !== w && (!x.netId || !w.netId || x.netId === w.netId));
+    const aOn = !!w.a || !!schWireOnPoint(pts[0], w, sameNet);
+    const bOn = !!w.b || !!schWireOnPoint(pts[pts.length-1], w, sameNet);
+    const good = aOn && bOn && (!w.netId || (stat.get(w.netId) || { complete: true }).complete);
     ctx.strokeStyle = sel ? "#4da3ff" : (good ? SCH_WIRE_OK : SCH_WIRE_BAD);
     ctx.lineWidth = sel ? 2.4 : 1.6;
     ctx.lineJoin = "round"; ctx.lineCap = "round";
@@ -564,8 +678,8 @@ function schDrawWires(ctx){
       if (anchored) ctx.fill();
       else { ctx.strokeStyle = SCH_WIRE_BAD; ctx.lineWidth = 1.4; ctx.stroke(); ctx.strokeStyle = sel ? "#4da3ff" : (good ? SCH_WIRE_OK : SCH_WIRE_BAD); }
     };
-    endDot(pts[0], !!w.a);
-    endDot(pts[pts.length-1], !!w.b);
+    endDot(pts[0], aOn);
+    endDot(pts[pts.length-1], bOn);
   }
 }
 
@@ -704,6 +818,22 @@ function schWireSegHit(sx, sy){
   return null;
 }
 
+/* the grid-snapped point (mm) on a hit wire segment nearest the cursor — where a
+   branching wire attaches (clamped to stay on the segment) */
+function schWireSegPoint(ws, mx, my){
+  const A = ws.w.points[ws.i], B = ws.w.points[ws.i + 1];
+  if (Math.abs(A.y - B.y) < 0.01){                                   // horizontal
+    const lo = Math.min(A.x, B.x), hi = Math.max(A.x, B.x);
+    return { x: Math.min(hi, Math.max(lo, schSnap(mx))), y: A.y };
+  }
+  if (Math.abs(A.x - B.x) < 0.01){                                   // vertical
+    const lo = Math.min(A.y, B.y), hi = Math.max(A.y, B.y);
+    return { x: A.x, y: Math.min(hi, Math.max(lo, schSnap(my))) };
+  }
+  const pr = projectOnSeg(mx, my, A, B);                             // diagonal (legacy)
+  return { x: pr.x, y: pr.y };
+}
+
 /* distance (screen px) from a point to a wire, for click-select */
 function schWireHit(sx, sy){
   const h = schWireSegHit(sx, sy);
@@ -815,17 +945,32 @@ function schDrawSymbol(ctx, c, g){
   }
   ctx.textAlign = "center";
 
-  // reference above, value below (upright, above/below the rotated bbox)
+  // reference + value stay upright. Horizontal symbols: ref above, value below.
+  // Vertical (90/270) 2-pin parts have their pins — and net labels — sticking out of
+  // the top/bottom, so the texts move BESIDE the body (ref left, value right) to keep
+  // clear of the pin labels.
   const { hw, hh } = schHalfExt(c, g);
   if (showText){
+    const vertical = schRotOf(c) % 180 !== 0;
+    const val = c.value || c.part || "";
     ctx.fillStyle = stroke;
     ctx.font = "bold " + (1.6 * s) + "px sans-serif";
-    ctx.fillText(c.ref, X, Y - (hh + 1.4) * s);
-    const val = c.value || c.part || "";
-    if (val){
-      ctx.fillStyle = "#cfd6df";
-      ctx.font = (1.35 * s) + "px sans-serif";
-      ctx.fillText(val, X, Y + (hh + 2.2) * s);
+    if (vertical){
+      ctx.textAlign = "right";
+      ctx.fillText(c.ref, X - (hw + 0.8) * s, Y + (val ? -0.3 : 0.55) * s);
+      if (val){
+        ctx.fillStyle = "#cfd6df";
+        ctx.font = (1.35 * s) + "px sans-serif";
+        ctx.textAlign = "left";
+        ctx.fillText(val, X + (hw + 0.8) * s, Y + 0.55 * s);
+      }
+    } else {
+      ctx.fillText(c.ref, X, Y - (hh + 1.4) * s);
+      if (val){
+        ctx.fillStyle = "#cfd6df";
+        ctx.font = (1.35 * s) + "px sans-serif";
+        ctx.fillText(val, X, Y + (hh + 2.2) * s);
+      }
     }
   }
   ctx.textAlign = "left";
@@ -942,7 +1087,7 @@ Sch.finishWire = (endAnchor) => {
   if (!d || d.points.length < 2){ Sch.render(); return; }
   const na = schNetOfAnchor(d.a), nb = schNetOfAnchor(endAnchor);
   pushUndo("draw schematic wire");
-  State.schWires.push({ id: nextId(), netId: na || nb || null, points: d.points, a: d.a, b: endAnchor || null });
+  State.schWires.push({ id: nextId(), netId: na || nb || d.netId || null, points: d.points, a: d.a, b: endAnchor || null });
   Sch.render();
 };
 
@@ -1065,7 +1210,13 @@ Sch.onMove = (p, e) => {
       const lead = items[0];
       const nx = schSnap(mx - lead.dx), ny = schSnap(my - lead.dy);
       if (nx === lead.c.schX && ny === lead.c.schY) return;
-      if (!d.armed){ pushUndo(d.kind === "group" ? "move schematic selection" : "move schematic symbol"); d.armed = true; }
+      if (!d.armed){
+        pushUndo(d.kind === "group" ? "move schematic selection" : "move schematic symbol");
+        d.armed = true;
+        // record which pins are touching a stationary same-net pin right now, so pulling
+        // them apart can drop a wire in the gap (see schSpawnTouchWires on release)
+        d.touchPairs = schTouchingPairs(items.map(it => it.c));
+      }
       d.moved = true;
       const shX = nx - lead.c.schX, shY = ny - lead.c.schY;
       for (const it of items){ it.c.schX += shX; it.c.schY += shY; schUpdateWiresFor(it.c); }
@@ -1180,26 +1331,47 @@ Sch.wire = () => {
       const pin = schFindPin(p.x, p.y);
       const d = Sch.wireDraft;
       if (!d){
-        if (!pin){ UI.toast("Wires start on a pin — click a pin to begin"); return; }
-        Sch.wireDraft = { points: [{ x: pin.pos.x, y: pin.pos.y }],
-                          a: { comp: pin.comp.id, pin: pin.pin }, preview: null };
+        if (pin){
+          Sch.wireDraft = { points: [{ x: pin.pos.x, y: pin.pos.y }],
+                            a: { comp: pin.comp.id, pin: pin.pin }, netId: null, preview: null };
+        } else {
+          // no pin — an existing wire can also start a branch (T junction, same net)
+          const ws = schWireSegHit(p.x, p.y);
+          if (!ws){ UI.toast("Wires start on a pin or an existing wire"); return; }
+          const q = schWireSegPoint(ws, mx, my);
+          Sch.wireDraft = { points: [{ x: q.x, y: q.y }], a: null, netId: ws.w.netId || null, preview: null };
+        }
         UI.select(null);           // drawing must not leave a part selected (stray R rotates it)
         Sch.boxSel = [];
       } else {
-        // ending on a pin of a DIFFERENT net is refused
+        const dNet = schNetOfAnchor(d.a) || d.netId;
+        let target = null, endsWire = false;
         if (pin){
-          const na = schNetOfAnchor(d.a), nb = schNetOfAnchor({ comp: pin.comp.id, pin: pin.pin });
-          if (na && nb && na !== nb){
-            UI.warn("Different net — " + (getNet(na)?.name || "?") + " can't connect to " + (getNet(nb)?.name || "?"));
+          // ending on a pin of a DIFFERENT net is refused
+          const nb = schNetOfAnchor({ comp: pin.comp.id, pin: pin.pin });
+          if (dNet && nb && dNet !== nb){
+            UI.warn("Different net — " + (getNet(dNet)?.name || "?") + " can't connect to " + (getNet(nb)?.name || "?"));
             return;
           }
+          target = pin.pos;
+        } else {
+          // ending on an existing wire of the same net makes a T junction
+          const ws = schWireSegHit(p.x, p.y);
+          if (ws){
+            if (dNet && ws.w.netId && dNet !== ws.w.netId){
+              UI.warn("Different net — " + (getNet(dNet)?.name || "?") + " can't connect to " + (getNet(ws.w.netId)?.name || "?"));
+              return;
+            }
+            target = schWireSegPoint(ws, mx, my);
+            endsWire = true;
+          } else target = { x: schSnap(mx), y: schSnap(my) };
         }
         const last = d.points[d.points.length - 1];
         const prevDir = d.points.length > 1 ? schSegDir(d.points[d.points.length-2], last) : null;
-        const target = pin ? pin.pos : { x: schSnap(mx), y: schSnap(my) };
         for (const q of schOrthoPath(last, target, prevDir)) d.points.push({ x: q.x, y: q.y });
         d.preview = null;
         if (pin){ Sch.finishWire({ comp: pin.comp.id, pin: pin.pin }); return; }
+        if (endsWire){ Sch.finishWire(null); return; }
       }
       Sch.render();
       return;
@@ -1297,6 +1469,9 @@ Sch.wire = () => {
       if (c){ Sch.boxSel = []; UI.select({ type: "comp", comp: c }); }
       Sch.render();
     } else if (d.moved){
+      // a moved symbol/group that pulled touching pins apart leaves a wire behind
+      if ((d.kind === "comp" || d.kind === "group") && d.touchPairs && d.touchPairs.length)
+        schSpawnTouchWires(d.touchPairs);
       Sch.render();                  // drop the drag highlight
     } else if (d.kind === "label" && !d.moved && d.armed){
       cancelUndo();
@@ -1351,8 +1526,19 @@ Sch.wire = () => {
         if (!t.length){ /* consumed — R must never rotate the BOARD part from this tab */ }
         else if (t.length === 1) Sch.rotate(t[0]);
         else {
+          // rotate the whole selection as ONE block: every symbol spins 90° AND its
+          // position orbits the group's centre (not each part spinning in place)
           pushUndo("rotate schematic selection");
-          for (const c of t){ c.schRot = (schRotOf(c) + 90) % 360; schUpdateWiresFor(c); }
+          let cx = 0, cy = 0;
+          for (const c of t){ cx += c.schX; cy += c.schY; }
+          cx = schSnap(cx / t.length); cy = schSnap(cy / t.length);
+          for (const c of t){
+            const dx = c.schX - cx, dy = c.schY - cy;
+            c.schX = schSnap(cx + dy);   // 90° CCW on screen (y-down): (dx,dy) → (dy,−dx)
+            c.schY = schSnap(cy - dx);
+            c.schRot = (schRotOf(c) + 90) % 360;
+            schUpdateWiresFor(c);
+          }
           Sch.render();
         }
       }

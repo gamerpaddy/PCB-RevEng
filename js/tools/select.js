@@ -64,7 +64,13 @@ function selectDown(w, pt, e){
       }
     }
   }
-  const h = hitTest(w.x, w.y);
+  let h = hitTest(w.x, w.y);
+  // Shift-click over a big part (SOIC/QFN…) often lands on a trace or via routed across
+  // its body — for shift the component body wins, so the schematic jump works on any part
+  if (e.shiftKey && h && (h.type === "trace" || h.type === "via")){
+    const cb = compBodyAt(w.x, w.y);
+    if (cb) h = { type:"comp", comp: cb };
+  }
   // Shift-click a pad → toggle pin multi-select for bulk net assignment (jumping to
   // the schematic is the component BODY's shift-click). A shift-DRAG on a pad still
   // detaches the part from its traces; the click/drag split is resolved in onPointerUp.
@@ -308,6 +314,12 @@ function assignNetToConnected(obj, name){
    connected node (connected), or just this one object (one). Handles undo + refresh. */
 function applyNetRename(obj, name, done){
   name = (name || "").trim();
+  // a pin marked no-connect can't take a net — unset NC first (right-click the pad)
+  if (name && obj.type === "pin" && obj.comp.pins[obj.pinIdx] && obj.comp.pins[obj.pinIdx].nc){
+    UI.toast(obj.comp.ref + "." + obj.comp.pins[obj.pinIdx].num + " is marked no-connect — unset NC first");
+    done && done();
+    return;
+  }
   const oldId = objNetId(obj);
   const old = oldId ? getNet(oldId) : null;
   const members = oldId ? netMembers(oldId).length : 0;
@@ -346,6 +358,23 @@ function applyNetRename(obj, name, done){
     if (!scope){ done && done(); return; }   // cancelled — nothing changes
     applyScope(scope);
   });
+}
+
+/* clear a pad/via/trace's net with a FIXED scope (context-menu items) — no scope dialog.
+   scope "one" detaches just this object, "all" clears every object on the net. */
+function clearNetScope(obj, scope){
+  const oldId = objNetId(obj);
+  if (!oldId) return;
+  pushUndo(scope === "all" ? "clear whole net" : "clear net");
+  if (scope === "all"){
+    for (const c of State.components) for (const p of c.pins) if (p.netId === oldId) p.netId = null;
+    for (const v of State.vias)   if (v.netId === oldId) v.netId = null;
+    for (const t of State.traces) if (t.netId === oldId) t.netId = null;
+  } else if (!assignNetToObject(obj, "", "one")){
+    cancelUndo(); return;
+  }
+  pruneNets();
+  UI.refreshNets(); UI.refreshInspector(); requestRender();
 }
 
 function promptNetName(h){

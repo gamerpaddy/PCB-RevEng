@@ -561,7 +561,11 @@ function showCanvasContextMenu(cx, cy, w){
     const c = h.comp, p = c.pins[h.pinIdx];
     UI.select(h);
     items.push({ label:"Set net…", action:()=>promptNetName(h) });
-    if (p.netId) items.push({ label:"Clear net", action:()=>applyNetRename(h, "") });
+    if (p.netId){
+      const nn = getNet(p.netId)?.name || "?";
+      items.push({ label:"Clear net at selected", action:()=>clearNetScope(h, "one") });
+      items.push({ label:"Clear whole net “"+nn+"”", action:()=>clearNetScope(h, "all") });
+    }
     items.push({ label: p.nc ? "Unset no-connect" : "Mark no-connect (NC)", action:()=>{ pushUndo("pin NC"); p.nc=!p.nc; if(p.nc)p.netId=null; pruneNets(); UI.refreshNets(); UI.refreshInspector(); requestRender(); } });
     // visual pad editor — drag handles to resize / move this pad (free & generated alike)
     items.push({ sep:true });
@@ -588,7 +592,11 @@ function showCanvasContextMenu(cx, cy, w){
   } else if (h && h.type === "via"){
     UI.select(h);
     items.push({ label:"Set net…", action:()=>promptNetName(h) });
-    if (h.via.netId) items.push({ label:"Clear net", action:()=>applyNetRename(h, "") });
+    if (h.via.netId){
+      const nn = getNet(h.via.netId)?.name || "?";
+      items.push({ label:"Clear net at selected", action:()=>clearNetScope(h, "one") });
+      items.push({ label:"Clear whole net “"+nn+"”", action:()=>clearNetScope(h, "all") });
+    }
     items.push({ label:"Set blind/buried span…", action:()=>UI.openViaSpanEditor(h.via) });
     items.push({ label: h.via.kind==="pth" ? "Change to via" : "Change to PTH", action:()=>{ pushUndo("via type"); h.via.kind = h.via.kind==="pth"?"via":"pth"; UI.refreshInspector(); requestRender(); } });
     items.push({ sep:true });

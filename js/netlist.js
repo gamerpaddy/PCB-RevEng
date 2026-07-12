@@ -417,7 +417,12 @@ function _autoSymKind(c){
   if (n === 2){
     switch (rl){
       case "R": case "RN": case "RV": case "VR": case "TH": return "resistor";
-      case "C": return "capacitor";
+      case "C":
+        // a polarized footprint (e-cap SMD / radial with the + marker on) or an
+        // electrolytic/tantalum value keyword → polarized symbol
+        if ((typeof compIsPolarized === "function" && compIsPolarized(c)) ||
+            /elko|electroly|tantal|\btant\b|polar/.test(val)) return "cap_pol";
+        return "capacitor";
       case "CP": case "CE": return "cap_pol";
       case "L": case "FB": case "FL": return "inductor";
       case "LED": return "led";
