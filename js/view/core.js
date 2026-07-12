@@ -20,7 +20,8 @@ const View = {
   hideLabels: false,      // hide component reference-designator + value text (declutter dense boards)
   hideVias: false,        // hide all vias (also makes them non-interactive)
   labViaHi: false,        // EXPERIMENTAL: ring under-connected vias
-  labViaMax: 1,           // EXPERIMENTAL: highlight vias touching ≤ this many copper features
+  labViaMin: 0,           // EXPERIMENTAL: highlight vias touching ≥ this many copper features
+  labViaMax: 1,           // EXPERIMENTAL: …and ≤ this many (range min..max, inclusive)
   _labViaSet: null,       // per-frame set of vias to ring (built in render when labViaHi)
   xrayAuto: false,        // true when X-ray was auto-enabled by viewing the X-ray layer (so leaving it turns X-ray back off)
   split: false,           // synced split view — left & right panes share one camera

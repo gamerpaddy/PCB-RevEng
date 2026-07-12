@@ -59,6 +59,70 @@ UI.refreshParts = () => {
     cnt.innerHTML = base + (dupes ? ' <span class="dup-badge">' + dupes + ' dup</span>' : '');
   }
   list.scrollTop = sc;
+  UI.refreshPartsNets();
+};
+
+/* second Find list: nets, grouped, showing the part refs on each. The shared search
+   box matches a net by its name OR by any member ref. Click → highlight the net
+   (blink on the board, or centre + highlight it in the schematic tab). */
+UI.refreshPartsNets = () => {
+  const list = $("#partsnet-list");
+  if (!list) return;
+  const sc = list.scrollTop;
+  list.innerHTML = "";
+  const q = (UI.partFilter || "").trim().toLowerCase();
+  const map = buildNetMap();
+  const rows = [];
+  for (const n of State.nets){
+    const members = map.get(n.id);
+    if (!members || !members.length) continue;
+    const refs = [...new Set(members.map(m => m.ref))];
+    if (q && !(n.name.toLowerCase().includes(q) || refs.some(r => (r||"").toLowerCase().includes(q)))) continue;
+    rows.push({ net: n, refs, pins: members.length });
+  }
+  rows.sort((a,b) => a.net.name.localeCompare(b.net.name, undefined, { numeric:true, sensitivity:"base" }));
+  for (const r of rows){
+    const item = document.createElement("div");
+    item.className = "part-item" + (UI.activeNetId === r.net.id ? " active" : "");
+    const refList = r.refs.slice(0, 8).join(", ") + (r.refs.length > 8 ? " +" + (r.refs.length - 8) : "");
+    item.innerHTML = `<span class="pref">${escAttr(r.net.name)}</span>
+      <span class="pval">${escAttr(refList)}</span>
+      <span class="pside">${r.pins}p</span>`;
+    item.title = r.refs.join(", ");
+    item.addEventListener("click", () => UI.jumpToNet(r.net.id));
+    list.appendChild(item);
+  }
+  if (q && !rows.length){
+    const none = document.createElement("div");
+    none.className = "panel-hint";
+    none.textContent = "No nets match “" + UI.partFilter.trim() + "”";
+    list.appendChild(none);
+  }
+  const cnt = $("#partsnet-count");
+  if (cnt) cnt.textContent = rows.length ? "(" + rows.length + ")" : "";
+  list.scrollTop = sc;
+};
+
+/* highlight a net: board → blink it; schematic → centre + focus on its pins */
+UI.jumpToNet = (netId) => {
+  UI.activeNetId = netId;
+  UI.refreshNets();
+  const dlg = $("#parts-dialog");
+  if (typeof EditorTabs !== "undefined" && EditorTabs.current === "schematic" && typeof Sch !== "undefined"){
+    const geo = Sch.geo();
+    let x = 0, y = 0, n = 0;
+    for (const c of State.components){
+      if (typeof c.schX !== "number") continue;
+      for (let i = 0; i < c.pins.length; i++) if (c.pins[i].netId === netId){
+        const p = schPinPos(c, i, geo); if (!p) continue; x += p.x; y += p.y; n++;
+      }
+    }
+    if (n){ Sch.zoom = Math.max(Sch.zoom, 7); Sch.panX = Sch.width/2 - (x/n) * Sch.zoom; Sch.panY = Sch.height/2 - (y/n) * Sch.zoom; }
+    Sch.invalidate(); Sch.render();
+  } else {
+    if (typeof blinkNet === "function") blinkNet(netId); else requestRender();
+  }
+  if (dlg && dlg.open) dlg.close();
 };
 
 /* central rename: warns when another part already owns the reference, offering

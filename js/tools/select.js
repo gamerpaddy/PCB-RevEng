@@ -65,33 +65,34 @@ function selectDown(w, pt, e){
     }
   }
   let h = hitTest(w.x, w.y);
-  // Shift-click over a big part (SOIC/QFN…) often lands on a trace or via routed across
-  // its body — for shift the component body wins, so the schematic jump works on any part
-  if (e.shiftKey && h && (h.type === "trace" || h.type === "via")){
-    const cb = compBodyAt(w.x, w.y);
-    if (cb) h = { type:"comp", comp: cb };
-  }
-  // Shift-click a pad → toggle pin multi-select for bulk net assignment (jumping to
-  // the schematic is the component BODY's shift-click). A shift-DRAG on a pad still
-  // detaches the part from its traces; the click/drag split is resolved in onPointerUp.
-  if (e.shiftKey && h && h.type === "pin"){
-    const c = h.comp;
-    if (compMoveLocked(c)){
-      UI.togglePinSel(c, h.pinIdx);
+  // Shift-click semantics: a PAD → pin multi-select (bulk net assign); anywhere else on a
+  // PART — its silk body, or a trace/via routed across it — → jump to the Schematic tab.
+  // The pad test is tight (essentially on the pad), so the body-jump stays hittable on
+  // EVERY part, not just small discretes: a click in the body gap, or a near-miss beside a
+  // pad, falls through to the body. A shift-DRAG on a pad still detaches (resolved in
+  // onPointerUp via shiftPin/d.moved).
+  if (e.shiftKey){
+    const padHit = padHitTight(w.x, w.y);
+    if (padHit){
+      const c = padHit.comp;
+      if (compMoveLocked(c)){ UI.togglePinSel(c, padHit.pinIdx); requestRender(); return; }
+      pushUndo();
+      Tools.drag = { kind:"move-comp", comp:c, offX:w.x-c.x, offY:w.y-c.y, moved:false,
+                     anchors:[], detach:true, shiftPin:{comp:c, pinIdx:padHit.pinIdx}, wx:w.x, wy:w.y };
       requestRender();
       return;
     }
-    pushUndo();
-    Tools.drag = { kind:"move-comp", comp:c, offX:w.x-c.x, offY:w.y-c.y, moved:false,
-                   anchors:[], detach:true, shiftPin:{comp:c, pinIdx:h.pinIdx}, wx:w.x, wy:w.y };
-    requestRender();
-    return;
-  }
-  // shift-click a trace → select every trace on its net
-  if (e.shiftKey && h && h.type === "trace"){
-    UI.selectNetTraces(h.trace.netId);
-    requestRender();
-    return;
+    // precise body/pad first, then the full part extent (perimeter-pin ring, inter-pad
+    // gaps) — so a shift-click anywhere on ANY part reaches the jump, not just parts with
+    // a big silk gap. compExtentAt only kicks in where no precise body/pad is under the
+    // cursor, so it rarely steals a click meant for a neighbour.
+    const cb = compBodyAt(w.x, w.y) || compExtentAt(w.x, w.y);
+    if (cb) h = { type:"comp", comp: cb };                 // body / part extent / trace-over-part → jump
+    else if (h && h.type === "trace"){                     // bare trace → select its whole net
+      UI.selectNetTraces(h.trace.netId);
+      requestRender();
+      return;
+    }
   }
   // ctrl-click a trace → add/remove this segment from a multi-trace selection
   if ((e.ctrlKey || e.metaKey) && h && h.type === "trace"){
@@ -108,7 +109,19 @@ function selectDown(w, pt, e){
   }
   if (h.type === "comp" || h.type === "pin"){
     const c = h.comp;
-    if (compMoveLocked(c)){ UI.setHint(c.ref + " is move-locked — press " + Keymap.keyFor("edit.lock") + " to unlock"); requestRender(); return; }
+    if (compMoveLocked(c)){
+      // A move-locked part can't be DRAGGED — but a shift-click on its body is a JUMP, not
+      // a move, and must still work. (The jump is normally emitted in onPointerUp off the
+      // move-comp drag that the lock blocks — which is why pre-existing/locked parts, e.g.
+      // an imported QFP, never jumped while freshly-placed unlocked parts did.)
+      if (e && e.shiftKey && typeof SchEnabled === "function" && SchEnabled()){
+        EditorTabs.show("schematic");
+        Sch.focusComp(c);       // selects c on the board too (jump target)
+      } else {
+        UI.setHint(c.ref + " is move-locked — press " + Keymap.keyFor("edit.lock") + " to unlock");
+      }
+      requestRender(); return;
+    }
     pushUndo();
     // grab every trace vertex sitting on one of this component's pads so connected
     // anchors translate along with the component, preserving their relative position.
@@ -365,6 +378,11 @@ function applyNetRename(obj, name, done){
 function clearNetScope(obj, scope){
   const oldId = objNetId(obj);
   if (!oldId) return;
+  if (scope === "all"){
+    const nm = getNet(oldId)?.name || "?";
+    const cnt = netMembers(oldId).length;
+    if (!confirm("Clear the whole net “" + nm + "”?\nThis removes the net from " + cnt + " object" + (cnt === 1 ? "" : "s") + " (undoable).")) return;
+  }
   pushUndo(scope === "all" ? "clear whole net" : "clear net");
   if (scope === "all"){
     for (const c of State.components) for (const p of c.pins) if (p.netId === oldId) p.netId = null;

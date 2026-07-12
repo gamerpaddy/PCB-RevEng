@@ -3,7 +3,42 @@
 
 /* ---------------- net list ---------------- */
 UI.netFilter = "";
+UI.expandedNetId = null;   // net whose per-pin focus buttons are shown (click a row to toggle)
+
+/* every pad on a net, with the component + pin index needed to focus it on the board */
+function netPinMembers(netId){
+  const out = [];
+  for (const c of State.components)
+    for (let i = 0; i < c.pins.length; i++)
+      if (c.pins[i].netId === netId) out.push({ comp: c, pinIdx: i, num: c.pins[i].num, name: c.pins[i].name });
+  return out;
+}
+
+/* select a pad and centre the board on it (used by the net list's per-pin buttons) */
+UI.focusPin = (comp, pinIdx) => {
+  UI.select({ type: "pin", comp, pinIdx });
+  const fp = compFootprint(comp);
+  const fpin = fp && fp.pins[pinIdx];
+  const wp = fpin ? pinWorldPos(comp, fpin) : { x: comp.x, y: comp.y };
+  View.panX = View.width / 2 - wp.x * View.zoom * (View.flip ? -1 : 1);
+  View.panY = View.height / 2 - wp.y * View.zoom;
+  requestRender();
+};
+
+function _netPinStyle(){
+  if (document.getElementById("net-pin-style")) return;
+  const st = document.createElement("style");
+  st.id = "net-pin-style";
+  st.textContent =
+    ".net-pins{display:flex;flex-wrap:wrap;gap:4px;padding:4px 6px 8px 20px}" +
+    ".net-pin-btn{font-size:11px;padding:2px 8px;background:#232b35;color:#cdd5df;" +
+    "border:1px solid #3a4553;border-radius:4px;cursor:pointer;white-space:nowrap}" +
+    ".net-pin-btn:hover{background:#2f3a47;color:#fff;border-color:#4a5766}";
+  document.head.appendChild(st);
+}
+
 UI.refreshNets = () => {
+  _netPinStyle();
   const list = $("#net-list");
   list.innerHTML = "";
   const map = buildNetMap();
@@ -37,6 +72,7 @@ UI.refreshNets = () => {
     item.addEventListener("click", ()=>{
       const turnOn = UI.activeNetId !== n.id;
       UI.activeNetId = turnOn ? n.id : null;
+      UI.expandedNetId = turnOn ? n.id : null;   // reveal / hide this net's per-pin buttons
       UI.refreshNets();
       if (turnOn) blinkNet(n.id); else requestRender();
     });
@@ -49,6 +85,29 @@ UI.refreshNets = () => {
       UI.refreshNets(); UI.refreshInspector(); requestRender();
     });
     list.appendChild(item);
+    // expanded net → a button per pad on it: "REF (pin name, else pin number)"; click
+    // focuses that pad on the board (selects + centres it)
+    if (UI.expandedNetId === n.id){
+      const grp = document.createElement("div");
+      grp.className = "net-pins";
+      const members = netPinMembers(n.id);
+      for (const m of members){
+        const label = m.name && String(m.name).trim() ? m.name : m.num;
+        const b = document.createElement("button");
+        b.className = "net-pin-btn";
+        b.textContent = m.comp.ref + " (" + label + ")";
+        b.title = "Focus " + m.comp.ref + " · pin " + m.num + (m.name ? " (" + m.name + ")" : "");
+        b.addEventListener("click", e => { e.stopPropagation(); UI.focusPin(m.comp, m.pinIdx); });
+        grp.appendChild(b);
+      }
+      if (!members.length){
+        const none = document.createElement("div");
+        none.className = "panel-hint"; none.style.paddingLeft = "20px";
+        none.textContent = "No pads on this net";
+        grp.appendChild(none);
+      }
+      list.appendChild(grp);
+    }
   }
   if (q && !shown && total){
     const none = document.createElement("div");

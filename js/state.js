@@ -560,7 +560,11 @@ function serializeProject(){
     refCounters: State.refCounters,
     nets: State.nets,
     bomColumns: State.bomColumns,
-    components: State.components,
+    // `_fp` is a RUNTIME footprint cache — never persist it. Saving it means a reloaded
+    // project reuses the stale (possibly old-format) cached geometry instead of
+    // regenerating from fpId+fpParams, which quietly breaks body hit-testing (e.g. the
+    // shift-click → schematic jump) on loaded-but-not-freshly-placed parts.
+    components: State.components.map(c => { const { _fp, ...rest } = c; return rest; }),
     vias: State.vias,
     traces: State.traces,
     notes: State.notes,
@@ -598,6 +602,7 @@ function loadProject(json, done){
   State.nets = s.nets || [];
   State.bomColumns = s.bomColumns || [];
   State.components = s.components || [];
+  State.components.forEach(c => { c._fp = null; });  // drop any persisted footprint cache → regenerate from fpId+fpParams
   State.vias = s.vias || [];
   State.traces = s.traces || [];
   State.notes = s.notes || [];

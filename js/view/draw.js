@@ -174,15 +174,17 @@ function drawVia(ctx, v, selNet){
   ctx.restore();
 }
 
-/* EXPERIMENTAL: set of vias with ≤ View.labViaMax copper "arms" — dangling vias that connect
-   little or nothing. An arm is a piece of copper leaving the via: a trace END on the via = 1
-   arm, a trace passing THROUGH it (interior vertex, or a segment crossing it) = 2 arms, each
-   touching pad = 1 arm. So a via with one trace through it reads as 2 (not flagged), while a
-   via at the dead end of a single trace reads as 1. Early-breaks once a via clears the max. */
+/* EXPERIMENTAL: set of vias whose copper "arm" count falls in [labViaMin, labViaMax]
+   (inclusive) — dangling vias that connect little or nothing. An arm is a piece of copper
+   leaving the via: a trace END on the via = 1 arm, a trace passing THROUGH it (interior
+   vertex, or a segment crossing it) = 2 arms, each touching pad = 1 arm. So a via with one
+   trace through it reads as 2, while a via at the dead end of a single trace reads as 1.
+   viaArmCount early-breaks once it passes the max (anything above the range is excluded). */
 function computeLabViaSet(){
   const set = new Set();
   const max = Math.max(0, View.labViaMax|0);
-  for (const v of State.vias) if (viaArmCount(v, max) <= max) set.add(v);
+  const min = Math.max(0, Math.min(max, View.labViaMin|0));
+  for (const v of State.vias){ const a = viaArmCount(v, max); if (a >= min && a <= max) set.add(v); }
   return set;
 }
 function viaArmCount(v, cap){

@@ -15,8 +15,8 @@ const QuickAdd = {
   pvZoom: 1,      // preview zoom factor (mouse wheel over the preview)
 };
 
-/* experimental toggle (Lab dialog), off by default, retained in localStorage */
-QuickAdd.enabled = () => { try { return localStorage.getItem("pcbreveng.quickAdd") === "on"; } catch(e){ return false; } };
+/* standard feature now (on by default); still disable-able via localStorage */
+QuickAdd.enabled = () => { try { return localStorage.getItem("pcbreveng.quickAdd") !== "off"; } catch(e){ return true; } };
 
 /* ---------------- query parser ---------------- */
 

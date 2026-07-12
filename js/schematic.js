@@ -14,9 +14,9 @@
    Everything reads State live, so the tab is always in sync with the board editor. */
 "use strict";
 
-/* Lab toggle — retained across sessions like every experimental setting */
+/* Schematic editor is a standard feature now (on by default); still toggleable off. */
 function SchEnabled(){
-  try { return localStorage.getItem("pcbreveng.lab.schematic") === "on"; } catch(e){ return false; }
+  try { return localStorage.getItem("pcbreveng.lab.schematic") !== "off"; } catch(e){ return true; }
 }
 
 /* ---------------- editor tabs ---------------- */
@@ -121,6 +121,14 @@ function schXf(c, x, y){
   return schRot2d(x * (c.schFlipH ? -1 : 1), y * (c.schFlipV ? -1 : 1), schRotOf(c));
 }
 
+/* X/Y are CANVAS axes, not symbol axes: toggle the symbol-space flip flag that
+   mirrors along the requested SCREEN axis. A 90/270 rotation swaps the axes (the
+   symbol's x-axis is drawn vertically), so X and Y swap which flag they touch. */
+function schFlipComp(c, vert){
+  const useV = (schRotOf(c) % 180 !== 0) ? !vert : vert;
+  if (useV) c.schFlipV = !c.schFlipV; else c.schFlipH = !c.schFlipH;
+}
+
 /* a pin's position in schematic mm (y down), honouring rotation + flips */
 function schPinPos(c, i, geo){
   const g = (geo || Sch.geo()).get(c.id);
@@ -152,15 +160,6 @@ function schIsPowerNet(net){
 }
 function schIsGroundNet(net){ return !!net && /gnd|vss|vee/i.test(net.name); }
 
-/* pins already joined by a drawn wire — their ratline is redundant */
-function schWiredPinSet(){
-  const set = new Set();
-  for (const w of State.schWires){
-    if (w.a && w.b){ set.add(w.a.comp + ":" + w.a.pin); set.add(w.b.comp + ":" + w.b.pin); }
-  }
-  return set;
-}
-
 /* another wire of the same net whose copper the point sits on (mm), or null —
    the geometric test behind wire→wire junctions (T intersections) */
 function schWireOnPoint(p, except, wires){
@@ -173,18 +172,20 @@ function schWireOnPoint(p, except, wires){
   return null;
 }
 
-/* ---------- net connectivity (wire colouring) ----------
-   A net is "fully connected" when every non-power pin on it is joined into ONE
-   group (single-pin nets count as connected). Joins come from: wires anchored to
-   pins, a wire END sitting geometrically on another wire of the same net (a T
-   junction), and pins physically stacked on the same point (touching = connected).
-   A wire is green only when both its ends land on something AND its net is fully
-   connected; anything dangling or partial draws red. */
-function schNetStatus(){
-  const stat = new Map();                       // netId -> {complete}
+/* ---------- net connectivity ----------
+   Per non-power net, union its pins into connected GROUPS. Joins come from: drawn
+   wires (anchored to a pin, or a wire END sitting on another same-net wire = a T
+   junction), pins physically stacked on the same point (touching), and shared NET
+   LABELS — two pins each carrying a manual net label of the same net are declared
+   connected (a named node), exactly like KiCad labels. Returns
+   Map netId -> {groups:[[{key,x,y}]...], complete}; complete = all pins in ONE group
+   (single-pin nets count complete). Ratlines are drawn BETWEEN the groups so the
+   missing links are visible; a wire colours green only when its net is complete. */
+function schConnectivity(comps, geo){
+  geo = geo || Sch.geo();
+  comps = comps || State.components.filter(c => geo.has(c.id) && typeof c.schX === "number");
   const pinsByNet = new Map();                  // netId -> [{key,x,y}]
-  const geo = Sch.geo();
-  for (const c of State.components){
+  for (const c of comps){
     if (typeof c.schX !== "number") continue;
     for (let i = 0; i < c.pins.length; i++){
       const nid = c.pins[i].netId;
@@ -194,9 +195,9 @@ function schNetStatus(){
       a.push({ key: c.id + ":" + i, x: p.x, y: p.y });
     }
   }
+  const labelled = new Set(State.schLabels.map(l => l.comp + ":" + l.pin));
+  const out = new Map();
   for (const [nid, pins] of pinsByNet){
-    if (pins.length < 2){ stat.set(nid, { complete: true }); continue; }
-    // union-find over the net's pins AND wires
     const idx = new Map(); const par = [];
     const node = (k) => { let i = idx.get(k); if (i == null){ i = par.length; par.push(i); idx.set(k, i); } return i; };
     const find = (i) => { while (par[i] !== i){ par[i] = par[par[i]]; i = par[i]; } return i; };
@@ -207,26 +208,32 @@ function schNetStatus(){
       for (let j = i + 1; j < pins.length; j++)
         if (Math.abs(pins[i].x - pins[j].x) < 0.02 && Math.abs(pins[i].y - pins[j].y) < 0.02)
           union(pinNodes[i], pinNodes[j]);
+    // shared net labels → one common bus node for every labelled pin of the net
+    let busN = null;
+    for (let i = 0; i < pins.length; i++)
+      if (labelled.has(pins[i].key)){ if (busN == null) busN = node("lbl:" + nid); union(pinNodes[i], busN); }
+    // drawn wires (anchored ends + wire→wire T junctions)
     const wires = State.schWires.filter(w => w.netId === nid);
-    let ok = true;
     for (const w of wires){
       const wn = node("w:" + w.id);
       const ends = [[w.a, w.points[0]], [w.b, w.points[w.points.length - 1]]];
       for (const [an, p] of ends){
-        if (an){
-          const t = idx.get(an.comp + ":" + an.pin);
-          if (t != null) union(wn, t);
-        } else {
-          const hit = schWireOnPoint(p, w, wires);
-          if (hit) union(wn, node("w:" + hit.id));  // T junction on another wire
-          else ok = false;                          // genuinely dangling end
-        }
+        if (an){ const t = idx.get(an.comp + ":" + an.pin); if (t != null) union(wn, t); }
+        else { const hit = schWireOnPoint(p, w, wires); if (hit) union(wn, node("w:" + hit.id)); }
       }
     }
-    const root = find(pinNodes[0]);
-    for (let i = 1; i < pinNodes.length && ok; i++) if (find(pinNodes[i]) !== root) ok = false;
-    stat.set(nid, { complete: ok });
+    const groups = new Map();
+    for (let i = 0; i < pins.length; i++){ const r = find(pinNodes[i]); let g = groups.get(r); if (!g) groups.set(r, g = []); g.push(pins[i]); }
+    const arr = [...groups.values()];
+    out.set(nid, { groups: arr, complete: arr.length <= 1 });
   }
+  return out;
+}
+
+/* {complete} view over schConnectivity for the .kicad_sch exporter (label gating) */
+function schNetStatus(){
+  const stat = new Map();
+  for (const [nid, info] of schConnectivity(null, Sch.geo())) stat.set(nid, { complete: info.complete });
   return stat;
 }
 
@@ -426,8 +433,9 @@ Sch.render = () => {
     if (Sch.selLabel && !State.schLabels.includes(Sch.selLabel)) Sch.selLabel = null;
   }
 
-  schDrawRatlines(ctx, comps, geo);
-  schDrawWires(ctx);
+  const conn = schConnectivity(comps, geo);
+  schDrawRatlines(ctx, comps, geo, conn);
+  schDrawWires(ctx, conn);
   for (const c of comps) schDrawSymbol(ctx, c, geo.get(c.id));
   schDrawPowerPins(ctx, comps, geo);
   schDrawNetLabels(ctx, comps, geo);
@@ -436,22 +444,16 @@ Sch.render = () => {
   schDrawMarquee(ctx);
 };
 
-/* thin blue ratlines: per net, a minimum-spanning tree over every connected pin
-   (centroid star for very large nets), showing which pins must be wired together. */
-function schDrawRatlines(ctx, comps, geo){
-  const wired = schWiredPinSet();
-  const byNet = new Map();
-  for (const c of comps){
-    for (let i = 0; i < c.pins.length; i++){
-      const pin = c.pins[i];
-      if (!pin.netId) continue;
-      const net = getNet(pin.netId);
-      if (schIsPowerNet(net)) continue;              // power pins draw a symbol instead
-      if (wired.has(c.id + ":" + i)) continue;       // already joined by a real wire
-      const p = schPinPos(c, i, geo); if (!p) continue;
-      let a = byNet.get(pin.netId); if (!a) byNet.set(pin.netId, a = []);
-      a.push({ x: schX2S(p.x), y: schY2S(p.y) });
-    }
+/* thin blue ratlines: for each INCOMPLETE net, draw airwires BETWEEN its connected
+   groups (a link lands on the nearest pin pair across the two groups) so the missing
+   connections — and only the missing ones — are shown. Fully-connected nets (wired
+   or net-labelled) draw nothing. */
+function schDrawRatlines(ctx, comps, geo, conn){
+  conn = conn || schConnectivity(comps, geo);
+  const byNet = new Map();                          // netId -> [ [screenPt...] per group ]
+  for (const [nid, info] of conn){
+    if (info.complete) continue;                    // fully connected → no ratlines
+    byNet.set(nid, info.groups.map(g => g.map(p => ({ x: schX2S(p.x), y: schY2S(p.y) }))));
   }
   const dragComp = Sch.drag && (Sch.drag.comp || (Sch.drag.group && Sch.drag.group[0] && Sch.drag.group[0].c));
   const hotNets = new Set();
@@ -470,16 +472,16 @@ function schDrawRatlines(ctx, comps, geo){
     ctx.lineWidth = hot ? 1.8 : 1;
     ctx.globalAlpha = hot ? 1 : ((dragComp || wireFocus) ? 0.35 : 0.75);
     ctx.beginPath();
-    for (const [netId, pts] of byNet){
+    for (const [netId, groups] of byNet){
       if (hotNets.has(netId) !== hot) continue;
-      schPathNet(ctx, pts);
+      schPathGroups(ctx, groups);
     }
     ctx.stroke();
-    if (hot){                                        // mark the connected pins
+    if (hot){                                        // mark the still-unconnected pins
       ctx.fillStyle = "#7ec3ff";
-      for (const [netId, pts] of byNet){
+      for (const [netId, groups] of byNet){
         if (!hotNets.has(netId)) continue;
-        for (const p of pts){ ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, Math.PI*2); ctx.fill(); }
+        for (const g of groups) for (const p of g){ ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, Math.PI*2); ctx.fill(); }
       }
     }
   };
@@ -488,40 +490,48 @@ function schDrawRatlines(ctx, comps, geo){
   ctx.globalAlpha = 1;
 }
 
-/* path one net's airwires into the current ctx path (MST, or centroid star when huge) */
-function schPathNet(ctx, pts){
-  const n = pts.length;
+/* airwires linking a net's disconnected GROUPS: MST over group centroids, but each
+   link is drawn between the nearest pin pair across the two groups (so it touches
+   real pins, showing exactly where a wire is still needed). Centroid star when the
+   net is very fragmented. */
+function schPathGroups(ctx, groups){
+  const n = groups.length;
   if (n < 2) return;
-  if (n > 120){
-    let cx = 0, cy = 0;
-    for (const p of pts){ cx += p.x; cy += p.y; }
-    cx /= n; cy /= n;
-    for (const p of pts){ ctx.moveTo(p.x, p.y); ctx.lineTo(cx, cy); }
+  const reps = groups.map(g => { let x=0,y=0; for (const p of g){ x+=p.x; y+=p.y; } return { x:x/g.length, y:y/g.length }; });
+  if (n > 60){
+    let cx=0, cy=0; for (const r of reps){ cx+=r.x; cy+=r.y; } cx/=n; cy/=n;
+    for (const r of reps){ ctx.moveTo(r.x, r.y); ctx.lineTo(cx, cy); }
     return;
   }
-  // Prim's MST
-  const inTree = new Array(n).fill(false);
-  const dist = new Array(n).fill(Infinity);
-  const from = new Array(n).fill(0);
+  const inTree = new Array(n).fill(false), dist = new Array(n).fill(Infinity), from = new Array(n).fill(0);
   inTree[0] = true;
-  for (let i = 1; i < n; i++){
-    const dx = pts[i].x - pts[0].x, dy = pts[i].y - pts[0].y;
-    dist[i] = dx*dx + dy*dy;
-  }
+  for (let i = 1; i < n; i++){ const dx = reps[i].x-reps[0].x, dy = reps[i].y-reps[0].y; dist[i] = dx*dx+dy*dy; }
   for (let k = 1; k < n; k++){
     let best = -1, bd = Infinity;
     for (let i = 0; i < n; i++) if (!inTree[i] && dist[i] < bd){ bd = dist[i]; best = i; }
     if (best < 0) break;
     inTree[best] = true;
-    ctx.moveTo(pts[from[best]].x, pts[from[best]].y);
-    ctx.lineTo(pts[best].x, pts[best].y);
+    const pr = schNearestPair(groups[from[best]], groups[best]);
+    ctx.moveTo(pr[0].x, pr[0].y); ctx.lineTo(pr[1].x, pr[1].y);
     for (let i = 0; i < n; i++){
       if (inTree[i]) continue;
-      const dx = pts[i].x - pts[best].x, dy = pts[i].y - pts[best].y;
-      const d = dx*dx + dy*dy;
+      const dx = reps[i].x-reps[best].x, dy = reps[i].y-reps[best].y;
+      const d = dx*dx+dy*dy;
       if (d < dist[i]){ dist[i] = d; from[i] = best; }
     }
   }
+}
+
+/* nearest pin pair between two screen-space groups (capped for huge groups) */
+function schNearestPair(ga, gb){
+  const A = ga.length > 24 ? ga.slice(0, 24) : ga;
+  const B = gb.length > 24 ? gb.slice(0, 24) : gb;
+  let bd = Infinity, ra = A[0], rb = B[0];
+  for (const p of A) for (const q of B){
+    const dx = p.x-q.x, dy = p.y-q.y, d = dx*dx+dy*dy;
+    if (d < bd){ bd = d; ra = p; rb = q; }
+  }
+  return [ra, rb];
 }
 
 /* fixed power symbols: a GND bar / supply tick + name on each pin of a power net —
@@ -652,8 +662,8 @@ function schLabelText(ctx, text, X, Y, effAngle, s, plate){
 }
 
 /* ---------- schematic wires ---------- */
-function schDrawWires(ctx){
-  const stat = schNetStatus();
+function schDrawWires(ctx, conn){
+  const stat = conn || schConnectivity(null, Sch.geo());
   for (const w of State.schWires){
     const pts = w.points;
     if (!pts || pts.length < 2) continue;
@@ -730,21 +740,63 @@ function schDrawMarquee(ctx){
   }
 }
 
+/* collinear-overlap length between segment A-B and C-D (0 when they merely cross, are
+   perpendicular, or don't share a line). Crossings are fine — only wires lying ON TOP of
+   each other count. */
+function schSegOverlapLen(a, b, c, d){
+  const eps = 0.03;
+  const aH = Math.abs(a.y - b.y) < eps, cH = Math.abs(c.y - d.y) < eps;
+  const aV = Math.abs(a.x - b.x) < eps, cV = Math.abs(c.x - d.x) < eps;
+  if (aH && cH && Math.abs(a.y - c.y) < eps){                 // both horizontal, same row
+    const lo = Math.max(Math.min(a.x, b.x), Math.min(c.x, d.x));
+    const hi = Math.min(Math.max(a.x, b.x), Math.max(c.x, d.x));
+    return Math.max(0, hi - lo);
+  }
+  if (aV && cV && Math.abs(a.x - c.x) < eps){                 // both vertical, same column
+    const lo = Math.max(Math.min(a.y, b.y), Math.min(c.y, d.y));
+    const hi = Math.min(Math.max(a.y, b.y), Math.max(c.y, d.y));
+    return Math.max(0, hi - lo);
+  }
+  return 0;
+}
+
+/* total length a candidate path (points starting from `start`) would lie on top of any
+   existing schematic wire. Used to pick the elbow that avoids overlapping straights. */
+function schPathOverlap(start, pathPts){
+  let prev = start, total = 0;
+  for (const q of pathPts){
+    for (const w of State.schWires)
+      for (let i = 0; i < w.points.length - 1; i++)
+        total += schSegOverlapLen(prev, q, w.points[i], w.points[i + 1]);
+    prev = q;
+  }
+  return total;
+}
+
 /* 90°-snapped path from L to target T: straight when aligned, else one corner.
    prevDir ("h"/"v"/null) = direction of the previous segment; Sch.axisPref (R while
-   drafting) forces which leg comes first when there's no previous segment. */
+   drafting) forces which leg comes first. With no forced preference the elbow that lies
+   on top of existing wires the LEAST wins (crossings are fine, overlapping straights are
+   not), falling back to prev-segment alternation / the long axis on a tie. */
 function schOrthoPath(L, T, prevDir){
   if (Math.abs(L.x - T.x) < 0.01 || Math.abs(L.y - T.y) < 0.01) return [T];
+  const hPath = [{ x: T.x, y: L.y }, T];   // horizontal leg first
+  const vPath = [{ x: L.x, y: T.y }, T];   // vertical leg first
+  if (Sch.axisPref === "h") return hPath;  // explicit R-key preference wins on every corner
+  if (Sch.axisPref === "v") return vPath;
+  const ho = schPathOverlap(L, hPath), vo = schPathOverlap(L, vPath);
+  if (ho + 0.05 < vo) return hPath;        // clearly less overlap one way → take it
+  if (vo + 0.05 < ho) return vPath;
+  // tie (usually both zero) → old behaviour: alternate off the previous leg, else long axis
   const horizFirst = prevDir === "h" ? false : prevDir === "v" ? true
-                   : Sch.axisPref === "h" ? true : Sch.axisPref === "v" ? false
                    : Math.abs(T.x - L.x) >= Math.abs(T.y - L.y);
-  return horizFirst ? [{ x: T.x, y: L.y }, T] : [{ x: L.x, y: T.y }, T];
+  return horizFirst ? hPath : vPath;
 }
 function schSegDir(a, b){ return Math.abs(a.y - b.y) < 0.01 ? "h" : Math.abs(a.x - b.x) < 0.01 ? "v" : null; }
 
 /* nearest pin within `tol` screen px of a screen point, or null */
 function schFindPin(sx, sy, tol){
-  tol = tol || 9;
+  tol = tol || 15;
   const geo = Sch.geo();
   let best = null, bd = tol * tol;
   for (const c of State.components){
@@ -1013,7 +1065,7 @@ Sch.rotate = (c) => {
 Sch.flip = (c, vert) => {
   if (!c) return;
   pushUndo("flip schematic symbol");
-  if (vert) c.schFlipV = !c.schFlipV; else c.schFlipH = !c.schFlipH;
+  schFlipComp(c, vert);
   schUpdateWiresFor(c);
   Sch.render();
 };
@@ -1397,8 +1449,13 @@ Sch.wire = () => {
       if (Sch.boxSel.includes(c)){
         Sch.drag = { kind: "group", group: Sch.boxSel.map(g => ({ c: g, dx: mx - g.schX, dy: my - g.schY })), armed: false, moved: false, clickComp: c, shift: e.shiftKey };
       } else {
+        // select the grabbed part right away so the previously-selected object doesn't
+        // stay highlighted while this one is being dragged
         Sch.boxSel = [];
+        Sch.selWire = null; Sch.selLabel = null;
+        if (!(UI.sel && UI.sel.type === "comp" && UI.sel.comp === c)) UI.select({ type: "comp", comp: c });
         Sch.drag = { kind: "comp", comp: c, dx: mx - c.schX, dy: my - c.schY, armed: false, moved: false, clickComp: c, shift: e.shiftKey };
+        Sch.render();
       }
       return;
     }
@@ -1548,7 +1605,7 @@ Sch.wire = () => {
       if (!t.length){ /* consumed — X must not toggle the board X-ray from this tab */ }
       else if (t.length > 1){
         pushUndo("flip schematic selection");
-        for (const c of t){ if (vert) c.schFlipV = !c.schFlipV; else c.schFlipH = !c.schFlipH; schUpdateWiresFor(c); }
+        for (const c of t){ schFlipComp(c, vert); schUpdateWiresFor(c); }
         Sch.render();
       } else Sch.flip(t[0], vert);
     } else if (k === "n" || k === "N"){

@@ -69,6 +69,61 @@ function compBodyAt(wx, wy){
   return null;
 }
 
+/* topmost visible component whose OVERALL extent — the bounding box of its silk body
+   UNION every pad, in the part's own rotated/mirrored frame — contains the point. Wider
+   than compBodyAt (which only covers the body and each individual pad): this also fills
+   the "dead ring" between a body edge and its perimeter pads, and the gaps between pads.
+   Used as the shift-click jump fallback so a click ANYWHERE on a multi-pin part (QFP/SOIC/
+   header pins included) reaches the schematic jump, while padHitTight still peels off a
+   tight-on-pad click for multi-select first. */
+function pointInCompExtent(comp, wx, wy){
+  const fp = compFootprint(comp);
+  const s = State.pxPerMm * (comp.scale || 1);
+  let dx = wx - comp.x, dy = wy - comp.y;
+  const a = -comp.rot * Math.PI/180, ca = Math.cos(a), sa = Math.sin(a);
+  let lx = dx*ca - dy*sa, ly = dx*sa + dy*ca;
+  if (comp.side === "back") lx = -lx;
+  const mx = lx/s, my = ly/s;
+  const tol = 5 / View.zoom / s;
+  let minX = -fp.body.w/2, maxX = fp.body.w/2, minY = -fp.body.h/2, maxY = fp.body.h/2;
+  for (const p of fp.pins){
+    if (p.xmm - p.w/2 < minX) minX = p.xmm - p.w/2;
+    if (p.xmm + p.w/2 > maxX) maxX = p.xmm + p.w/2;
+    if (p.ymm - p.h/2 < minY) minY = p.ymm - p.h/2;
+    if (p.ymm + p.h/2 > maxY) maxY = p.ymm + p.h/2;
+  }
+  return mx >= minX - tol && mx <= maxX + tol && my >= minY - tol && my <= maxY + tol;
+}
+function compExtentAt(wx, wy){
+  for (let i=State.components.length-1; i>=0; i--){
+    const c = State.components[i];
+    if (!compBodyVisible(c)) continue;
+    if (pointInCompExtent(c, wx, wy)) return c;
+  }
+  return null;
+}
+
+/* topmost visible PAD the point sits essentially on (tight, ~2 screen px), or null.
+   Splits shift-click: a pad here → pin multi-select; anything else on the part → the
+   schematic jump. The tight test keeps the body-jump reachable on EVERY part (a click
+   in the silk gap, or a near-miss beside a pad, falls through to the body) rather than
+   only on small discretes with a big clear centre. Mirrors hitTest's pad-visibility. */
+function padHitTight(wx, wy){
+  const tol = 2 / View.zoom;
+  for (let i=State.components.length-1; i>=0; i--){
+    const c = State.components[i];
+    if (Math.hypot(wx-c.x, wy-c.y) > compRadius(c) + tol) continue;
+    const fp = compFootprint(c);
+    const smdShown = compBodyVisible(c);
+    for (let pi=0; pi<c.pins.length; pi++){
+      const fpin = fp.pins[pi]; if (!fpin) continue;
+      if (!smdShown && !(fpin.shape === "circle" && fpin.tht !== false)) continue;
+      if (pinEdgeDist(c, fpin, wx, wy) <= tol) return { comp:c, pinIdx:pi };
+    }
+  }
+  return null;
+}
+
 function distToSeg(px,py,a,b){
   const dx=b.x-a.x, dy=b.y-a.y;
   const len2 = dx*dx+dy*dy;

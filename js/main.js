@@ -876,38 +876,37 @@ function wireDialogs(){
    View flags, so leaving it untouched changes nothing. */
 /* every experimental setting is remembered across sessions in localStorage under a
    pcbreveng.lab.* key — add future toggles to this same retained scheme. */
-const LAB_LS = { viaHi:"pcbreveng.lab.viaHi", viaMax:"pcbreveng.lab.viaMax" };
+const LAB_LS = { viaHi:"pcbreveng.lab.viaHi", viaMin:"pcbreveng.lab.viaMin", viaMax:"pcbreveng.lab.viaMax" };
 function labRestore(){
   try {
     View.labViaHi  = localStorage.getItem(LAB_LS.viaHi) === "on";
     const m = parseInt(localStorage.getItem(LAB_LS.viaMax), 10);
     if (isFinite(m)) View.labViaMax = Math.max(0, Math.min(9, m));
+    const lo = parseInt(localStorage.getItem(LAB_LS.viaMin), 10);
+    if (isFinite(lo)) View.labViaMin = Math.max(0, Math.min(View.labViaMax, lo));
   } catch(e){}
 }
 function wireLab(){
-  const chk = $("#lab-viaconn"), maxIn = $("#lab-viaconn-max");
+  const chk = $("#lab-viaconn"), minIn = $("#lab-viaconn-min"), maxIn = $("#lab-viaconn-max");
   labRestore();
-  chk.checked = !!View.labViaHi; maxIn.value = View.labViaMax;
+  chk.checked = !!View.labViaHi; minIn.value = View.labViaMin; maxIn.value = View.labViaMax;
   const apply = () => {
     View.labViaHi  = chk.checked;
     View.labViaMax = Math.max(0, Math.min(9, parseInt(maxIn.value, 10) || 0));
+    View.labViaMin = Math.max(0, Math.min(View.labViaMax, parseInt(minIn.value, 10) || 0));
+    minIn.value = View.labViaMin;   // reflect the clamp (min can't exceed max)
     try { localStorage.setItem(LAB_LS.viaHi, chk.checked ? "on" : "off");
+          localStorage.setItem(LAB_LS.viaMin, String(View.labViaMin));
           localStorage.setItem(LAB_LS.viaMax, String(View.labViaMax)); } catch(e){}
     requestRender();
   };
-  const qa = $("#lab-quickadd");
-  const schChk = $("#lab-schematic");
-  $("#btn-lab").addEventListener("click", ()=>{ chk.checked = !!View.labViaHi; maxIn.value = View.labViaMax; qa.checked = QuickAdd.enabled(); schChk.checked = SchEnabled(); $("#lab-dialog").showModal(); });
+  // Quick-add components and the Schematic tab are standard features now (on by
+  // default), no longer gated here — see QuickAdd.enabled / SchEnabled.
+  $("#btn-lab").addEventListener("click", ()=>{ chk.checked = !!View.labViaHi; minIn.value = View.labViaMin; maxIn.value = View.labViaMax; $("#lab-dialog").showModal(); });
   $("#lab-close").addEventListener("click", ()=> $("#lab-dialog").close());
   chk.addEventListener("change", apply);
+  minIn.addEventListener("input", apply);
   maxIn.addEventListener("input", apply);
-  qa.addEventListener("change", ()=>{ try{ localStorage.setItem("pcbreveng.quickAdd", qa.checked?"on":"off"); }catch(e){} });
-  // schematic-editor tab (schematic.js) — retained like every lab setting
-  schChk.addEventListener("change", ()=>{
-    try { localStorage.setItem("pcbreveng.lab.schematic", schChk.checked ? "on" : "off"); } catch(e){}
-    EditorTabs.refreshLabTab();
-    UI.toast(schChk.checked ? "Schematic tab enabled (top left)" : "Schematic tab disabled");
-  });
 
   // clear/remove-all: bulk-delete every object of the ticked kinds (undoable)
   $("#lab-clear-go").addEventListener("click", () => {
