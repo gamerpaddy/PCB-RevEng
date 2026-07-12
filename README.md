@@ -2,14 +2,70 @@
 
 ### ▶ TRY IT OUT HERE: https://gamerpaddy.github.io/PCB-RevEng/
 
-A zero-dependency web app for re-tracing electronic PCBs from photos and exporting
-a netlist you can import into KiCad (or any EDA that reads KiCad netlists / CSV / JSON).
+A zero-dependency open-source web app for reverse-engineering and repairing electronic PCBs from photos and exporting
+a netlist you can import into EDAs like KiCad.
 
-Plain HTML + CSS + vanilla JS. No build step, no CDN, no server-side code.
+No building needed, no CDN, no server-side code. All local in your browser.
 
 ## Screenshots
 
 ![Whole GUI overview](images/whole-gui-overview.jpg)
+
+
+
+## Running
+- **Github:** use the link above or the deployment page to access the latest iteration directly.
+- **Locally:** Extract and just open `index.html` in any modern browser, no server needed.
+- **On a web host:** just upload the folder to any static host (nginx, GitHub Pages, S3, …).
+
+Your session **autosaves to the browser** (IndexedDB, images included) - F5 or
+closing the tab loses nothing; "New" clears it. Use Save/Open for files you
+want to keep or move between machines.
+Keep in mind that Browser plugins or settings that clear those storages will remove all progress if you didnt save it to a file.
+Disabling javascript will stop this software from working completely.
+
+
+## Workflow
+
+1. **Load photos** deskew, align and calibrate the dimensions.
+2. **Assign photos to layers** you can change the amount of layers in options
+3. **Place parts** press C and click somewhere for a Quick menu, Hold shift while clicking for the Footprint selector.
+4. **Assign values, types, prefixes** etc. make your life easier later by putting in the effort now.
+5. **Create Nets** click on pins, edit parts in the inspector or draw wires, its up to you how you connect them.
+6. **Edit Schematic** The schematic can be found under the Schematic tab or by pressing F2, arrange the blocks and connect them. Unconnected wires will auto-generate a Net label for Kicad export.
+7. **Export** to your favourite EDA as long as it supports the file formats implemented, more to come.
+
+
+## AI features ##
+Yes.. no new software without AI nowadays. But its disabled by default and you dont need to use it, its not being forced on you!
+
+Go to the experimental section to enable it and provide a API key. 
+
+Currently it can support your in 3 tasks, finding pinouts, creating footprints, arranging parts in schematic. 
+All highly unreliable and dependend on the weather, universe and what not.  verify results before use.
+
+
+<img width="325" height="250" alt="claude_HoQ5RjeWJb" src="https://github.com/user-attachments/assets/f04503d1-2443-460e-9c4d-2aa01a4e142c" />
+
+
+## New features regularily.
+Features change a lot, so i hold back editing this Readme feature list until i hit a equilibrium.
+
+just try it out, you can undo anything and fiddle around in the sample project as much as you like.
+
+**You got an great idea or found a bug? Open a Issue i will look into it.**
+
+
+## Repair functionality ##
+**If you are repairing and dont need the reverse engineering functionality, you are covered aswell.** 
+
+Import allows you to open Boardview .brd and .cad files directly for troubleshooting and fault finding.
+
+
+<img width="1126" height="771" alt="firefox_7J42z4hYx8" src="https://github.com/user-attachments/assets/df5ca5c1-3e36-4308-9b16-3523cea9397f" />
+
+<img width="1906" height="1277" alt="firefox_oWt9LO7s4P" src="https://github.com/user-attachments/assets/ad96aaaf-efe0-439c-b3c6-83f26679bc34" />
+<img width="713" height="686" alt="firefox_xeYeZYlMq8" src="https://github.com/user-attachments/assets/4b83a3a1-7eac-4828-a9da-56b1b1b5b0af" />
 
 ![Component / footprint picker](images/component-picker.png)
 
@@ -17,229 +73,5 @@ Plain HTML + CSS + vanilla JS. No build step, no CDN, no server-side code.
 
 ![Trace routing close-up](images/xray-closeup.png)
 
-<img width="1906" height="1277" alt="firefox_oWt9LO7s4P" src="https://github.com/user-attachments/assets/ad96aaaf-efe0-439c-b3c6-83f26679bc34" />
-<img width="713" height="686" alt="firefox_xeYeZYlMq8" src="https://github.com/user-attachments/assets/4b83a3a1-7eac-4828-a9da-56b1b1b5b0af" />
-
-## Running
-
-- **Locally:** just open `index.html` in any modern browser (double-click works - no server needed).
-- **On a web host:** upload the folder to any static host (nginx, GitHub Pages, S3, …).
-- **Dev preview:** any static server, e.g. `python -m http.server 8741`.
-
-Your session **autosaves to the browser** (IndexedDB, images included) - F5 or
-closing the tab loses nothing; "New" clears it. Use Save/Open for files you
-want to keep or move between machines.
-
-## Workflow
-
-1. **Load photos** - drag & drop front / back / inner-layer images onto the canvas
-   (or “+ Add” in the Layers panel). Side is guessed from the filename; back photos
-   are auto-mirrored (⇋) so they overlay the front view correctly.
-2. **Align** (`G`) - drag the active layer to move, `Shift`+drag to rotate,
-   `Alt`+wheel to scale, or use the **Align** button on a layer: click four
-   features **on that layer** (each click is numbered and shows a thumbnail of what
-   you clicked), then click the four matching positions on the reference - a side
-   strip shows the source thumbnails so you know which feature to match next.
-   Offset, rotation, scale **and skew** are solved by least squares. After step 2
-   (clicking the destinations on the base layer) the active layer automatically
-   switches back to the layer you just aligned. Tip: only the base layer needs the
-   **Deskew** button (next to *Calibrate*): click two lines that should be parallel
-   & axis-aligned (e.g. two board edges) and the image is straightened and
-   perspective-corrected (the correction is baked into the layer bitmap); every other
-   layer can then just be 4-point-aligned to it. Aligning or deskewing a layer that
-   already has components/traces on its side prompts a warning first, since the image
-   moves but the placed elements don't. Use the opacity sliders to onion-skin
-   layers while aligning. Number keys 1…0 switch the view to a layer, or toggle
-   visibility - pick the behavior in *Board / display*. (In **split view** the
-   numbers set the left half and `Shift`+number the right half.) You can also load
-   an image straight from a URL with **+ URL** (see *Hosted image layers* below).
-3. **Calibrate**  - Click calibrate in the left toolbar, drag along a known dimension (e.g. a 2.54 mm header pitch
-   ×10) and enter the real length in mm. Footprints then render at true board scale.
-4. **Place components** (`C`) - footprint selector with parametric DIP / SOIC / TSSOP /
-   QFP / QFN / SOT-23-323-523-723 / SOT-223 / SOT-89 / DPAK / TO-92 / TO-220 /
-   chip R-C / headers / BGA-grid / test points,
-   plus a **Freestyle** footprint: place the body anywhere (even off-board) and drop
-   its pins one by one with “+ Add pins” in the Inspector; each freestyle pad's type
-(THT / SMD) and size are editable per-pin. In the selector, **1–9** jump to the
-   first nine categories and **Shift+1–9** to the next nine (the number is shown on
-   each category button). The **Ω** button next to Value decodes SMD resistor codes
-   (103, 01C, 4R7, 4k7…) or computes THT color bands.
-   For the **R / C / L chip** the click modifier sets the refdes prefix:
-   click = **R**, Shift-click = **C**, Ctrl-click = **L** (diodes live in MELF / SOD
-   packages, so they're separate categories rather than a chip variant).
-   Assign reference, value, part name and KiCad footprint; `R` rotates, `B` flips side.
-   Pin names and per-pin nets are editable in the Inspector.
-5. **Trace** (`W`) - click a pad, follow the copper, click the destination pad.
-   Endpoints snap to pads, vias **and existing traces** - start on a trace to branch
-   off and keep its net, and traces that cross on the same copper side are joined
-   into one net automatically. Pick the copper side in the toolbar (`D` cycles);
-   the board's copper layer count (1–12, adds inner layers) and the global
-   via/trace display sizes live in the *Board / display* panel. `V` places vias
-   to hop sides. `K` is the **Cut** tool: click a trace to sever it - the app
-   re-derives connectivity and gives disconnected halves separate nets.
-   By default only the active side's traces are shown (vias and pads always are)
-   and far-side component bodies are hidden, pads dimmed - both switchable in
-   *Board / display*. Selecting a layer (card click, side change, or number key)
-   also switches the draw side to match.
-6. **Name nets** - double-click any pad/via/trace (or use the Inspector / net panel).
-   Hovering or selecting highlights the whole net across the board; `F` flips the
-   view to work from the back.
-7. **Export** (`Ctrl+E`) - KiCad netlist (`.net`, import via Pcbnew → File → Import
-   Netlist), a **KiCad schematic** (`.kicad_sch`, open directly in Eeschema - each
-   part becomes a boxed symbol with global-label nets, since Eeschema can't import
-   netlists), CSV, or JSON. `Ctrl+S` saves the whole project (including images) as
-   one JSON file; reopen it with `Ctrl+O` or drag & drop.
-<img width="325" height="250" alt="claude_HoQ5RjeWJb" src="https://github.com/user-attachments/assets/f04503d1-2443-460e-9c4d-2aa01a4e142c" />
-
-Press `?` in the app for the full hotkey list. All single-key shortcuts are
-rebindable via the ⌨ **Hotkey editor** in the top bar (saved in the browser).
-Board & display settings live in the ⚙ **Options** menu. Components have separate
-**move** and **edit** locks (`L` toggles the move lock); locked parts show a 🔒.
-The **Mask** toggle (`H`) darkens board areas that have no components yet (and
-tints them red), leaving placed parts bright, so you can see at a glance what's
-left to identify on a crowded board.
-
-## Newer features
-
-**Split view (`Y`).** Front on the left, back on the right, sharing one camera so
-the same board area lines up in both halves - ideal for following a link across
-sides. A faint second cursor shows where you are in the other half. Number keys set
-the **left** half's layer, `Shift`+number the **right** half; each half also has its
-own layer dropdown. The **Draw on** side follows whichever half the cursor is in.
-
-**Ratsnest airwires.** The **Ratsnest** button cycles Off → **Net** → **Star**.
-*Net* draws a minimum-spanning tree over every same-net pad/via (across all layers);
-hover or select a net to isolate it. *Star* draws spokes from one pad to every pad it
-connects to - just **hover a pad** (or select it) to see its connections; vias are
-not shown as spokes in this mode.
-
-**Hide traces.** The **Hide traces** button hides every drawn trace (and makes them
-non-selectable) so you can read the bare photo, pads and vias. Click again to restore.
-
-**Sticky notes.** The **Note** tool (📝) drops annotations on the board; the text
-only appears on hover, so notes never obstruct the view. Select a note to edit its
-text and colour in the Inspector; drag its marker to move it. Notes are saved with
-the project.
-
-**Hosted image layers (`+ URL`).** Load a photo live from a web address instead of a
-file. Only the *link* is stored (never the bytes), so a hosted layer re-fetches on
-open and **vanishes if the link dies** - a warning says as much, and hosted layers
-are flagged with 🔗 in the layer list. For anything important, download the image and
-add it as a file. The loader tries CORS first, then a plain load, so it still shows on
-servers without CORS headers.
-
-**Gigapixel photos (LOD tiling).** Very large uploaded scans are automatically built
-into a level-of-detail tile pyramid: only the visible tiles are drawn, at a resolution
-matched to the zoom, so huge images pan and zoom smoothly and even render at all (a
-single texture over ~16k px would otherwise blank out). Nothing to configure.
-
-**Trace current estimate.** Selecting a trace shows its width in **mm and mil** (edit
-either box) plus an IPC-2221 current estimate from the width, length and copper weight.
-Copper weight is set per **outer** and **inner** layer in Options (inner is usually
-0.5 oz).
-
-**Shorts check.** The **Check** report now also lists **shorts** - two traces of
-*different* nets touching on the same side (a stray anchor on the wrong centerline, or
-an overlap). Each one jumps to the marked contact point on the board.
-
-**Smaller conveniences.** A merge of two *small* nets shows a brief self-dismissing
-notice (no OK button); the big-merge confirmation still guards large nets. `Shift`+`D`
-switches the shown photo to the side you're now drawing on; the **^** key blanks the
-view to no-photo (black). Viewing an X-ray photo layer turns the X-ray overlay on
-automatically (and off again when you leave it, unless you'd enabled it by hand).
-**Options** gained a configurable **autosave interval** (never runs mid-drag; can be
-switched off) and a **non-selected opacity** slider for how far the rest of the board
-fades when a net is focused.
-<img width="1126" height="771" alt="firefox_7J42z4hYx8" src="https://github.com/user-attachments/assets/df5ca5c1-3e36-4308-9b16-3523cea9397f" />
-
-**More interaction.** **Right-click** anything for a context menu whose options
-match what's under the cursor - right-clicking a *pad* offers pad actions (set/clear
-net, mark no-connect, change pad type) and never deletes the whole component, while
-the component body offers duplicate / rotate / flip / lock / delete. Each net has a
-**colour picker** in the Nets list (GND defaults to black, power rails to red, and
-dark colours get a light outline so they stay visible). Selecting or hovering a net
-**dims everything else** so it stands out; double-click a pad/via/trace to open the
-net popup and press **1-9** to instantly pick a common net (GND, VCC, …). Vias and
-PTHs always draw on top of pads so they stay visible. The **X-ray** toggle (a knob
-next to *Mask*, shown only once a layer's side is set to *X-ray*) overlays components
-and traces from *both* sides at once over an uploaded X-ray image; it is independent
-of *Draw on*, so drawing still targets the copper side you have selected.
-
-**Nets & protection.** Power nets (GND, VCC, VDD, VSS, +3V3, +5V…) are *protected
-prefabs* (🛡): they can't be renamed and never get silently merged into a signal
-net by an accidental crossing - you'll get a warning instead. Renaming a net only
-affects the copper actually wired to the object you edit (connectivity is
-re-derived), so two unconnected nets that happen to share a name stay independent;
-renaming a pin's net follows through to its connected traces. Shift-click pads to
-multi-select and assign one net to all of them at once.
-
-**History.** The 🕒 **Undo timeline** lets you revert a single past action without
-undoing everything after it - it restores only the objects that action touched.
-Length defaults to 25, adjustable in Options. Standard `Ctrl+Z`/`Ctrl+Y` still work;
-`Ctrl+D` duplicates the selected component with the next free reference.
-
-**Editing.** Double-click a component for a quick Reference + Value popup (Value
-auto-resolves SMD codes). Inspector fields commit as you type - no Enter needed.
-Components have independent **move** and **edit** locks. Moving a component warns
-you (once the move ends) if a pad now overlaps copper of a different net, offering
-to merge or undo - this check is toggleable in Options. Vias can't stack on each
-other but may sit inside pads (the via wins when you click an overlapping spot);
-components can't stack either.
-
-**More tools & display.** Traces only auto-join on a real crossing or shared
-junction - parallel traces running close together are never merged, and a genuine
-overlap asks before connecting. Select a trace to get **drag handles** on every
-vertex; **shift-click** a trace selects its whole net, **ctrl-click** builds a
-multi-segment selection. The **Check** button (Nets panel) lists pads with no net
-and pin/trace net mismatches (with one-click reconcile); mark a pin **NC** in the
-inspector to exclude it. Clicking a net in the list flashes it 3× on the board.
-The footprint preview shows a 1 mm grid; the selector remembers your last category,
-parameters and value; far-side parts show only through-hole pads and vias. Options
-also controls reference-label size and undo-history length (default 25). The ⊕
-button next to any net field generates a fresh unique net name. The whole session
-autosaves in the background without the periodic hitch (images are stored once,
-not re-encoded every tick). The **undo timeline persists** too, the top-right
-shows when it last saved ("saved 2m ago"), and reopening the page shows a brief
-"loading saved session" splash while it restores. The **coverage mask** now
-clears each part's actual footprint outline plus a small halo (so a wide IDC
-connector no longer wipes the whole board). Double-clicking a via (or pad/trace)
-opens a net-name popup with quick-select buttons for GND/VCC/… and existing nets;
-placing vias reuses the last via's net for stitching (Shift-click for a fresh
-one). Radial caps can be **round or square (foil)** with a proper body outline.
-Joining two large nets (each >3 pads) asks for confirmation - toggle in Options.
-
-**Sides, selection & units.** Component visibility follows the **active side**
-(the layer/draw-side you're working): the far side shows only its through-hole
-pads and vias, so a front SMD part doesn't bleed through when you're on the back.
-Components are selected by their **actual outline** (body + pads), not a bounding
-circle, so a wide connector is only grabbable on its body. Vias and **PTH**
-(plated through holes, Alt-click with the via tool) are distinct primitives with
-their own size; the via inspector switches between them. Values **auto-resolve**
-SMD codes as you type (103→10k, 01C→10k) while R/k/M notation like 220R stays
-literal - no apply click. Trace anchors drag freely (no snap). The "connect two
-nets" prompt's *No* now abandons the trace instead of connecting it. Measurements,
-the position readout and the footprint-preview grid can switch between **mm and
-mil** in Options. The footprint library gained MELF, SMD electrolytic, SOD/SMA-C
-diodes, screw terminals, JST, MSOP, crystals and mounting holes.
-
-## Files
-
-- `index.html` - app shell, toolbar, dialogs
-- `css/style.css` - dark EDA-style theme
-- `js/state.js` - data model, nets, undo/redo, project save/load
-- `js/footprints/` - parametric footprint library, split by category:
-  `core.js` (registry/generator/renderer) + `passives.js`, `discrete.js`,
-  `connectors.js`, `ics.js`, `misc.js` - each registers its footprints via
-  `Footprints.register(def)`
-- `js/view.js` - canvas renderer, pan/zoom/flip, hit testing, ratsnest, mask
-- `js/imagetiles.js` - level-of-detail tile pyramid for gigapixel image layers
-- `js/tools.js` - select / place / trace / via / align / measure / note tools
-- `js/align.js` - image deskew and 4-point alignment (homography warp)
-- `js/layerstack.js` - exploded pseudo-3D layer-stack viewer
-- `js/keymap.js` - rebindable hotkey system (persisted in localStorage)
-- `js/resolver.js` - resistor value resolver (SMD codes, EIA-96, color bands)
-- `js/netlist.js` - KiCad / CSV / JSON exporters
-- `js/ui.js` - panels, inspector, export & checker dialogs
-- `js/fpdialog.js` - footprint picker dialog
-- `js/autosave.js` - background IndexedDB autosave (project + images + undo)
-- `js/main.js` - event wiring, hotkeys, file I/O, view toggles
+## License ##
+I dont care about licenses really, do whatever you want but dont be an a-hole. 
