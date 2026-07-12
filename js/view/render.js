@@ -290,9 +290,14 @@ function drawWorld(ctx){
     }
   }
 
+  // checker markers fade out over 5s from when the checker last ran (View.checkMarksT0)
+  const _ckNow = (typeof performance !== "undefined" ? performance.now() : Date.now());
+  const _ckAlpha = View.checkMarksT0 ? Math.max(0, 1 - (_ckNow - View.checkMarksT0) / 5000) : 1;
+
   // --- checker markers (pads with no net) ---
-  if (View.checkMarks && View.checkMarks.length){
+  if (_ckAlpha > 0 && View.checkMarks && View.checkMarks.length){
     ctx.save();
+    ctx.globalAlpha = _ckAlpha;
     ctx.strokeStyle = "#ff4dff"; ctx.lineWidth = 2.5/View.zoom;
     const r = 12/View.zoom;
     for (const m of View.checkMarks){
@@ -302,8 +307,9 @@ function drawWorld(ctx){
   }
 
   // --- short markers (different-net traces touching) — red ⚡ ring + cross ---
-  if (View.shortMarks && View.shortMarks.length){
+  if (_ckAlpha > 0 && View.shortMarks && View.shortMarks.length){
     ctx.save();
+    ctx.globalAlpha = _ckAlpha;
     ctx.strokeStyle = "#ff2b2b"; ctx.lineWidth = 3/View.zoom;
     const r = 13/View.zoom;
     for (const m of View.shortMarks){

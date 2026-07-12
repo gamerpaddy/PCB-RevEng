@@ -15,6 +15,7 @@ const View = {
   blinkNet: null,         // net flashing after a net-list click
   blinkOn: false,
   flashMark: null,        // {x,y,t0} transient red locator ring (checker "Go" jump) that fades out over 5s
+  checkMarks: null, shortMarks: null, checkMarksT0: 0, // checker result rings; fade out over 5s from checkMarksT0
   ratsnest: false,        // draw straight "airwire" connections between same-net pads/vias
   ratsnestMode: "mst",    // "mst" = minimum-spanning tree over the whole net · "star" = spokes from the selected pad to every same-net pad/via
   hideTraces: false,      // hide all drawn traces (also makes them non-interactive) to read the bare photo/pads
@@ -61,6 +62,22 @@ function flashMarkAt(x, y){
     const now = (typeof performance !== "undefined" ? performance.now() : Date.now());
     if (!View.flashMark || now - View.flashMark.t0 >= 5000){
       clearInterval(_flashTimer); _flashTimer = null; View.flashMark = null;
+    }
+    requestRender();
+  }, 60);
+}
+
+/* start (or restart) the 5s fade-out of the checker result rings, then remove them */
+let _checkFadeTimer = null;
+function fadeCheckMarks(){
+  if (_checkFadeTimer){ clearInterval(_checkFadeTimer); _checkFadeTimer = null; }
+  View.checkMarksT0 = (typeof performance !== "undefined" ? performance.now() : Date.now());
+  requestRender();
+  _checkFadeTimer = setInterval(() => {
+    const now = (typeof performance !== "undefined" ? performance.now() : Date.now());
+    if (now - View.checkMarksT0 >= 5000){
+      clearInterval(_checkFadeTimer); _checkFadeTimer = null;
+      View.checkMarks = null; View.shortMarks = null;
     }
     requestRender();
   }, 60);

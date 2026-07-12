@@ -390,7 +390,7 @@ UI.openChecker = () => {
   const res = runChecker();
   View.checkMarks = res.unnetted.map(u => u.wp);
   View.shortMarks = (res.shorts || []).map(s => s.pos);
-  requestRender();
+  fadeCheckMarks();   // rings fade out over 5s instead of lingering until the next run
   const box = $("#checker-list");
   const issues = [];   // each row → { wp, comp, pinIdx } for the "Go" button to jump to
   const row = (label, issue) => {

@@ -392,16 +392,29 @@ function schJumpToVisual(c){
   UI.toast(c.ref + " on the board");
 }
 
+/* Re-arranging moves every symbol, so any hand-drawn wires would be left dangling.
+   Warn (if there are wires) and, on confirm, report that the caller should clear them.
+   Returns false if the user backed out. Caller pushes undo, then clears on true. */
+Sch.confirmArrangeClearsWires = () => {
+  const n = State.schWires.length;
+  if (!n) return true;
+  return confirm("Re-arranging will move every symbol, so the " + n + " schematic wire" +
+    (n === 1 ? "" : "s") + " you've drawn will be cleared.\n\nContinue? (undoable)");
+};
+
 /* AI auto-arrange: ask the model where to place each part, then apply + de-overlap */
 Sch.arrangeAI = async () => {
   if (typeof AI === "undefined" || !AI.enabled("arrange")){
     UI.toast("Enable AI schematic auto-arrange in 🔬 Experimental → AI Connect first"); return;
   }
+  const hadWires = State.schWires.length > 0;
+  if (!Sch.confirmArrangeClearsWires()) return;
   (UI.warn || UI.toast)("AI is arranging the schematic… (may take a moment / cost a request) — debug log in 🔬 Experimental → AI Connect");
   try {
     const placements = await AI.arrangeSchematic();
     const byRef = new Map(placements.map(p => [String(p.ref), p]));
     pushUndo("AI arrange schematic");
+    if (hadWires){ State.schWires = []; Sch.selWire = null; }
     let n = 0;
     for (const c of State.components){
       const p = byRef.get(String(c.ref));
@@ -411,7 +424,8 @@ Sch.arrangeAI = async () => {
       schUpdateWiresFor(c); n++;
     }
     Sch.invalidate(); Sch.fit();
-    UI.toast("AI placed " + n + " symbol" + (n===1?"":"s") + " — undoable");
+    UI.toast("AI placed " + n + " symbol" + (n===1?"":"s") +
+      (hadWires ? " — wires cleared" : "") + " — undoable");
   } catch(err){ UI.warn ? UI.warn("AI arrange failed: " + err.message) : UI.toast("AI arrange failed: " + err.message); }
 };
 
@@ -1920,9 +1934,7 @@ Sch.wire = () => {
     // re-arranging moves every part, so any hand-drawn wires would be left dangling —
     // clear them, but warn first so the user can back out (undoable either way).
     const hadWires = State.schWires.length > 0;
-    if (hadWires && !confirm("Re-arranging will move every symbol, so the " + State.schWires.length +
-        " schematic wire" + (State.schWires.length === 1 ? "" : "s") +
-        " you've drawn will be cleared.\n\nContinue? (undoable)")) return;
+    if (!Sch.confirmArrangeClearsWires()) return;
     pushUndo("arrange schematic");
     if (hadWires){ State.schWires = []; Sch.selWire = null; }
     const geo = (Sch.invalidate(), Sch.geo());

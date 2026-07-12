@@ -14,6 +14,7 @@ UI.openQuickEdit = (c) => {
   if (aiRow){
     aiRow.style.display = aiOn ? "flex" : "none";
     if (aiOn && aiStatus) aiStatus.textContent = "";
+    if (aiHint) aiHint.value = "";   // start fresh — the hint is per-part, don't carry it over
     const aiBtn = $("#quick-aifill");
     if (aiOn && aiBtn) aiBtn.onclick = async () => {
       // persist the currently-typed value/part so the model sees them
