@@ -84,6 +84,7 @@ const Sch = {
   wireDraft: null,                 // {points:[{x,y}mm], a:{comp,pin}, preview:[{x,y}]|null}
   axisPref: null,                  // "h"|"v"|null — R while drafting toggles which leg comes first
   selWire: null,                   // selected schematic wire (Delete removes it)
+  selSeg: null,                    // shift-selected single segment {w,i} (Delete removes just that leg)
   selLabel: null,                  // selected manual net label (Delete removes it)
   boxSel: [],                      // box-selected components (schematic-local selection)
   _labelRects: [],                 // manual-label screen rects from the last render (hit test)
@@ -358,6 +359,29 @@ function schJumpToVisual(c){
   UI.jumpToComp(c);
   UI.toast(c.ref + " on the board");
 }
+
+/* AI auto-arrange: ask the model where to place each part, then apply + de-overlap */
+Sch.arrangeAI = async () => {
+  if (typeof AI === "undefined" || !AI.enabled("arrange")){
+    UI.toast("Enable AI schematic auto-arrange in 🔬 Experimental → AI Connect first"); return;
+  }
+  UI.toast("AI is arranging the schematic… (may take a moment / cost a request)");
+  try {
+    const placements = await AI.arrangeSchematic();
+    const byRef = new Map(placements.map(p => [String(p.ref), p]));
+    pushUndo("AI arrange schematic");
+    let n = 0;
+    for (const c of State.components){
+      const p = byRef.get(String(c.ref));
+      if (!p || typeof p.x !== "number" || typeof p.y !== "number") continue;
+      c.schX = schSnap(p.x); c.schY = schSnap(p.y);
+      if (typeof p.rot === "number") c.schRot = ((Math.round(p.rot/90)*90) % 360 + 360) % 360;
+      schUpdateWiresFor(c); n++;
+    }
+    Sch.invalidate(); Sch.fit();
+    UI.toast("AI placed " + n + " symbol" + (n===1?"":"s") + " — undoable");
+  } catch(err){ UI.warn ? UI.warn("AI arrange failed: " + err.message) : UI.toast("AI arrange failed: " + err.message); }
+};
 
 Sch.fit = () => {
   const geo = Sch.geo();
@@ -690,6 +714,14 @@ function schDrawWires(ctx, conn){
     };
     endDot(pts[0], aOn);
     endDot(pts[pts.length-1], bOn);
+    // shift-selected single segment → highlight it (Delete removes just this leg)
+    if (Sch.selSeg && Sch.selSeg.w === w && pts[Sch.selSeg.i + 1]){
+      const a = pts[Sch.selSeg.i], b = pts[Sch.selSeg.i + 1];
+      ctx.strokeStyle = "#ff9d3d"; ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(schX2S(a.x), schY2S(a.y)); ctx.lineTo(schX2S(b.x), schY2S(b.y));
+      ctx.stroke();
+    }
   }
 }
 
@@ -1047,10 +1079,19 @@ Sch.hit = (mx, my) => {
     const g = geo.get(c.id);
     if (!g || typeof c.schX !== "number") continue;
     const { hw, hh } = schHalfExt(c, g);
-    if (Math.abs(mx - c.schX) <= hw + 3 && Math.abs(my - c.schY) <= hh + 3) return c;
+    if (Math.abs(mx - c.schX) <= hw + 1 && Math.abs(my - c.schY) <= hh + 1) return c;
   }
   return null;
 };
+
+/* true when (mx,my) mm lands on a component's actual body (no margin) — used to let a
+   wire routed under a part's bounding box still be picked when clicking off the body */
+function schPtInBody(c, mx, my){
+  const g = Sch.geo().get(c.id);
+  if (!g) return false;
+  const { hw, hh } = schHalfExt(c, g);
+  return Math.abs(mx - c.schX) <= hw && Math.abs(my - c.schY) <= hh;
+}
 
 /* rotate a symbol 90° CCW (R key) — wires anchored to its pins follow */
 Sch.rotate = (c) => {
@@ -1112,6 +1153,24 @@ Sch.addLabel = (comp, pin) => {
   return lab;
 };
 
+/* delete a single wire segment (shift-selected): splits the polyline into the run
+   before the cut and the run after it, dropping any piece too short to survive */
+Sch.deleteSegment = (seg) => {
+  const w = seg.w, i = seg.i;
+  if (!w || !w.points || i + 1 >= w.points.length) return;
+  pushUndo("delete wire segment");
+  const pts = w.points;
+  const before = pts.slice(0, i + 1);      // keeps w.a
+  const after  = pts.slice(i + 1);         // keeps w.b
+  State.schWires = State.schWires.filter(x => x !== w);
+  if (before.length >= 2)
+    State.schWires.push({ id: nextId(), netId: w.netId, points: before, a: w.a || null, b: null });
+  if (after.length >= 2)
+    State.schWires.push({ id: nextId(), netId: w.netId, points: after, a: null, b: w.b || null });
+  Sch.selSeg = null; Sch.selWire = null;
+  Sch.render();
+};
+
 Sch.deleteLabel = (lab) => {
   if (!lab) return;
   pushUndo("delete net label");
@@ -1132,6 +1191,23 @@ Sch.editLabel = (lab) => {
   });
 };
 
+/* collapse consecutive collinear points in a polyline so a straight run is ONE
+   segment (dragged as a whole, not split into pieces) — and drop zero-length steps */
+function schCleanPoints(pts){
+  const eps = 0.001;
+  const out = pts.filter((p, i) => !i || Math.abs(p.x - pts[i-1].x) > eps || Math.abs(p.y - pts[i-1].y) > eps);
+  for (let i = 1; i + 1 < out.length; ){
+    const a = out[i-1], b = out[i], c = out[i+1];
+    const abH = Math.abs(a.y - b.y) < eps, bcH = Math.abs(b.y - c.y) < eps;
+    const abV = Math.abs(a.x - b.x) < eps, bcV = Math.abs(b.x - c.x) < eps;
+    if ((abH && bcH && Math.abs(a.y - c.y) < eps) || (abV && bcV && Math.abs(a.x - c.x) < eps))
+      out.splice(i, 1);          // b lies on the a-c straight → drop it
+    else i++;
+  }
+  return out;
+}
+Sch.cleanWire = (w) => { if (w && w.points) w.points = schCleanPoints(w.points); };
+
 /* finish the wire draft → a persisted State.schWires entry */
 Sch.finishWire = (endAnchor) => {
   const d = Sch.wireDraft;
@@ -1139,7 +1215,7 @@ Sch.finishWire = (endAnchor) => {
   if (!d || d.points.length < 2){ Sch.render(); return; }
   const na = schNetOfAnchor(d.a), nb = schNetOfAnchor(endAnchor);
   pushUndo("draw schematic wire");
-  State.schWires.push({ id: nextId(), netId: na || nb || d.netId || null, points: d.points, a: d.a, b: endAnchor || null });
+  State.schWires.push({ id: nextId(), netId: na || nb || d.netId || null, points: schCleanPoints(d.points), a: d.a, b: endAnchor || null });
   Sch.render();
 };
 
@@ -1240,19 +1316,36 @@ Sch.onMove = (p, e) => {
         pushUndo("move wire segment");
         d.armed = true;
         // pin a copy of an endpoint in place when it can't shift with the segment —
-        // an anchored wire end (stays on its pin) or a COLLINEAR neighbouring segment
-        // (shifting the shared corner would turn it diagonal); the copy becomes a 90° jog
-        if ((d.i === 0 && d.w.a) || (d.i > 0 && schSegDir(pts[d.i-1], pts[d.i]) === dir)){
+        // an anchored wire end (stays on its pin), a COLLINEAR neighbouring segment
+        // (shifting the shared corner would turn it diagonal), OR a free end sitting on
+        // ANOTHER wire (a T junction — keep it landed so the connection survives); the
+        // copy becomes a 90° jog, i.e. a new horizontal/vertical bridge wire in place
+        const others = State.schWires.filter(x => x !== d.w);
+        const startJct = d.i === 0 && !d.w.a && !!schWireOnPoint(pts[0], d.w, others);
+        if ((d.i === 0 && d.w.a) || startJct || (d.i > 0 && schSegDir(pts[d.i-1], pts[d.i]) === dir)){
           pts.splice(d.i, 0, { x: pts[d.i].x, y: pts[d.i].y });
           d.i++;
         }
         const j = d.i + 1;
-        if ((j === pts.length - 1 && d.w.b) || (j < pts.length - 1 && schSegDir(pts[j], pts[j+1]) === dir))
+        const endJct = j === pts.length - 1 && !d.w.b && !!schWireOnPoint(pts[pts.length-1], d.w, others);
+        if ((j === pts.length - 1 && d.w.b) || endJct || (j < pts.length - 1 && schSegDir(pts[j], pts[j+1]) === dir))
           pts.splice(j + 1, 0, { x: pts[j].x, y: pts[j].y });
       }
       const A = pts[d.i], B = pts[d.i+1];
-      if (dir === "h"){ const y = schSnap(my); A.y = y; B.y = y; }
-      else            { const x = schSnap(mx); A.x = x; B.x = x; }
+      // prospective new position, then reject it if the segment would lie ON TOP of any
+      // other wire (crossings are fine — only collinear overlap is blocked)
+      const nA = { x: A.x, y: A.y }, nB = { x: B.x, y: B.y };
+      if (dir === "h"){ const y = schSnap(my); nA.y = y; nB.y = y; }
+      else            { const x = schSnap(mx); nA.x = x; nB.x = x; }
+      let overlaps = false;
+      for (const ow of State.schWires){
+        if (ow === d.w) continue;
+        for (let k = 0; k + 1 < ow.points.length && !overlaps; k++)
+          if (schSegOverlapLen(nA, nB, ow.points[k], ow.points[k+1]) > 0.05) overlaps = true;
+        if (overlaps) break;
+      }
+      if (overlaps) return;                 // keep the segment where it was
+      A.x = nA.x; A.y = nA.y; B.x = nB.x; B.y = nB.y;
       d.moved = true;
       Sch.render();
       return;
@@ -1444,15 +1537,20 @@ Sch.wire = () => {
     }
     if (Sch.selLabel){ Sch.selLabel = null; Sch.render(); }
 
+    // wire under the cursor? a wire only loses to a part when the click is over the
+    // part's actual BODY — so wires routed under a symbol's bounding-box margin stay
+    // selectable. Shift-click selects just this segment (to delete a single leg).
+    const ws = schWireSegHit(p.x, p.y);
     const c = Sch.hit(mx, my);
-    if (c){
+    const wireWins = ws && (!c || !schPtInBody(c, mx, my));
+    if (c && !wireWins){
       if (Sch.boxSel.includes(c)){
         Sch.drag = { kind: "group", group: Sch.boxSel.map(g => ({ c: g, dx: mx - g.schX, dy: my - g.schY })), armed: false, moved: false, clickComp: c, shift: e.shiftKey };
       } else {
         // select the grabbed part right away so the previously-selected object doesn't
         // stay highlighted while this one is being dragged
         Sch.boxSel = [];
-        Sch.selWire = null; Sch.selLabel = null;
+        Sch.selWire = null; Sch.selLabel = null; Sch.selSeg = null;
         if (!(UI.sel && UI.sel.type === "comp" && UI.sel.comp === c)) UI.select({ type: "comp", comp: c });
         Sch.drag = { kind: "comp", comp: c, dx: mx - c.schX, dy: my - c.schY, armed: false, moved: false, clickComp: c, shift: e.shiftKey };
         Sch.render();
@@ -1461,15 +1559,17 @@ Sch.wire = () => {
     }
     // wire under the cursor? select it (Delete removes) and grab the SEGMENT so a
     // drag slides it perpendicular (horizontal segments move up/down, vertical ones
-    // left/right); anchored ends stay pinned via an inserted corner
-    const ws = schWireSegHit(p.x, p.y);
+    // left/right); anchored ends stay pinned via an inserted corner. Shift-click marks
+    // ONLY the clicked segment (Delete then removes that leg, splitting the wire).
     if (ws){
       Sch.selWire = ws.w;
-      Sch.drag = { kind: "wireseg", w: ws.w, i: ws.i, armed: false, moved: false };
+      Sch.selSeg = e.shiftKey ? { w: ws.w, i: ws.i } : null;
+      Sch.drag = e.shiftKey ? null : { kind: "wireseg", w: ws.w, i: ws.i, armed: false, moved: false };
+      UI.select(null);
       Sch.render();
       return;
     }
-    if (Sch.selWire){ Sch.selWire = null; }
+    if (Sch.selWire || Sch.selSeg){ Sch.selWire = null; Sch.selSeg = null; }
     // empty space: box select (left-drag pan is gone — pan with wheel-click / Space)
     Sch.boxSel = [];
     UI.select(null);
@@ -1512,9 +1612,9 @@ Sch.wire = () => {
     if (d.kind === "wireseg"){
       if (!d.moved && d.armed) cancelUndo();
       if (d.moved){
-        // drop zero-length segments a move may have collapsed (keeps the polyline clean)
-        const pts = d.w.points;
-        d.w.points = pts.filter((p, i) => !i || Math.abs(p.x - pts[i-1].x) > 0.001 || Math.abs(p.y - pts[i-1].y) > 0.001);
+        // drop zero-length + collinear points a move may have collapsed (keeps it clean,
+        // and re-merges a leg dragged back into line with its neighbour into one segment)
+        d.w.points = schCleanPoints(d.w.points);
       }
       Sch.render();
       return;
@@ -1620,11 +1720,12 @@ Sch.wire = () => {
         : "Wire mode off");
     } else if (k === "Escape"){
       if (Sch.mode === "wire"){ Sch.wireDraft = null; Sch.setMode("select"); UI.toast("Wire mode off"); }
-      else if (Sch.selWire || Sch.selLabel){ Sch.selWire = null; Sch.selLabel = null; Sch.render(); }
+      else if (Sch.selWire || Sch.selLabel || Sch.selSeg){ Sch.selWire = null; Sch.selLabel = null; Sch.selSeg = null; Sch.render(); }
       else if (Sch.boxSel.length){ Sch.boxSel = []; Sch.render(); }
       else return;   // let the global Esc (deselect) run
     } else if (k === "Delete"){
       if (Sch.selLabel){ Sch.deleteLabel(Sch.selLabel); }
+      else if (Sch.selSeg){ Sch.deleteSegment(Sch.selSeg); }
       else if (Sch.selWire){
         pushUndo("delete schematic wire");
         State.schWires = State.schWires.filter(w => w !== Sch.selWire);
@@ -1647,8 +1748,9 @@ Sch.wire = () => {
     e.stopImmediatePropagation();
   }, true);
 
-  $("#sch-arrange-go").addEventListener("click", () => {
+  $("#sch-arrange-go").addEventListener("click", async () => {
     const mode = $("#sch-arrange").value;
+    if (mode === "ai"){ Sch.arrangeAI(); return; }
     pushUndo("arrange schematic");
     const geo = (Sch.invalidate(), Sch.geo());
     const pos = schArrange(mode, geo);

@@ -48,6 +48,14 @@ function componentDown(w, e){
   };
   // a concrete symbol pick fills in its standard pin names
   if (comp.symOverride && comp.symOverride !== "box") applySymPinNames(comp, comp.symOverride);
+  // a pasted copy carries the source part's pin names + nets (matched by pin number)
+  if (p.pinData){
+    const byNum = new Map(p.pinData.map(pd => [String(pd.num), pd]));
+    for (const cp of comp.pins){
+      const pd = byNum.get(String(cp.num));
+      if (pd){ if (pd.name) cp.name = pd.name; if (pd.netId != null) cp.netId = pd.netId; }
+    }
+  }
   State.components.push(comp);
   autoConnectPins(comp);   // pins dropped on existing copper inherit its net (e.g. plated mounting hole over a trace)
   p.ref = ""; // subsequent placements auto-number

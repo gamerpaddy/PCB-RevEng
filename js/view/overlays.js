@@ -133,9 +133,11 @@ function renderRatsnest(ctx, selNet){
   ctx.restore();
 }
 
-/* ---------- coverage mask: tint board areas not yet covered by components ---------- */
+/* ---------- coverage mask: REMOVED (Jul 2026) ----------
+   The coverage-mask overlay was dropped; the helper is retained-as-dead only if
+   referenced. All wiring/buttons/keymap removed. */
 let _maskCv = null;
-function renderMask(ctx){
+function renderMask_removed(ctx){
   if (!_maskCv) _maskCv = document.createElement("canvas");
   const mc = _maskCv;
   // only resize when the canvas actually changed — assigning width/height reallocates the

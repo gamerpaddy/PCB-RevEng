@@ -205,6 +205,35 @@ function buildFpParams(){
     imp.title = "Import KiCad footprint files — they are retained in this browser and searchable in quick-add as custom:<name>";
     imp.addEventListener("click", () => $("#file-customfp").click());
     grp.appendChild(imp);
+    // AI footprint maker (experimental) — describe a part, get a generated .kicad_mod
+    if (typeof AI !== "undefined" && AI.enabled("footprint")){
+      const aiBox = document.createElement("div");
+      aiBox.className = "fp-custom-row";
+      aiBox.style.cssText = "flex-direction:column;align-items:stretch;gap:4px;margin:6px 0;padding:6px;border:1px solid #3a2f22;border-radius:5px";
+      const lbl = document.createElement("div");
+      lbl.className = "panel-hint"; lbl.style.color = "#e0a94a";
+      lbl.textContent = "🤖 AI footprint maker (very experimental) — describe the part:";
+      const ta = document.createElement("input");
+      ta.type = "text"; ta.placeholder = "e.g. USB-C SMD 629722000214";
+      ta.style.cssText = "width:100%;box-sizing:border-box";
+      const go = document.createElement("button");
+      go.type = "button"; go.textContent = "Generate footprint";
+      const st = document.createElement("span"); st.className = "panel-hint";
+      go.addEventListener("click", async () => {
+        const prompt = ta.value.trim();
+        if (!prompt){ st.textContent = "Type a description first"; return; }
+        st.textContent = "Generating…";
+        try {
+          const mod = await AI.makeFootprint(prompt);
+          const nm = (prompt.replace(/[^\w -]+/g, "").trim().slice(0, 40) || "AI part");
+          const entry = CustomFPs.importKicadMod(nm + ".kicad_mod", mod);
+          if (entry){ FPD.params.name = entry.name; st.textContent = "✓ " + entry.name + " (" + entry.pins.length + " pads)"; buildFpParams(); }
+          else st.textContent = "⚠ Generated text had no pads";
+        } catch(err){ st.textContent = "⚠ " + err.message; }
+      });
+      aiBox.appendChild(lbl); aiBox.appendChild(ta); aiBox.appendChild(go); aiBox.appendChild(st);
+      grp.appendChild(aiBox);
+    }
     for (const f of CustomFPs.list()){
       const row = document.createElement("div");
       row.className = "fp-custom-row";

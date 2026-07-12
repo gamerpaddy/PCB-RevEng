@@ -5,8 +5,35 @@
 UI.openQuickEdit = (c) => {
   const dlg = $("#quick-dialog");
   $("#quick-title").textContent = c.ref + " — " + compFootprint(c).label;
-  const refIn = $("#quick-ref"), valIn = $("#quick-value"), hint = $("#quick-resolve");
+  const refIn = $("#quick-ref"), valIn = $("#quick-value"), hint = $("#quick-resolve"), partIn = $("#quick-part");
   refIn.value = c.ref; valIn.value = c.value;
+  if (partIn) partIn.value = c.part || "";
+  // AI Autofill row — only shown when the feature is enabled in 🔬 Experimental
+  const aiRow = $("#quick-ai-row"), aiStatus = $("#quick-aistatus"), aiHint = $("#quick-aihint");
+  const aiOn = typeof AI !== "undefined" && AI.enabled("autofill");
+  if (aiRow){
+    aiRow.style.display = aiOn ? "flex" : "none";
+    if (aiOn && aiStatus) aiStatus.textContent = "";
+    const aiBtn = $("#quick-aifill");
+    if (aiOn && aiBtn) aiBtn.onclick = async () => {
+      // persist the currently-typed value/part so the model sees them
+      c.value = valIn.value.trim(); c.part = partIn ? partIn.value.trim() : (c.part || "");
+      aiStatus.textContent = "Asking the model…";
+      try {
+        const data = await AI.autofillPart(c, aiHint ? aiHint.value.trim() : "");
+        pushUndo("AI autofill " + c.ref);
+        if (Array.isArray(data.pins)){
+          const byNum = new Map(data.pins.map(p => [String(p.num), p.name]));
+          for (const cp of c.pins){ const nm = byNum.get(String(cp.num)); if (nm) cp.name = String(nm); }
+        }
+        if (data.device) c.aiDevice = data.device;
+        if (data.notes){ c.bom = c.bom || {}; c.bom.AI = data.notes; }
+        c._fp = null;
+        UI.refreshInspector(); requestRender();
+        aiStatus.textContent = "✓ " + (data.device || "filled") + " — " + (Array.isArray(data.pins) ? data.pins.length : 0) + " pin names";
+      } catch(err){ aiStatus.textContent = "⚠ " + err.message; }
+    };
+  }
   // resolving an SMD code (103 → 10k) is resistor-only, keyed off the (possibly edited) ref
   const resolveVal = () => isResistorRef(refIn.value.trim() || c.ref) ? autoResolveValue(valIn.value) : valIn.value.trim();
   const updateHint = ()=>{
@@ -21,6 +48,7 @@ UI.openQuickEdit = (c) => {
     if (compEditLocked(c)){ UI.toast(c.ref + " is edit-locked"); return; }
     pushUndo("quick edit " + c.ref);
     c.value = resolveVal(); // auto-fill on OK (no apply click)
+    if (partIn) c.part = partIn.value.trim();
     UI.refreshInspector(); requestRender();
     if (refIn.value.trim()) UI.commitRename(c, refIn.value, true); // may prompt on a duplicate ref
   };
@@ -62,7 +90,6 @@ UI.buildHelp = () => {
       ["Mouse wheel","Zoom at cursor"],["Space + drag / middle drag","Pan"],
       ["Arrow keys","Pan the view (Shift = half a screen per press)"],
       [k("view.flip"),"Flip view (look from back)"],["Home / " + k("view.fit"),"Zoom to fit"],
-      [k("view.mask"),"Coverage mask — tint areas without components"],
       ["1 … 9, 0","Switch view to image layer 1–10 (or toggle visibility — see Board/display panel)"],
       [k("view.split"),"Split view — Front/Back side by side; 1…0 set the LEFT view's layer, Shift+1…0 the RIGHT"],
     ]],

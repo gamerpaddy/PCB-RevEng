@@ -414,7 +414,7 @@ function duplicateSelection(){
   const copy = JSON.parse(JSON.stringify({...c, _fp:undefined}));
   copy.id = nextId(); copy.ref = ref;
   copy.x += 30/View.zoom; copy.y += 30/View.zoom;
-  copy.pins.forEach(p => p.netId = null);
+  // pin names + nets are inherited from the source part (deep-copied above)
   copy.lockMove = copy.lockEdit = false; delete copy.locked;
   delete copy._fp;
   State.components.push(copy);
@@ -426,8 +426,8 @@ function duplicateSelection(){
 /* ---------- clipboard (Ctrl+C / Ctrl+V) ----------
    Copies the selected component; paste arms the component tool with a copy, so the
    ghost sticks to the cursor and a click places it — the exact mechanics of placing
-   a new part (R rotates, B flips side, edge auto-scroll, Esc cancels). Nets are not
-   copied (same as Duplicate). */
+   a new part (R rotates, B flips side, edge auto-scroll, Esc cancels). Pin names AND
+   nets are carried onto the copy. */
 function copySelection(){
   // hard guard: copy/paste exist only in the Visual editor, never in Schematic/BOM
   if (typeof EditorTabs !== "undefined" && EditorTabs.current !== "visual") return;
@@ -439,6 +439,7 @@ function copySelection(){
     symOverride: c.symOverride || null,
     rot: c.rot || 0, side: c.side,
     refPrefix: (/^([A-Za-z]+)/.exec(c.ref) || [,"U"])[1],
+    pins: c.pins.map(p => ({ num:p.num, name:p.name||"", netId:p.netId||null })),
   };
   UI.toast("Copied " + c.ref + " — Ctrl+V to place a copy");
 }
@@ -451,6 +452,7 @@ function pasteClipboard(){
     fpId: cb.fpId, fpParams: JSON.parse(JSON.stringify(cb.fpParams)),
     ref: "", value: cb.value, part: cb.part, kicad: cb.kicad,
     symOverride: cb.symOverride, refPrefix: cb.refPrefix,
+    pinData: cb.pins || null,
   };
   Tools.ghostFp = generateFootprint(cb.fpId, Tools.pending.fpParams);
   Tools.ghostRot = cb.rot;

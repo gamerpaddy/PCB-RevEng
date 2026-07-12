@@ -51,7 +51,6 @@ function wireToolbar(){
     b.addEventListener("click", () => setTool(b.dataset.tool)));
 
   $("#btn-flip").addEventListener("click", toggleFlip);
-  $("#btn-mask").addEventListener("click", toggleMask);
   $("#btn-options").addEventListener("click", ()=>{ syncSettings(); $("#options-dialog").showModal(); });
   $("#btn-undo").addEventListener("click", ()=>{ if (undo()) afterHistory(); });
   $("#btn-redo").addEventListener("click", ()=>{ if (redo()) afterHistory(); });
@@ -120,7 +119,10 @@ function wireButtonHotkeys(){
 }
 
 function toggleFlip(){
-  // keep the world point at screen centre fixed
+  // keep the world point at screen centre fixed. Clear any stale pane offset first —
+  // in split mode _paneDX still holds the last-drawn pane's shift, which would otherwise
+  // leak into the screen<->world round-trip and drift the view sideways on every flip.
+  View._paneDX = 0;
   const c = screenToWorld(View.width/2, View.height/2);
   View.flip = !View.flip;
   const s = worldToScreen(c.x, c.y);
@@ -128,13 +130,6 @@ function toggleFlip(){
   $("#btn-flip").classList.toggle("active", View.flip);
   UI.setStatusPos(c);
   UI.toast(View.flip ? "Viewing board from the BACK" : "Viewing board from the FRONT");
-  requestRender();
-}
-
-function toggleMask(){
-  View.mask = !View.mask;
-  $("#btn-mask").classList.toggle("active", View.mask);
-  UI.toast(View.mask ? "Coverage mask ON — red tint = no components placed there yet" : "Coverage mask off");
   requestRender();
 }
 
@@ -617,7 +612,6 @@ function showCanvasContextMenu(cx, cy, w){
   } else {
     items.push({ label:"Add note here…", action:()=>{ noteDown(w, {}); } });
     items.push({ label:"Place component here…", action:()=>{ Tools.pending=null; setTool("component"); } });
-    if (View.mask !== undefined) items.push({ label: View.mask?"Hide coverage mask":"Show coverage mask", action:()=>toggleMask() });
   }
   if (items.length) UI.showContextMenu(cx, cy, items);
 }

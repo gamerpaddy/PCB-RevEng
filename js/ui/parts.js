@@ -44,7 +44,14 @@ UI.refreshParts = () => {
     item.innerHTML = `<span class="pref">${escAttr(c.ref)}${isDup ? ' <span class="dup-badge" title="Duplicate reference">dup</span>' : ''}</span>
       <span class="pval">${escAttr(c.value || "")}</span>
       <span class="pside">${c.side==="back" ? "B" : "F"}</span>`;
-    item.addEventListener("click", () => UI.jumpToComp(c));
+    item.addEventListener("click", () => {
+      // in the schematic tab, jump + zoom + pan to the symbol instead of the board
+      if (typeof EditorTabs !== "undefined" && EditorTabs.current === "schematic" &&
+          typeof Sch !== "undefined" && typeof c.schX === "number"){
+        const dlg = $("#parts-dialog"); if (dlg && dlg.open) dlg.close();
+        Sch.focusComp(c);
+      } else UI.jumpToComp(c);
+    });
     list.appendChild(item);
   }
   if (q && !shown && total){
@@ -78,17 +85,19 @@ UI.refreshPartsNets = () => {
     if (!members || !members.length) continue;
     const refs = [...new Set(members.map(m => m.ref))];
     if (q && !(n.name.toLowerCase().includes(q) || refs.some(r => (r||"").toLowerCase().includes(q)))) continue;
-    rows.push({ net: n, refs, pins: members.length });
+    // one token per pin on the net: REF(pinName else pinNum) — e.g. U1(A5), R1(2)
+    const nodes = members.map(m => (m.ref || "?") + "(" + (m.pinName || m.pin || "?") + ")");
+    rows.push({ net: n, refs, nodes, pins: members.length });
   }
   rows.sort((a,b) => a.net.name.localeCompare(b.net.name, undefined, { numeric:true, sensitivity:"base" }));
   for (const r of rows){
     const item = document.createElement("div");
     item.className = "part-item" + (UI.activeNetId === r.net.id ? " active" : "");
-    const refList = r.refs.slice(0, 8).join(", ") + (r.refs.length > 8 ? " +" + (r.refs.length - 8) : "");
+    const refList = r.nodes.slice(0, 8).join(", ") + (r.nodes.length > 8 ? " +" + (r.nodes.length - 8) : "");
     item.innerHTML = `<span class="pref">${escAttr(r.net.name)}</span>
       <span class="pval">${escAttr(refList)}</span>
       <span class="pside">${r.pins}p</span>`;
-    item.title = r.refs.join(", ");
+    item.title = r.nodes.join(", ");
     item.addEventListener("click", () => UI.jumpToNet(r.net.id));
     list.appendChild(item);
   }

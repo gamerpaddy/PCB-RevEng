@@ -32,7 +32,6 @@ const KeyActions = [
   { id:"edit.lock",      label:"Move-lock / unlock component",  def:"L",      run:()=>toggleLockSelection() },
   { id:"edit.padsize",   label:"Edit selected pad size/pos (drag)", def:"",   run:()=>{ if (UI.sel && UI.sel.type==="pin") enterPadEdit(UI.sel.comp, UI.sel.pinIdx); else UI.toast("Select a pad first"); } },
   { id:"edit.delete",    label:"Delete selection",              def:"Delete", run:()=>deleteSelection() },
-  { id:"view.mask",      label:"Toggle coverage mask",          def:"H",      btn:"#btn-mask",       run:()=>toggleMask() },
   { id:"view.hidetraces",label:"Toggle hide traces",            def:"",       btn:"#tgl-hidetraces", run:()=>toggleHideTraces() },
   { id:"view.hidevias",  label:"Toggle hide vias",              def:"",       btn:"#tgl-hidevias",   run:()=>toggleHideVias() },
   { id:"view.hidelabels",label:"Toggle hide labels",            def:"",       btn:"#tgl-hidelabels", run:()=>toggleHideLabels() },

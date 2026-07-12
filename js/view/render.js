@@ -206,9 +206,6 @@ function drawWorld(ctx){
     ctx.restore();
   }
 
-  // coverage mask (red tint = no component placed there yet)
-  if (View.mask) renderMask(ctx);
-
   const selNet = currentHighlightNet();
 
   // --- traces ---

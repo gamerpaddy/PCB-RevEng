@@ -53,7 +53,6 @@
         <option value="inner2">Inner 2</option>
       </select>
       <button id="btn-flip" title="Flip board view (look from the back)  [F]">Flip view</button>
-      <button id="btn-mask" title="Coverage mask — tints board areas without components  [H]">Mask</button>
       <button id="btn-xray" title="X-ray overlay — show components &amp; traces from BOTH sides at once. Inactive-side copper is dimmed; if an X-ray image layer exists it is shown too. Drawing stays on the selected side.">X-ray</button>
       <button id="btn-split" title="Split view  [Y]  — Front (left) and Back (right) side by side, sharing one camera. The same board area lines up in both halves so you can correlate features across sides. Draw/select in either half.">Split</button>
       <button id="btn-ratsnest" title="Ratsnest airwires (click to cycle). Net: minimum-spanning tree over every same-net pad/via across all layers — hover/select a net to isolate it. Star: spokes from the selected pad/via to every pad it connects to.">Ratsnest</button>
@@ -145,6 +144,7 @@
         <option value="pcb">Same as PCB — keep board positions</option>
         <option value="closest">Closest — group by net distance</option>
         <option value="opt">Optimized — nets closest, no overlap</option>
+        <option value="ai">🤖 AI (experimental — enable in 🔬)</option>
       </select>
       <button id="sch-arrange-go" title="Re-place every symbol with the chosen auto-arrangement (undoable)">Apply</button>
       <button id="sch-fit" title="Zoom to fit all symbols">Fit</button>
@@ -457,6 +457,45 @@
       <div class="dlg-row" style="margin-top:8px"><button id="lab-clear-go" class="danger">Remove ticked</button></div>
     </div>
 
+    <div style="border:1px solid #3a2f22;border-radius:6px;padding:10px;margin-bottom:10px;background:rgba(60,40,10,0.12)">
+      <label style="display:flex;align-items:center;gap:8px;font-weight:600">&#129302; AI Connect</label>
+      <div class="panel-hint" style="margin:6px 0 8px;color:#e0a94a">
+        ⚠ AI features can produce <b>garbage / wrong results</b> and every request <b>may incur unpredictable cost</b>.
+        Set spend limits in your provider dashboard (OpenRouter/OpenAI usage caps etc.) before use. Your API key is stored
+        only in this browser (localStorage) and is <b>never written into project save files</b>, so sharing a saved board never leaks it.
+      </div>
+      <div class="dlg-row" style="gap:6px">
+        <label style="width:110px">Provider</label>
+        <select id="ai-provider" style="flex:1">
+          <option value="anthropic">Anthropic (Claude)</option>
+          <option value="openai">OpenAI</option>
+          <option value="openrouter">OpenRouter</option>
+          <option value="gemini">Google Gemini</option>
+          <option value="local">Local / custom (OpenAI-compatible)</option>
+        </select>
+      </div>
+      <div class="dlg-row" style="gap:6px;margin-top:6px">
+        <label style="width:110px">API key</label>
+        <input type="password" id="ai-key" placeholder="sk-… (stored locally only)" style="flex:1" autocomplete="off">
+      </div>
+      <div class="dlg-row" style="gap:6px;margin-top:6px" id="ai-baseurl-row">
+        <label style="width:110px">Base URL</label>
+        <input type="text" id="ai-baseurl" placeholder="http://localhost:1234/v1" style="flex:1">
+      </div>
+      <div class="dlg-row" style="gap:6px;margin-top:6px">
+        <label style="width:110px">Model</label>
+        <select id="ai-model" style="flex:1"><option value="">— pick / refresh —</option></select>
+        <button id="ai-refresh" title="Fetch the models available for this provider + key">Refresh</button>
+      </div>
+      <div class="dlg-row" style="margin-top:6px"><button id="ai-test">Test connection</button><span id="ai-status" class="panel-hint" style="margin-left:8px"></span></div>
+      <div class="panel-hint" style="margin:10px 0 4px;font-weight:600">Enable AI features</div>
+      <div class="dlg-row" style="gap:14px;flex-wrap:wrap">
+        <label style="width:auto"><input type="checkbox" id="ai-en-autofill"> Part / pin autofill</label>
+        <label style="width:auto"><input type="checkbox" id="ai-en-footprint"> Footprint maker</label>
+        <label style="width:auto"><input type="checkbox" id="ai-en-arrange"> Schematic auto-arrange</label>
+      </div>
+    </div>
+
     <div class="dlg-buttons"><button id="lab-close" class="primary">Close</button></div>
   </dialog>
 
@@ -466,6 +505,12 @@
     <div class="dlg-row"><label style="width:80px">Reference</label><input id="quick-ref" style="width:120px"></div>
     <div class="dlg-row"><label style="width:80px">Value</label><input id="quick-value" style="width:120px" placeholder="10k / 01C / 103">
       <span id="quick-resolve" class="res-out" style="cursor:pointer"></span></div>
+    <div class="dlg-row"><label style="width:80px">Part no.</label><input id="quick-part" style="width:120px" placeholder="e.g. BC847 / STM32F103"></div>
+    <div class="dlg-row" id="quick-ai-row" style="display:none;flex-direction:column;align-items:stretch;gap:4px;margin-top:4px">
+      <label style="width:auto">AI hint (extra info — markings, function, anything that helps)</label>
+      <textarea id="quick-aihint" rows="2" style="width:100%;box-sizing:border-box" placeholder="e.g. 6-pin SOT-23, dual diode, marking 'A7'"></textarea>
+      <div class="dlg-row" style="gap:8px"><button id="quick-aifill" title="Ask the AI model to fill pin names + device type + BOM note">&#129302; AI Autofill</button><span id="quick-aistatus" class="panel-hint"></span></div>
+    </div>
     <div class="dlg-buttons">
       <button id="quick-cancel">Cancel</button>
       <button id="quick-ok" class="primary">OK</button>
@@ -661,18 +706,18 @@
 <script src="js/view/core.js?v=90"></script>
 <script src="js/view/geom.js?v=89"></script>
 <script src="js/view/hittest.js?v=93"></script>
-<script src="js/view/render.js?v=99"></script>
+<script src="js/view/render.js?v=100"></script>
 <script src="js/view/draw.js?v=98"></script>
-<script src="js/view/overlays.js?v=89"></script>
+<script src="js/view/overlays.js?v=90"></script>
 <script src="js/layerstack.js?v=55"></script>
 <script src="js/tools/core.js?v=125"></script>
-<script src="js/tools/select.js?v=122"></script>
+<script src="js/tools/select.js?v=123"></script>
 <script src="js/tools/trace.js?v=117"></script>
 <script src="js/tools/via.js?v=116"></script>
 <script src="js/tools/checker.js?v=111"></script>
-<script src="js/tools/ops.js?v=117"></script>
+<script src="js/tools/ops.js?v=118"></script>
 <script src="js/align.js?v=60"></script>
-<script src="js/keymap.js?v=65"></script>
+<script src="js/keymap.js?v=66"></script>
 <script src="js/resolver.js?v=49"></script>
 <script src="js/netlist.js?v=75"></script>
 <script src="js/eagle.js?v=4"></script>
@@ -682,16 +727,17 @@
 <script src="js/ui/core.js?v=106"></script>
 <script src="js/ui/layers.js?v=105"></script>
 <script src="js/ui/nets.js?v=105"></script>
-<script src="js/ui/parts.js?v=104"></script>
-<script src="js/ui/inspector.js?v=112"></script>
+<script src="js/ui/parts.js?v=105"></script>
+<script src="js/ui/inspector.js?v=113"></script>
 <script src="js/ui/dialogs.js?v=108"></script>
-<script src="js/ui/misc.js?v=109"></script>
+<script src="js/ui/misc.js?v=110"></script>
 <script src="js/kicadsearch.js?v=51"></script>
-<script src="js/fpdialog.js?v=59"></script>
+<script src="js/fpdialog.js?v=60"></script>
 <script src="js/quickadd.js?v=15"></script>
-<script src="js/schematic.js?v=11"></script>
+<script src="js/schematic.js?v=12"></script>
+<script src="js/ai.js?v=1"></script>
 <script src="js/autosave.js?v=53"></script>
-<script src="js/main.js?v=122"></script>
+<script src="js/main.js?v=123"></script>
 
 </body>
 </html>

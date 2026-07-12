@@ -202,6 +202,7 @@ UI.inspectComponent = (c, selPin) => {
     <div class="insp-actions">
       <button id="i-fp">Change footprint…</button>
       <button id="i-dup">Duplicate</button>
+      <button id="i-clearvals" title="Wipe value, part number, KiCad footprint, symbol and all pin names + nets — keeps the footprint and the refdes prefix">Clear part values</button>
       ${c.fpId==="free" ? `<button id="i-addpin" class="${Tools.addPinFor===c?"primary":""}">${Tools.addPinFor===c?"Done adding pins":"+ Add pins (click board)"}</button>` : ""}
       <button id="i-del" class="danger">Delete</button>
     </div>`;
@@ -288,6 +289,15 @@ UI.inspectComponent = (c, selPin) => {
   if (polCb) polCb.addEventListener("change", e => setCompPolarized(c, e.target.checked));
   sec.querySelector("#i-del").addEventListener("click", deleteSelection);
   sec.querySelector("#i-dup").addEventListener("click", duplicateSelection);
+  sec.querySelector("#i-clearvals").addEventListener("click", ()=>{
+    pushUndo("clear part values " + c.ref);
+    c.value = ""; c.part = ""; c.kicad = ""; c.symOverride = null;
+    for (const p of c.pins){ p.name = ""; p.netId = null; }
+    c._fp = null;
+    pruneNets();
+    UI.refreshInspector(); UI.refreshNets(); requestRender();
+    UI.toast("Cleared values for " + c.ref + " (footprint + prefix kept)");
+  });
   sec.querySelector("#i-fp").addEventListener("click", ()=> UI.openFootprintDialog(c));
   const addBtn = sec.querySelector("#i-addpin");
   if (addBtn) addBtn.addEventListener("click", ()=>{
