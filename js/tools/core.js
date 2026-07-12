@@ -255,13 +255,13 @@ function onPointerUp(e){
   if (d.kind === "move-comp" || d.kind === "move-via" || d.kind === "move-layer" || d.kind === "rot-layer" || d.kind === "move-vert"){
     if (!d.moved){
       cancelUndo(); // no-op drag, drop the snapshot (restores redo — a click mustn't wipe it)
-      // a shift-click that never dragged a single-pad part falls back to pin multi-select
-      if (d.shiftPin){ UI.togglePinSel(d.shiftPin.comp, d.shiftPin.pinIdx); requestRender(); }
-      // shift-click (no drag) on a component body → show it in the Schematic tab
-      else if (d.kind === "move-comp" && d.detach && typeof SchEnabled === "function" && SchEnabled()){
+      // shift-click (no drag) on a pad or component body → show it in the Schematic tab;
+      // with the schematic tab disabled, a pad shift-click falls back to pin multi-select
+      if (d.kind === "move-comp" && d.detach && typeof SchEnabled === "function" && SchEnabled()){
         EditorTabs.show("schematic");
         Sch.focusComp(d.comp);
       }
+      else if (d.shiftPin){ UI.togglePinSel(d.shiftPin.comp, d.shiftPin.pinIdx); requestRender(); }
       // an align-tool click that never dragged drops the next 4-point marker
       if (d.alignClick){ placeAlignMarker(d.alignClick.x, d.alignClick.y, d.alignClick.thumb); }
     }
@@ -323,6 +323,10 @@ function handleDrag(pt, w, e){
       View.panY = d.panY + (pt.y - d.sy);
       break;
     case "move-comp":
+      // shift-click = jump to the schematic; ignore sub-4px jitter so it stays a CLICK
+      // (a real shift-drag past the threshold still detaches and moves as before)
+      if (!d.moved && d.detach && d.wx !== undefined &&
+          Math.hypot(w.x - d.wx, w.y - d.wy) * View.zoom < 4) break;
       d.moved = true;
       d.comp.x = w.x - d.offX; d.comp.y = w.y - d.offY;
       // drag connected trace anchors with the component, preserving relative position

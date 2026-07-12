@@ -68,7 +68,7 @@ UI.inspectMultiPins = () => {
     <div class="insp-actions">
       <button id="i-multiclear">Clear selection</button>
     </div>
-    <div class="panel-hint">Shift-click pads to add/remove · Enter applies the net to every selected pin</div>`;
+    <div class="panel-hint">Ctrl+Shift-click pads to add/remove (plain Shift-click jumps to the schematic when that tab is on) · Enter applies the net to every selected pin</div>`;
   box.appendChild(sec);
   sec.querySelector("#i-multinet").addEventListener("change", e => {
     const name = e.target.value.trim();

@@ -50,20 +50,22 @@ function selectDown(w, pt, e){
     }
   }
   const h = hitTest(w.x, w.y);
-  // shift-click pins → multi-select for bulk net assignment.
-  // BUT for a single-pad part (test point / mounting hole) a shift-DRAG detaches it from
-  // any trace anchored to it — start a detached move now; if it turns out to be a click
-  // with no drag, onPointerUp falls back to the multi-select toggle instead.
+  // Ctrl+Shift-click pins → multi-select for bulk net assignment (plain shift when the
+  // schematic tab is off — with it on, a plain shift-CLICK jumps to the schematic).
+  // A shift-DRAG on a pad still detaches the part from its traces; the click/drag split
+  // is resolved in onPointerUp.
   if (e.shiftKey && h && h.type === "pin"){
     const c = h.comp;
-    if (!compMoveLocked(c)){
-      pushUndo();
-      Tools.drag = { kind:"move-comp", comp:c, offX:w.x-c.x, offY:w.y-c.y, moved:false,
-                     anchors:[], detach:true, shiftPin:{comp:c, pinIdx:h.pinIdx} };
+    const multiSel = (e.ctrlKey || e.metaKey) || !SchEnabled();
+    if (multiSel || compMoveLocked(c)){
+      if (multiSel) UI.togglePinSel(c, h.pinIdx);
+      else { EditorTabs.show("schematic"); Sch.focusComp(c); }   // locked part: still jump
       requestRender();
       return;
     }
-    UI.togglePinSel(c, h.pinIdx);
+    pushUndo();
+    Tools.drag = { kind:"move-comp", comp:c, offX:w.x-c.x, offY:w.y-c.y, moved:false,
+                   anchors:[], detach:true, shiftPin:{comp:c, pinIdx:h.pinIdx}, wx:w.x, wy:w.y };
     requestRender();
     return;
   }
@@ -113,7 +115,7 @@ function selectDown(w, pt, e){
         }
       }
     }
-    Tools.drag = { kind:"move-comp", comp:c, offX:w.x-c.x, offY:w.y-c.y, moved:false, anchors, detach };
+    Tools.drag = { kind:"move-comp", comp:c, offX:w.x-c.x, offY:w.y-c.y, moved:false, anchors, detach, wx:w.x, wy:w.y };
   } else if (h.type === "via"){
     pushUndo();
     // grab every trace vertex sitting on the via so connected anchors move along with it;
