@@ -351,6 +351,21 @@ Sch.focusComp = (c) => {
   Sch.render();
 };
 
+/* centre + select a single pin (pad) of a component in the schematic */
+Sch.focusPin = (c, pinIdx) => {
+  Sch.ensurePositions();
+  if (typeof c.schX !== "number") return;
+  Sch.resize();
+  const geo = Sch.geo();
+  const p = schPinPos(c, pinIdx, geo);
+  Sch.zoom = Math.max(Sch.zoom, 9);
+  const tx = p ? p.x : c.schX, ty = p ? p.y : c.schY;
+  Sch.panX = Sch.width/2  - tx * Sch.zoom;
+  Sch.panY = Sch.height/2 - ty * Sch.zoom;
+  UI.select({ type: "pin", comp: c, pinIdx });
+  Sch.render();
+};
+
 /* jump the other way: show a schematic part on the board, zoomed + selected */
 function schJumpToVisual(c){
   EditorTabs.show("visual");
@@ -365,7 +380,7 @@ Sch.arrangeAI = async () => {
   if (typeof AI === "undefined" || !AI.enabled("arrange")){
     UI.toast("Enable AI schematic auto-arrange in 🔬 Experimental → AI Connect first"); return;
   }
-  UI.toast("AI is arranging the schematic… (may take a moment / cost a request)");
+  (UI.warn || UI.toast)("AI is arranging the schematic… (may take a moment / cost a request) — debug log in 🔬 Experimental → AI Connect");
   try {
     const placements = await AI.arrangeSchematic();
     const byRef = new Map(placements.map(p => [String(p.ref), p]));
@@ -902,6 +917,23 @@ function schWireSegHit(sx, sy){
   return null;
 }
 
+/* a FREE wire endpoint (not anchored to a pin) within tol screen px, or null.
+   Used to grab and drag a stray/unconnected wire end around. */
+function schWireEndHit(sx, sy){
+  const tol = 7;
+  for (let k = State.schWires.length - 1; k >= 0; k--){
+    const w = State.schWires[k];
+    const pts = w.points;
+    const ends = [[0, !w.a], [pts.length - 1, !w.b]];
+    for (const [idx, free] of ends){
+      if (!free || idx < 0) continue;
+      const dx = schX2S(pts[idx].x) - sx, dy = schY2S(pts[idx].y) - sy;
+      if (dx*dx + dy*dy <= tol*tol) return { w, idx };
+    }
+  }
+  return null;
+}
+
 /* the grid-snapped point (mm) on a hit wire segment nearest the cursor — where a
    branching wire attaches (clamped to stay on the segment) */
 function schWireSegPoint(ws, mx, my){
@@ -1039,7 +1071,16 @@ function schDrawSymbol(ctx, c, g){
     const val = c.value || c.part || "";
     ctx.fillStyle = stroke;
     ctx.font = "bold " + (1.6 * s) + "px sans-serif";
-    if (vertical){
+    if (g.isBox){
+      // box/IC symbols: reference (prefix) centred inside the box, value just below it
+      ctx.textAlign = "center";
+      ctx.fillText(c.ref, X, Y + 0.55 * s);
+      if (val){
+        ctx.fillStyle = "#cfd6df";
+        ctx.font = (1.35 * s) + "px sans-serif";
+        ctx.fillText(val, X, Y + (hh + 1.6) * s);
+      }
+    } else if (vertical){
       ctx.textAlign = "right";
       ctx.fillText(c.ref, X - (hw + 0.8) * s, Y + (val ? -0.3 : 0.55) * s);
       if (val){
@@ -1058,6 +1099,17 @@ function schDrawSymbol(ctx, c, g){
     }
   }
   ctx.textAlign = "left";
+
+  // move-lock badge: a small padlock at the symbol's top-left so a locked part is
+  // visible at a glance (mirrors the 🔒 in the inspector title)
+  if (compSchMoveLocked(c) && s > 2.5){
+    ctx.font = (1.6 * s) + "px sans-serif";
+    ctx.textAlign = "right";
+    ctx.textBaseline = "bottom";
+    ctx.fillText("🔒", X - (hw + 0.4) * s, Y - (hh + 0.4) * s);
+    ctx.textBaseline = "alphabetic";
+    ctx.textAlign = "left";
+  }
 
   // selection / hover outline (axis-aligned around the rotated symbol)
   const selected = (UI.sel && UI.sel.type === "comp" && UI.sel.comp === c) || Sch.boxSel.includes(c);
@@ -1227,7 +1279,7 @@ function schEdgeScrollAllowed(){
   if (!UI.edgeScrollOn()) return false;
   if (Sch.mode === "wire") return true;
   const d = Sch.drag;
-  return !!(d && (d.kind === "comp" || d.kind === "group" || d.kind === "label" || d.kind === "marquee" || d.kind === "wireseg"));
+  return !!(d && (d.kind === "comp" || d.kind === "group" || d.kind === "label" || d.kind === "marquee" || d.kind === "wireseg" || d.kind === "wireend"));
 }
 
 function schUpdateEdgeScroll(p){
@@ -1330,6 +1382,20 @@ Sch.onMove = (p, e) => {
         const endJct = j === pts.length - 1 && !d.w.b && !!schWireOnPoint(pts[pts.length-1], d.w, others);
         if ((j === pts.length - 1 && d.w.b) || endJct || (j < pts.length - 1 && schSegDir(pts[j], pts[j+1]) === dir))
           pts.splice(j + 1, 0, { x: pts[j].x, y: pts[j].y });
+        // OTHER wires whose free end lands ON this segment (a T junction into this wire):
+        // record them so they ride along and the connection survives moving THIS wire
+        // (the other-wire-moves case was already handled by the jct pin above)
+        d.riders = [];
+        const sa = pts[d.i], sb = pts[d.i+1];
+        for (const ow of State.schWires){
+          if (ow === d.w) continue;
+          const op = ow.points;
+          const ends = [[0, !ow.a], [op.length - 1, !ow.b]];
+          for (const [idx, free] of ends){
+            if (!free || idx < 0) continue;
+            if (distToSeg(op[idx].x, op[idx].y, sa, sb) <= 0.05) d.riders.push({ ow, idx });
+          }
+        }
       }
       const A = pts[d.i], B = pts[d.i+1];
       // prospective new position, then reject it if the segment would lie ON TOP of any
@@ -1345,7 +1411,29 @@ Sch.onMove = (p, e) => {
         if (overlaps) break;
       }
       if (overlaps) return;                 // keep the segment where it was
+      const dX = nA.x - A.x, dY = nA.y - A.y;
       A.x = nA.x; A.y = nA.y; B.x = nB.x; B.y = nB.y;
+      // drag every riding T-junction endpoint the same amount, re-squaring its own wire
+      if (d.riders) for (const r of d.riders){
+        const op = r.ow.points, pt = op[r.idx];
+        pt.x += dX; pt.y += dY;
+        if (op.length > 1){
+          const nb = op[r.idx + (r.idx === 0 ? 1 : -1)];
+          if (dir === "h"){ if (Math.abs(nb.y - (pt.y - dY)) < 0.01) nb.y = pt.y; }
+          else            { if (Math.abs(nb.x - (pt.x - dX)) < 0.01) nb.x = pt.x; }
+        }
+      }
+      d.moved = true;
+      Sch.render();
+      return;
+    }
+    if (d.kind === "wireend"){
+      if (!d.armed){ pushUndo("move wire end"); d.armed = true; }
+      const pin = schFindPin(p.x, p.y);   // snapping to a pin lets a stray end re-connect
+      Sch.hotPin = pin;
+      const pt = d.w.points[d.idx];
+      const tgt = pin ? pin.pos : { x: schSnap(mx), y: schSnap(my) };
+      pt.x = tgt.x; pt.y = tgt.y;
       d.moved = true;
       Sch.render();
       return;
@@ -1364,7 +1452,7 @@ Sch.onMove = (p, e) => {
       }
       d.moved = true;
       const shX = nx - lead.c.schX, shY = ny - lead.c.schY;
-      for (const it of items){ it.c.schX += shX; it.c.schY += shY; schUpdateWiresFor(it.c); }
+      for (const it of items){ if (compSchMoveLocked(it.c)) continue; it.c.schX += shX; it.c.schY += shY; schUpdateWiresFor(it.c); }
       Sch.render();
       return;
     }
@@ -1389,6 +1477,7 @@ Sch.nudgeSelection = (dx, dy) => {
   if (!Sch._nudgeAt || now - Sch._nudgeAt > 1500) pushUndo("move schematic selection");
   Sch._nudgeAt = now;
   for (const c of targets){
+    if (compSchMoveLocked(c)) continue;
     c.schX = schSnap(c.schX + dx * SCH_GRID);
     c.schY = schSnap(c.schY + dy * SCH_GRID);
     schUpdateWiresFor(c);
@@ -1537,6 +1626,21 @@ Sch.wire = () => {
     }
     if (Sch.selLabel){ Sch.selLabel = null; Sch.render(); }
 
+    // a FREE wire endpoint under the cursor → grab it and move it freely (2-D, grid
+    // snapped). Endpoints take priority over the segment grab so a stray end can be
+    // repositioned / dropped back onto a pin. Only when NOT over a part body.
+    const endHit = schWireEndHit(p.x, p.y);
+    if (endHit){
+      const cOver = Sch.hit(mx, my);
+      if (!(cOver && schPtInBody(cOver, mx, my))){
+        Sch.selWire = endHit.w; Sch.selSeg = null;
+        Sch.drag = { kind: "wireend", w: endHit.w, idx: endHit.idx, armed: false, moved: false };
+        UI.select(null);
+        Sch.render();
+        return;
+      }
+    }
+
     // wire under the cursor? a wire only loses to a part when the click is over the
     // part's actual BODY — so wires routed under a symbol's bounding-box margin stay
     // selectable. Shift-click selects just this segment (to delete a single leg).
@@ -1544,6 +1648,16 @@ Sch.wire = () => {
     const c = Sch.hit(mx, my);
     const wireWins = ws && (!c || !schPtInBody(c, mx, my));
     if (c && !wireWins){
+      // a symbol-locked part can be selected/inspected but not dragged on the sheet
+      if (compSchMoveLocked(c) && !Sch.boxSel.includes(c)){
+        Sch.boxSel = [];
+        Sch.selWire = null; Sch.selLabel = null; Sch.selSeg = null;
+        if (e.shiftKey){ schJumpToVisual(c); return; }
+        if (!(UI.sel && UI.sel.type === "comp" && UI.sel.comp === c)) UI.select({ type: "comp", comp: c });
+        UI.setHint && UI.setHint(c.ref + " symbol is locked — press " + (Keymap.keyFor ? Keymap.keyFor("edit.lock") : "L") + " to unlock");
+        Sch.render();
+        return;
+      }
       if (Sch.boxSel.includes(c)){
         Sch.drag = { kind: "group", group: Sch.boxSel.map(g => ({ c: g, dx: mx - g.schX, dy: my - g.schY })), armed: false, moved: false, clickComp: c, shift: e.shiftKey };
       } else {
@@ -1606,6 +1720,25 @@ Sch.wire = () => {
           c.schX >= lx && c.schX <= hx && c.schY >= ly && c.schY <= hy);
         UI.toast(Sch.boxSel.length ? Sch.boxSel.length + " symbol" + (Sch.boxSel.length===1?"":"s") + " selected — drag / arrows / wheel-click to move" : "Nothing in the box");
       }
+      Sch.render();
+      return;
+    }
+    if (d.kind === "wireend"){
+      Sch.hotPin = null;
+      if (!d.moved && d.armed){ cancelUndo(); Sch.render(); return; }
+      // dropped on a pin? anchor the end to it (net-compatible only) so it re-connects
+      const pin = d.moved ? schFindPin(Sch._lastP ? Sch._lastP.x : -1, Sch._lastP ? Sch._lastP.y : -1) : null;
+      if (pin){
+        const wireNet = d.w.netId || schNetOfAnchor(d.w.a) || schNetOfAnchor(d.w.b);
+        const pinNet = schNetOfAnchor({ comp: pin.comp.id, pin: pin.pin });
+        if (!wireNet || !pinNet || wireNet === pinNet){
+          const key = d.idx === 0 ? "a" : "b";
+          d.w[key] = { comp: pin.comp.id, pin: pin.pin };
+          d.w.points[d.idx] = { x: pin.pos.x, y: pin.pos.y };
+          if (!d.w.netId) d.w.netId = wireNet || pinNet || null;
+        }
+      }
+      d.w.points = schCleanPoints(d.w.points);
       Sch.render();
       return;
     }

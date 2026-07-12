@@ -122,11 +122,14 @@ function zoomToFit(){
   for (const n of State.notes) acc(n.x, n.y, 0);
   if (!any){ View.panX=View.width/2; View.panY=View.height/2; View.zoom=1; requestRender(); return; }
   const w=maxX-minX, h=maxY-minY;
-  View.zoom = Math.min(View.width/(w||1), View.height/(h||1)) * 0.92;
+  // in synced split view each pane is only half the canvas wide and shares one camera,
+  // so fit the board into a single pane's width rather than the whole canvas
+  const vw = View.split ? View.width/2 : View.width;
+  View.zoom = Math.min(vw/(w||1), View.height/(h||1)) * 0.92;
   View.zoom = Math.max(0.02, Math.min(80, View.zoom));
   const cx=(minX+maxX)/2, cy=(minY+maxY)/2;
   const fx = View.flip ? -1 : 1;
-  View.panX = View.width/2  - cx*View.zoom*fx;
+  View.panX = vw/2  - cx*View.zoom*fx;
   View.panY = View.height/2 - cy*View.zoom;
   requestRender();
 }

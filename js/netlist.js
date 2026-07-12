@@ -543,7 +543,7 @@ function schGeometry(){
     }
     const bw = w + 2 * Math.max(leftExt, rightExt);   // symmetric envelope (de-overlap tests centred boxes)
     const bh = h + 2 * 2.54;                           // ref/value text above and below the box
-    geo.set(c.id, { w, h, pins, body, hideNums, hideNames, bw, bh });
+    geo.set(c.id, { w, h, pins, body, hideNums, hideNames, bw, bh, isBox: !sym });
   }
   return geo;
 }

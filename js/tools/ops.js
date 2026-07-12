@@ -442,10 +442,22 @@ function migrateLock(c){
 }
 function compMoveLocked(c){ return !!(c.lockMove || c.locked); }
 function compEditLocked(c){ return !!(c.lockEdit || c.locked); }
+/* independent lock for the SCHEMATIC symbol's position (schX/schY) — the board part's
+   own move-lock is separate so you can pin a symbol on the sheet without freezing the pad */
+function compSchMoveLocked(c){ return !!c.schLockMove; }
 
 function toggleLockSelection(){
   const c = UI.sel && UI.sel.comp;
   if (!c) return;
+  // in the schematic tab the lock pins the SYMBOL, not the board part
+  if (typeof EditorTabs !== "undefined" && EditorTabs.current === "schematic"){
+    pushUndo();
+    c.schLockMove = !c.schLockMove;
+    UI.toast(c.ref + (c.schLockMove ? " symbol locked 🔒" : " symbol unlocked"));
+    UI.refreshInspector();
+    if (typeof Sch !== "undefined") Sch.render();
+    return;
+  }
   pushUndo();
   migrateLock(c);
   c.lockMove = !c.lockMove;

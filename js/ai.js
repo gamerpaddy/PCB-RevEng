@@ -35,6 +35,36 @@ const AI = {
     })[p] || "";
   },
 
+  /* ---------- in-flight requests + cancellation ----------
+     Every network call registers an AbortController so the user can cancel it
+     (a floating "AI working… [Cancel]" banner appears while any are live). */
+  _ctrls: new Set(),
+  _newCtrl(){
+    const c = (typeof AbortController !== "undefined") ? new AbortController() : { signal: undefined, abort(){} };
+    AI._ctrls.add(c); AI._updateBusy();
+    return c;
+  },
+  _dropCtrl(c){ AI._ctrls.delete(c); AI._updateBusy(); },
+  busy(){ return AI._ctrls.size > 0; },
+  cancel(){                                   // abort every live request
+    for (const c of AI._ctrls){ try { c.abort(); } catch(e){} }
+    AI._ctrls.clear(); AI._updateBusy();
+  },
+  isAbort(err){ return !!err && (err.name === "AbortError" || /abort/i.test(err.message || "")); },
+
+  /* ---------- debug log (request / answer history) ----------
+     Ring buffer of recent calls, shown in the Experimental → AI Connect debug panel.
+     Kept in memory only (never persisted) — the raw prompt can be large / sensitive. */
+  _log: [],
+  LOG_CAP: 40,
+  _record(e){
+    e.time = Date.now();
+    AI._log.unshift(e);
+    if (AI._log.length > AI.LOG_CAP) AI._log.length = AI.LOG_CAP;
+    if (typeof AI._renderLog === "function") AI._renderLog();
+  },
+  clearLog(){ AI._log.length = 0; if (typeof AI._renderLog === "function") AI._renderLog(); },
+
   /* ---------- low-level chat call (returns assistant text) ---------- */
   async chat(system, user, opts){
     opts = opts || {};
@@ -42,52 +72,64 @@ const AI = {
     const model = AI.model(p) || AI._defaultModel(p);
     if (!AI.configured()) throw new Error("No API key set — open 🔬 Experimental → AI Connect");
     const maxTok = opts.maxTokens || 2000;
-
-    if (p === "anthropic"){
-      const r = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "x-api-key": AI.key(p),
-          "anthropic-version": "2023-06-01",
-          "anthropic-dangerous-direct-browser-access": "true",
-        },
-        body: JSON.stringify({ model, max_tokens: maxTok, system,
-          messages: [{ role: "user", content: user }] }),
-      });
-      const j = await AI._json(r);
-      return (j.content || []).map(c => c.text || "").join("");
+    const ctrl = AI._newCtrl();
+    const t0 = Date.now();
+    const entry = { kind: opts.kind || "chat", provider: p, model, system, user, response: null, error: null, ms: 0 };
+    try {
+      let out;
+      if (p === "anthropic"){
+        const r = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST", signal: ctrl.signal,
+          headers: {
+            "content-type": "application/json",
+            "x-api-key": AI.key(p),
+            "anthropic-version": "2023-06-01",
+            "anthropic-dangerous-direct-browser-access": "true",
+          },
+          body: JSON.stringify({ model, max_tokens: maxTok, system,
+            messages: [{ role: "user", content: user }] }),
+        });
+        const j = await AI._json(r);
+        out = (j.content || []).map(c => c.text || "").join("");
+      } else if (p === "gemini"){
+        const url = "https://generativelanguage.googleapis.com/v1beta/models/" +
+          encodeURIComponent(model) + ":generateContent?key=" + encodeURIComponent(AI.key(p));
+        const r = await fetch(url, {
+          method: "POST", signal: ctrl.signal, headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            systemInstruction: { parts: [{ text: system }] },
+            contents: [{ role: "user", parts: [{ text: user }] }],
+            generationConfig: { maxOutputTokens: maxTok },
+          }),
+        });
+        const j = await AI._json(r);
+        out = ((j.candidates || [])[0]?.content?.parts || []).map(x => x.text || "").join("");
+      } else {
+        // openai / openrouter / local — all OpenAI chat/completions compatible
+        const base = p === "openai" ? "https://api.openai.com/v1"
+                   : p === "openrouter" ? "https://openrouter.ai/api/v1"
+                   : (AI.baseurl() || "").replace(/\/$/, "");
+        const headers = { "content-type": "application/json" };
+        if (AI.key(p)) headers["authorization"] = "Bearer " + AI.key(p);
+        if (p === "openrouter"){ headers["HTTP-Referer"] = location.origin; headers["X-Title"] = "PCB RevEng"; }
+        const r = await fetch(base + "/chat/completions", {
+          method: "POST", headers, signal: ctrl.signal,
+          body: JSON.stringify({ model, max_tokens: maxTok,
+            messages: [{ role: "system", content: system }, { role: "user", content: user }] }),
+        });
+        const j = await AI._json(r);
+        out = ((j.choices || [])[0]?.message?.content) || "";
+      }
+      entry.response = out;
+      return out;
+    } catch(err){
+      entry.error = AI.isAbort(err) ? "⨯ cancelled" : (err && err.message || String(err));
+      throw err;
+    } finally {
+      entry.ms = Date.now() - t0;
+      AI._dropCtrl(ctrl);
+      AI._record(entry);
     }
-
-    if (p === "gemini"){
-      const url = "https://generativelanguage.googleapis.com/v1beta/models/" +
-        encodeURIComponent(model) + ":generateContent?key=" + encodeURIComponent(AI.key(p));
-      const r = await fetch(url, {
-        method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          systemInstruction: { parts: [{ text: system }] },
-          contents: [{ role: "user", parts: [{ text: user }] }],
-          generationConfig: { maxOutputTokens: maxTok },
-        }),
-      });
-      const j = await AI._json(r);
-      return ((j.candidates || [])[0]?.content?.parts || []).map(x => x.text || "").join("");
-    }
-
-    // openai / openrouter / local — all OpenAI chat/completions compatible
-    const base = p === "openai" ? "https://api.openai.com/v1"
-               : p === "openrouter" ? "https://openrouter.ai/api/v1"
-               : (AI.baseurl() || "").replace(/\/$/, "");
-    const headers = { "content-type": "application/json" };
-    if (AI.key(p)) headers["authorization"] = "Bearer " + AI.key(p);
-    if (p === "openrouter"){ headers["HTTP-Referer"] = location.origin; headers["X-Title"] = "PCB RevEng"; }
-    const r = await fetch(base + "/chat/completions", {
-      method: "POST", headers,
-      body: JSON.stringify({ model, max_tokens: maxTok,
-        messages: [{ role: "system", content: system }, { role: "user", content: user }] }),
-    });
-    const j = await AI._json(r);
-    return ((j.choices || [])[0]?.message?.content) || "";
   },
 
   async _json(r){
@@ -113,27 +155,43 @@ const AI = {
   /* ---------- model listing ---------- */
   async listModels(){
     const p = AI.provider();
-    if (p === "gemini"){
-      const r = await fetch("https://generativelanguage.googleapis.com/v1beta/models?key=" + encodeURIComponent(AI.key(p)));
-      const j = await AI._json(r);
-      return (j.models || []).map(m => (m.name || "").replace(/^models\//, "")).filter(Boolean);
+    const ctrl = AI._newCtrl();
+    const t0 = Date.now();
+    const entry = { kind: "models", provider: p, model: "", system: null, user: "GET /models", response: null, error: null, ms: 0 };
+    try {
+      let out;
+      if (p === "gemini"){
+        const r = await fetch("https://generativelanguage.googleapis.com/v1beta/models?key=" + encodeURIComponent(AI.key(p)), { signal: ctrl.signal });
+        const j = await AI._json(r);
+        out = (j.models || []).map(m => (m.name || "").replace(/^models\//, "")).filter(Boolean);
+      } else if (p === "anthropic"){
+        const r = await fetch("https://api.anthropic.com/v1/models", {
+          signal: ctrl.signal,
+          headers: { "x-api-key": AI.key(p), "anthropic-version": "2023-06-01",
+                     "anthropic-dangerous-direct-browser-access": "true" },
+        });
+        const j = await AI._json(r);
+        out = (j.data || []).map(m => m.id).filter(Boolean);
+      } else {
+        const base = p === "openai" ? "https://api.openai.com/v1"
+                   : p === "openrouter" ? "https://openrouter.ai/api/v1"
+                   : (AI.baseurl() || "").replace(/\/$/, "");
+        const headers = {};
+        if (AI.key(p)) headers["authorization"] = "Bearer " + AI.key(p);
+        const r = await fetch(base + "/models", { headers, signal: ctrl.signal });
+        const j = await AI._json(r);
+        out = (j.data || []).map(m => m.id).filter(Boolean).sort();
+      }
+      entry.response = out.length + " models: " + out.slice(0, 30).join(", ");
+      return out;
+    } catch(err){
+      entry.error = AI.isAbort(err) ? "⨯ cancelled" : (err && err.message || String(err));
+      throw err;
+    } finally {
+      entry.ms = Date.now() - t0;
+      AI._dropCtrl(ctrl);
+      AI._record(entry);
     }
-    if (p === "anthropic"){
-      const r = await fetch("https://api.anthropic.com/v1/models", {
-        headers: { "x-api-key": AI.key(p), "anthropic-version": "2023-06-01",
-                   "anthropic-dangerous-direct-browser-access": "true" },
-      });
-      const j = await AI._json(r);
-      return (j.data || []).map(m => m.id).filter(Boolean);
-    }
-    const base = p === "openai" ? "https://api.openai.com/v1"
-               : p === "openrouter" ? "https://openrouter.ai/api/v1"
-               : (AI.baseurl() || "").replace(/\/$/, "");
-    const headers = {};
-    if (AI.key(p)) headers["authorization"] = "Bearer " + AI.key(p);
-    const r = await fetch(base + "/models", { headers });
-    const j = await AI._json(r);
-    return (j.data || []).map(m => m.id).filter(Boolean).sort();
   },
 
   /* ---------- feature 1: part / pin autofill ----------
@@ -202,8 +260,81 @@ const AI = {
   },
 };
 
+/* ---------- floating "AI working… [Cancel]" banner ---------- */
+AI._ensureBusyUI = function(){
+  if (document.getElementById("ai-busy")) return;
+  const el = document.createElement("div");
+  el.id = "ai-busy";
+  // popover ("manual") puts the banner in the browser top layer, so its Cancel
+  // button stays clickable even above a modal <dialog> (e.g. the footprint selector).
+  if ("popover" in el) el.setAttribute("popover", "manual");
+  el.style.cssText =
+    "position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:100000;margin:0;" +
+    "display:none;flex-direction:column;align-items:center;gap:4px;padding:8px 14px;background:#1c222b;" +
+    "color:#e6ebf1;border:1px solid #3c4856;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.6);" +
+    "font-size:13px";
+  el.innerHTML = '<div style="display:flex;align-items:center;gap:10px">' +
+    '<span class="ai-spin" style="width:13px;height:13px;border:2px solid #4a5766;' +
+    'border-top-color:#e0a94a;border-radius:50%;display:inline-block;animation:aiSpin .8s linear infinite"></span>' +
+    '<span id="ai-busy-txt">AI working…</span>' +
+    '<button id="ai-busy-cancel" style="padding:2px 10px">Cancel</button></div>' +
+    '<div style="font-size:11px;color:#8b97a5">See the debug log afterwards in 🔬 Experimental → AI Connect</div>';
+  if (!document.getElementById("ai-spin-style")){
+    const st = document.createElement("style");
+    st.id = "ai-spin-style";
+    st.textContent = "@keyframes aiSpin{to{transform:rotate(360deg)}}";
+    document.head.appendChild(st);
+  }
+  document.body.appendChild(el);
+  el.querySelector("#ai-busy-cancel").addEventListener("click", () => {
+    AI.cancel();
+    if (typeof UI !== "undefined" && UI.toast) UI.toast("AI request cancelled");
+  });
+};
+
+AI._updateBusy = function(){
+  AI._ensureBusyUI();
+  const el = document.getElementById("ai-busy");
+  if (!el) return;
+  const n = AI._ctrls.size;
+  el.style.display = n ? "flex" : "none";
+  const canPop = typeof el.showPopover === "function" && el.hasAttribute("popover");
+  if (canPop){
+    try {
+      const open = el.matches(":popover-open");
+      if (n && !open) el.showPopover();
+      else if (!n && open) el.hidePopover();
+    } catch(e){}
+  }
+  const txt = document.getElementById("ai-busy-txt");
+  if (txt) txt.textContent = n > 1 ? ("AI working… (" + n + " requests)") : "AI working…";
+};
+
+/* render the debug log into #ai-debug-list (if the Experimental dialog is built) */
+AI._renderLog = function(){
+  const box = document.getElementById("ai-debug-list");
+  if (!box) return;
+  if (!AI._log.length){ box.innerHTML = '<div class="panel-hint">No requests yet.</div>'; return; }
+  const esc = (s) => String(s == null ? "" : s).replace(/[&<>]/g, m => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;" }[m]));
+  const clip = (s, n) => { s = String(s == null ? "" : s); return s.length > n ? s.slice(0, n) + " …[" + s.length + " chars]" : s; };
+  box.innerHTML = AI._log.map(e => {
+    const when = new Date(e.time).toLocaleTimeString();
+    const head = esc(e.kind) + " · " + esc(e.provider) + (e.model ? "/" + esc(e.model) : "") +
+      " · " + when + " · " + e.ms + "ms";
+    const status = e.error ? '<span style="color:#e06b6b">' + esc(e.error) + '</span>'
+                           : '<span style="color:#7dc98a">✓ ok</span>';
+    const sys = e.system != null ? '<div style="color:#8fa">SYSTEM:</div><pre style="white-space:pre-wrap;margin:2px 0 6px">' + esc(clip(e.system, 1500)) + '</pre>' : '';
+    const usr = '<div style="color:#9bd">REQUEST:</div><pre style="white-space:pre-wrap;margin:2px 0 6px">' + esc(clip(e.user, 2500)) + '</pre>';
+    const rsp = e.response != null ? '<div style="color:#cda">ANSWER:</div><pre style="white-space:pre-wrap;margin:2px 0 0">' + esc(clip(e.response, 4000)) + '</pre>' : '';
+    return '<details style="border:1px solid #333c48;border-radius:5px;padding:6px 8px;margin-bottom:6px;background:#181d25">' +
+      '<summary style="cursor:pointer;font-size:12px">' + head + ' — ' + status + '</summary>' +
+      '<div style="font-size:11px;margin-top:6px">' + sys + usr + rsp + '</div></details>';
+  }).join("");
+};
+
 /* ---------- Experimental-dialog wiring ---------- */
 function wireAI(){
+  AI._ensureBusyUI();
   const prov = $("#ai-provider"), keyIn = $("#ai-key"), baseIn = $("#ai-baseurl"),
         baseRow = $("#ai-baseurl-row"), modelSel = $("#ai-model"),
         status = $("#ai-status");
@@ -262,10 +393,16 @@ function wireAI(){
     } catch(err){ status.textContent = "⚠ " + err.message; }
   });
 
+  // debug log panel
+  const dbgClear = $("#ai-debug-clear"), dbgRefresh = $("#ai-debug-refresh");
+  if (dbgClear) dbgClear.addEventListener("click", () => AI.clearLog());
+  if (dbgRefresh) dbgRefresh.addEventListener("click", () => AI._renderLog());
+
   // populate whenever the Experimental dialog opens
   const labBtn = $("#btn-lab");
-  if (labBtn) labBtn.addEventListener("click", syncFromStore);
+  if (labBtn) labBtn.addEventListener("click", () => { syncFromStore(); AI._renderLog(); });
   syncFromStore();
+  AI._renderLog();
 }
 
 window.addEventListener("DOMContentLoaded", wireAI);

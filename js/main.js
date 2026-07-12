@@ -123,10 +123,20 @@ function toggleFlip(){
   // in split mode _paneDX still holds the last-drawn pane's shift, which would otherwise
   // leak into the screen<->world round-trip and drift the view sideways on every flip.
   View._paneDX = 0;
-  const c = screenToWorld(View.width/2, View.height/2);
+  // reference point held fixed across the flip. In split view the whole-view centre
+  // (width/2) sits on the pane boundary, so flipping around it slides the board out of
+  // the pane — use the FOCUSED pane's own centre (and its pane offset) instead.
+  let refX = View.width / 2;
+  if (View.split){
+    const which = View.cursorPane || "left";
+    View._paneDX = which === "right" ? View.width / 2 : 0;
+    refX = which === "right" ? View.width * 0.75 : View.width * 0.25;
+  }
+  const c = screenToWorld(refX, View.height/2);
   View.flip = !View.flip;
   const s = worldToScreen(c.x, c.y);
-  View.panX += View.width/2 - s.x;
+  View.panX += refX - s.x;
+  View._paneDX = 0;
   $("#btn-flip").classList.toggle("active", View.flip);
   UI.setStatusPos(c);
   UI.toast(View.flip ? "Viewing board from the BACK" : "Viewing board from the FRONT");
