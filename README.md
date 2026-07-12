@@ -43,9 +43,9 @@ Go to the experimental section to enable it and provide a API key.
 
 Currently it can support your in 3 tasks, finding pinouts, creating footprints, arranging parts in schematic. 
 All highly unreliable and dependend on the weather, universe and what not.  verify results before use.
+<img width="849" height="502" alt="firefox_c5I9GKGa1Z" src="https://github.com/user-attachments/assets/9dc9d180-fd45-4edf-9c00-2e131a050dd8" />
+<img width="479" height="376" alt="firefox_CfrNjR6gwb" src="https://github.com/user-attachments/assets/b470025b-ece9-4e66-9901-5ac94488b9b6" />
 
-
-<img width="325" height="250" alt="claude_HoQ5RjeWJb" src="https://github.com/user-attachments/assets/f04503d1-2443-460e-9c4d-2aa01a4e142c" />
 
 
 ## New features regularily.
@@ -63,7 +63,7 @@ Import allows you to open Boardview .brd and .cad files directly for troubleshoo
 
 
 <img width="1126" height="771" alt="firefox_7J42z4hYx8" src="https://github.com/user-attachments/assets/df5ca5c1-3e36-4308-9b16-3523cea9397f" />
-
+<img width="325" height="250" alt="claude_HoQ5RjeWJb" src="https://github.com/user-attachments/assets/f04503d1-2443-460e-9c4d-2aa01a4e142c" />
 <img width="1906" height="1277" alt="firefox_oWt9LO7s4P" src="https://github.com/user-attachments/assets/ad96aaaf-efe0-439c-b3c6-83f26679bc34" />
 <img width="713" height="686" alt="firefox_xeYeZYlMq8" src="https://github.com/user-attachments/assets/4b83a3a1-7eac-4828-a9da-56b1b1b5b0af" />
 
