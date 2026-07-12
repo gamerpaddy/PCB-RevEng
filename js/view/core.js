@@ -14,6 +14,7 @@ const View = {
   cursorLabel: null,      // {text,color,x,y} discreet net-name chip drawn next to the pointer (screen px) when hovering a pad/via/trace
   blinkNet: null,         // net flashing after a net-list click
   blinkOn: false,
+  flashMark: null,        // {x,y,t0} transient red locator ring (checker "Go" jump) that fades out over 5s
   ratsnest: false,        // draw straight "airwire" connections between same-net pads/vias
   ratsnestMode: "mst",    // "mst" = minimum-spanning tree over the whole net · "star" = spokes from the selected pad to every same-net pad/via
   hideTraces: false,      // hide all drawn traces (also makes them non-interactive) to read the bare photo/pads
@@ -47,6 +48,22 @@ function blinkNet(netId){
     if (n >= 6){ clearInterval(_blinkTimer); _blinkTimer = null; View.blinkNet = null; View.blinkOn = false; }
     requestRender();
   }, 180);
+}
+
+/* drop a transient red locator ring at a world point that fades out over ~5s.
+   Used by the checker "Go" jump so you can see exactly where it panned you to. */
+let _flashTimer = null;
+function flashMarkAt(x, y){
+  if (_flashTimer){ clearInterval(_flashTimer); _flashTimer = null; }
+  View.flashMark = { x, y, t0: (typeof performance !== "undefined" ? performance.now() : Date.now()) };
+  requestRender();
+  _flashTimer = setInterval(() => {
+    const now = (typeof performance !== "undefined" ? performance.now() : Date.now());
+    if (!View.flashMark || now - View.flashMark.t0 >= 5000){
+      clearInterval(_flashTimer); _flashTimer = null; View.flashMark = null;
+    }
+    requestRender();
+  }, 60);
 }
 
 function viewInit(canvas){

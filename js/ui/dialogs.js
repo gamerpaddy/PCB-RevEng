@@ -440,6 +440,7 @@ UI.openChecker = () => {
     else UI.select({ type:"pin", comp:it.comp, pinIdx:it.pinIdx });
     View.panX = View.width/2 - it.wp.x*View.zoom*(View.flip?-1:1);
     View.panY = View.height/2 - it.wp.y*View.zoom;
+    flashMarkAt(it.wp.x, it.wp.y);   // red locator ring, fades out after 5s
     requestRender();
   }));
   $("#checker-dialog").showModal();

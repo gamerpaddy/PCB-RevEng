@@ -339,6 +339,21 @@ Sch.enter = () => {
   Sch.render();
 };
 
+/* drop a transient red locator ring (schematic mm coords) that fades out over ~5s,
+   so a search jump makes it obvious exactly where it panned/zoomed you to */
+Sch.flashAt = (x, y) => {
+  if (Sch._flashTimer){ clearInterval(Sch._flashTimer); Sch._flashTimer = null; }
+  Sch.flashMark = { x, y, t0: (typeof performance !== "undefined" ? performance.now() : Date.now()) };
+  Sch.render();
+  Sch._flashTimer = setInterval(() => {
+    const now = (typeof performance !== "undefined" ? performance.now() : Date.now());
+    if (!Sch.flashMark || now - Sch.flashMark.t0 >= 5000){
+      clearInterval(Sch._flashTimer); Sch._flashTimer = null; Sch.flashMark = null;
+    }
+    Sch.render();
+  }, 60);
+};
+
 /* centre + zoom the schematic view on one component (cross-jump from the board) */
 Sch.focusComp = (c) => {
   Sch.ensurePositions();
@@ -348,6 +363,7 @@ Sch.focusComp = (c) => {
   Sch.panX = Sch.width/2  - c.schX * Sch.zoom;
   Sch.panY = Sch.height/2 - c.schY * Sch.zoom;
   UI.select({ type: "comp", comp: c });
+  Sch.flashAt(c.schX, c.schY);
   Sch.render();
 };
 
@@ -363,6 +379,7 @@ Sch.focusPin = (c, pinIdx) => {
   Sch.panX = Sch.width/2  - tx * Sch.zoom;
   Sch.panY = Sch.height/2 - ty * Sch.zoom;
   UI.select({ type: "pin", comp: c, pinIdx });
+  Sch.flashAt(tx, ty);
   Sch.render();
 };
 
@@ -481,6 +498,22 @@ Sch.render = () => {
   schDrawWireDraft(ctx);
   schDrawHotPin(ctx);
   schDrawMarquee(ctx);
+
+  // transient red locator ring from a search jump — fades out over 5s
+  if (Sch.flashMark){
+    const now = (typeof performance !== "undefined" ? performance.now() : Date.now());
+    const a = Math.max(0, 1 - (now - Sch.flashMark.t0) / 5000);
+    if (a > 0){
+      const X = schX2S(Sch.flashMark.x), Y = schY2S(Sch.flashMark.y);
+      const r = Math.max(14, Sch.zoom * 3);
+      ctx.save();
+      ctx.globalAlpha = a;
+      ctx.strokeStyle = "#ff2b2b"; ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.arc(X, Y, r, 0, Math.PI*2); ctx.stroke();
+      ctx.beginPath(); ctx.arc(X, Y, r*0.5, 0, Math.PI*2); ctx.stroke();
+      ctx.restore();
+    }
+  }
 };
 
 /* thin blue ratlines: for each INCOMPLETE net, draw airwires BETWEEN its connected
@@ -1884,7 +1917,14 @@ Sch.wire = () => {
   $("#sch-arrange-go").addEventListener("click", async () => {
     const mode = $("#sch-arrange").value;
     if (mode === "ai"){ Sch.arrangeAI(); return; }
+    // re-arranging moves every part, so any hand-drawn wires would be left dangling —
+    // clear them, but warn first so the user can back out (undoable either way).
+    const hadWires = State.schWires.length > 0;
+    if (hadWires && !confirm("Re-arranging will move every symbol, so the " + State.schWires.length +
+        " schematic wire" + (State.schWires.length === 1 ? "" : "s") +
+        " you've drawn will be cleared.\n\nContinue? (undoable)")) return;
     pushUndo("arrange schematic");
+    if (hadWires){ State.schWires = []; Sch.selWire = null; }
     const geo = (Sch.invalidate(), Sch.geo());
     const pos = schArrange(mode, geo);
     for (const c of State.components){
@@ -1893,7 +1933,8 @@ Sch.wire = () => {
       schUpdateWiresFor(c);
     }
     Sch.fit();
-    UI.toast("Schematic re-arranged (" + $("#sch-arrange").selectedOptions[0].textContent.split("—")[0].trim() + ") — undoable");
+    UI.toast("Schematic re-arranged (" + $("#sch-arrange").selectedOptions[0].textContent.split("—")[0].trim() + ")" +
+      (hadWires ? " — wires cleared" : "") + " — undoable");
   });
   $("#sch-fit").addEventListener("click", () => Sch.fit());
   $("#sch-wire").addEventListener("click", () => {

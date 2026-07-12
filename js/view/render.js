@@ -316,6 +316,21 @@ function drawWorld(ctx){
     ctx.restore();
   }
 
+  // --- transient locator flash (checker "Go" jump) — red ring, fades over 5s ---
+  if (View.flashMark){
+    const now = (typeof performance !== "undefined" ? performance.now() : Date.now());
+    const a = Math.max(0, 1 - (now - View.flashMark.t0) / 5000);
+    if (a > 0){
+      ctx.save();
+      ctx.globalAlpha = a;
+      ctx.strokeStyle = "#ff2b2b"; ctx.lineWidth = 3/View.zoom;
+      const r = 16/View.zoom;
+      ctx.beginPath(); ctx.arc(View.flashMark.x, View.flashMark.y, r, 0, Math.PI*2); ctx.stroke();
+      ctx.beginPath(); ctx.arc(View.flashMark.x, View.flashMark.y, r*0.5, 0, Math.PI*2); ctx.stroke();
+      ctx.restore();
+    }
+  }
+
   // --- overlap markers (red cross where a pad collided with another net) ---
   if (View.overlapMarks && View.overlapMarks.length){
     ctx.save();
