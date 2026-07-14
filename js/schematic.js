@@ -180,6 +180,20 @@ function schWireOnPoint(p, except, wires){
   return null;
 }
 
+/* direction ("h"/"v"/null) of the wire SEGMENT that point `p` sits on (skipping
+   `exceptWire`), or null if it's on no wire — tells a segment drag whether a T-junction
+   end can slide ALONG its host (host perpendicular to the drag) or must be pinned with a
+   jog (host parallel to the moved segment). */
+function schHostSegDirAt(p, exceptWire){
+  for (const w of State.schWires){
+    if (w === exceptWire) continue;
+    const pts = w.points;
+    for (let i = 0; i + 1 < pts.length; i++)
+      if (distToSeg(p.x, p.y, pts[i], pts[i+1]) <= 0.05) return schSegDir(pts[i], pts[i+1]);
+  }
+  return null;
+}
+
 /* every wire electrically connected to `w` (transitively): shared net + a shared
    anchored pin, or one wire's endpoint sitting on the other (T junction / touching
    ends). Missing netId acts as a wildcard, matching the render's same-net logic. */
@@ -1572,16 +1586,20 @@ Sch.onMove = (p, e) => {
         // pin a copy of an endpoint in place when it can't shift with the segment —
         // an anchored wire end (stays on its pin), a COLLINEAR neighbouring segment
         // (shifting the shared corner would turn it diagonal), OR a free end sitting on
-        // ANOTHER wire (a T junction — keep it landed so the connection survives); the
-        // copy becomes a 90° jog, i.e. a new horizontal/vertical bridge wire in place
-        const others = State.schWires.filter(x => x !== d.w);
-        const startJct = d.i === 0 && !d.w.a && !!schWireOnPoint(pts[0], d.w, others);
+        // ANOTHER wire whose host runs PARALLEL to this segment (a perpendicular slide would
+        // pull that T-end off its host, so a jog keeps it connected). A T-end whose host is
+        // PERPENDICULAR to the segment simply slides ALONG the host — pinning it there would
+        // leave a bridge wire lying on top of the host (the "two dots + trailing segment" bug).
+        // The copy becomes a 90° jog, i.e. a new horizontal/vertical bridge wire in place.
+        const startHostDir = (d.i === 0 && !d.w.a) ? schHostSegDirAt(pts[0], d.w) : null;
+        const startJct = startHostDir === dir;
         if ((d.i === 0 && d.w.a) || startJct || (d.i > 0 && schSegDir(pts[d.i-1], pts[d.i]) === dir)){
           pts.splice(d.i, 0, { x: pts[d.i].x, y: pts[d.i].y });
           d.i++;
         }
         const j = d.i + 1;
-        const endJct = j === pts.length - 1 && !d.w.b && !!schWireOnPoint(pts[pts.length-1], d.w, others);
+        const endHostDir = (j === pts.length - 1 && !d.w.b) ? schHostSegDirAt(pts[pts.length-1], d.w) : null;
+        const endJct = endHostDir === dir;
         if ((j === pts.length - 1 && d.w.b) || endJct || (j < pts.length - 1 && schSegDir(pts[j], pts[j+1]) === dir))
           pts.splice(j + 1, 0, { x: pts[j].x, y: pts[j].y });
         // OTHER wires whose free end lands ON this segment (a T junction into this wire):
