@@ -802,10 +802,14 @@ function exportKiCadSch(mode){
   const wiredNets = new Set();
   const exportWires = mode === "manual" && typeof schNetStatus === "function" &&
                       State.schWires && State.schWires.length;
+  // effective wire net: stored netId, else re-derived from whichever end is anchored
+  const wNet = (w) => (typeof schWireNet === "function") ? schWireNet(w) : (w.netId || null);
   if (exportWires){
     const stat = schNetStatus();
-    for (const w of State.schWires)
-      if (w.netId && w.a && w.b && (stat.get(w.netId) || {}).complete) wiredNets.add(w.netId);
+    for (const w of State.schWires){
+      const nid = wNet(w);
+      if (nid && w.a && w.b && (stat.get(nid) || {}).complete) wiredNets.add(nid);
+    }
   }
   L.push('(kicad_sch (version 20211123) (generator "pcb-reveng")');
   L.push('  (uuid ' + _uuid() + ')');
@@ -886,7 +890,8 @@ function exportKiCadSch(mode){
   if (exportWires) for (const w of State.schWires){
     const pts = w.points;
     if (!pts || pts.length < 2) continue;
-    const sameNet = State.schWires.filter(x => x !== w && (!x.netId || !w.netId || x.netId === w.netId));
+    const wn = wNet(w);
+    const sameNet = State.schWires.filter(x => { if (x === w) return false; const xn = wNet(x); return !xn || !wn || xn === wn; });
     const aOn = !!w.a || (typeof schWireOnPoint === "function" && !!schWireOnPoint(pts[0], w, sameNet));
     const bOn = !!w.b || (typeof schWireOnPoint === "function" && !!schWireOnPoint(pts[pts.length-1], w, sameNet));
     if (!aOn || !bOn) continue;                       // truly dangling draft — don't export

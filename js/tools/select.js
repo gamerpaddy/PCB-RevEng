@@ -416,8 +416,11 @@ function duplicateSelection(){
   copy.x += 30/View.zoom; copy.y += 30/View.zoom;
   // pin names + nets are inherited from the source part (deep-copied above)
   // drop the schematic placement so the copy re-seeds its own sheet spot (not stacked
-  // exactly on the original's symbol) and never inherits a symbol-position lock
+  // exactly on the original's symbol) and never inherits a symbol-position lock. Clear
+  // the schematic rotation/flips too, otherwise the fresh seed-grid copy shows up
+  // pre-rotated / mirrored (it has no position of its own to justify the transform).
   delete copy.schX; delete copy.schY; delete copy.schLockMove;
+  delete copy.schRot; delete copy.schFlipH; delete copy.schFlipV;
   copy.lockMove = copy.lockEdit = false; delete copy.locked;
   delete copy._fp;
   State.components.push(copy);

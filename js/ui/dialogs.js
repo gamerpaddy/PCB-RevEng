@@ -63,8 +63,8 @@ UI._renderBomTable = () => {
   $("#bom-count").textContent = "(" + groups.length + " lines · " + State.components.length + " parts" +
     (badFp ? " · ⚠ " + badFp + " footprint" + (badFp>1?"s":"") + " not in KiCad list" : "") + ")";
 
-  let h = "<thead><tr><th class='bom-idx'>#</th><th class='bom-qty'>Qty</th><th>Value</th><th>Part</th><th>Footprint</th><th>References</th>";
-  cols.forEach((c, ci) => { h += `<th>${escAttr(c)} <button class="bom-delcol" data-ci="${ci}" title="Remove column">×</button></th>`; });
+  let h = "<thead><tr><th class='bom-idx' data-colkey='#'>#</th><th class='bom-qty' data-colkey='Qty'>Qty</th><th data-colkey='Value'>Value</th><th data-colkey='Part'>Part</th><th data-colkey='Footprint'>Footprint</th><th data-colkey='References'>References</th>";
+  cols.forEach((c, ci) => { h += `<th data-colkey="col:${escAttr(c)}">${escAttr(c)} <button class="bom-delcol" data-ci="${ci}" title="Remove column">×</button></th>`; });
   h += "</tr></thead><tbody>";
   groups.forEach((g, gi) => {
     const refs = g.refs.join(", ");
@@ -117,13 +117,15 @@ UI._renderBomTable = () => {
 };
 
 /* resizable BOM columns: a grip on each header's right edge; widths are kept for the
-   session (UI._bomColW, keyed by column index) and re-applied on every table rebuild */
+   session (UI._bomColW, keyed by column NAME — not index — so adding/removing a custom
+   column doesn't shift saved widths onto the wrong columns) and re-applied on rebuild */
 UI._wireBomColResize = (table) => {
   const ths = [...table.querySelectorAll("thead th")];
   const saved = UI._bomColW || {};
   if (Object.keys(saved).length) table.style.tableLayout = "fixed";
   ths.forEach((th, i) => {
-    if (saved[i]) th.style.width = saved[i] + "px";
+    const ck = th.dataset.colkey || String(i);
+    if (saved[ck]) th.style.width = saved[ck] + "px";
     const grip = document.createElement("span");
     grip.className = "bom-resize";
     grip.title = "Drag to resize this column";
@@ -141,7 +143,7 @@ UI._wireBomColResize = (table) => {
       const mv = (ev) => {
         const w = Math.max(36, startW + ev.clientX - startX);
         th.style.width = w + "px";
-        (UI._bomColW || (UI._bomColW = {}))[i] = w;
+        (UI._bomColW || (UI._bomColW = {}))[ck] = w;
       };
       const up = () => {
         grip.classList.remove("dragging");

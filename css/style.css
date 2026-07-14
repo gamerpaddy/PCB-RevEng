@@ -232,8 +232,10 @@ select:focus,input:focus,textarea:focus{outline:1px solid var(--accent);}
 #bom-table-wrap{max-height:62vh; min-width:680px; overflow:auto; border:1px solid var(--line); border-radius:6px;}
 .bom-table{width:100%; border-collapse:collapse; font-size:12px; white-space:nowrap;}
 .bom-table th{position:sticky; top:0; z-index:1; background:var(--bg2); color:var(--fg-dim);
-  text-align:left; padding:4px 6px; border-bottom:1px solid var(--line); font-weight:600;}
-.bom-table td{padding:1px 3px; border-bottom:1px solid #1d242d;}
+  text-align:left; padding:4px 6px; border-bottom:1px solid var(--line); font-weight:600;
+  border-right:1px solid rgba(255,255,255,.07);}
+.bom-table td{padding:1px 3px; border-bottom:1px solid #1d242d; border-right:1px solid rgba(255,255,255,.055);}
+.bom-table th:last-child, .bom-table td:last-child{border-right:none;}
 .bom-table tbody tr:hover{background:var(--bg3);}
 .bom-table .bom-idx,.bom-table .bom-qty{color:var(--fg-dim); text-align:right; padding-right:8px;}
 .bom-table input.bom-refs{min-width:200px; color:var(--fg-dim);}

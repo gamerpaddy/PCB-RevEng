@@ -402,7 +402,10 @@ function qaShuffled(arr){
 QuickAdd.open = (w) => {
   QuickAdd.active = true;
   QuickAdd.pos = { x:w.x, y:w.y };
-  QuickAdd.side = Tools.ghostSide || (UI.copperSide() === "back" ? "back" : "front");
+  // follow the active draw side (the "Draw on: …" selector). Quick-add only opens with NO
+  // footprint armed, so Tools.ghostSide is a stale leftover from the last placement and
+  // must not override an explicit Draw-on-Back — place where the user is drawing.
+  QuickAdd.side = (UI.copperSide() === "back") ? "back" : "front";
   QuickAdd.rot = Tools.ghostRot || 0;
   QuickAdd.fp = null; QuickAdd.parsed = null;
   QuickAdd.pvZoom = 1;
@@ -411,6 +414,7 @@ QuickAdd.open = (w) => {
   $("#qa-info").textContent = QA_PROMPT;
   $("#qa-info").className = "qa-info";
   QuickAdd.renderSides();
+  QuickAdd.updateKeysHint();
   QuickAdd.updateInfo();
   $("#qa-dialog").showModal();
   QuickAdd.render();
@@ -445,6 +449,18 @@ QuickAdd.update = () => {
 };
 
 const QA_PROMPT = "Describe the part (package · value · part number) — the Examples list shows the syntax, click one to try it";
+
+/* the keys line under the input reflects the ACTUAL bound hotkeys (rotate CW/CCW/place),
+   so a rebind in the hotkey editor shows up here instead of a stale "Shift rotate CW" */
+QuickAdd.updateKeysHint = () => {
+  const el = $("#qa-keys");
+  if (!el) return;
+  const kf = (id) => (typeof Keymap !== "undefined" && Keymap.keyFor(id)) || "—";
+  const cw = kf("quickadd.rotcw"), ccw = kf("quickadd.rotccw"), place = kf("quickadd.place");
+  el.innerHTML = "Arrows or drag the preview nudge · " + escAttr(cw) + " rotate CW · " + escAttr(ccw) +
+    " rotate CCW · right-click preview rotates · " + escAttr(place) + " place · Esc cancel · wheel over preview zooms  " +
+    '<span style="opacity:.7">(keys editable in the hotkey editor)</span>';
+};
 
 /* the "next free" reference for a prefix WITHOUT reserving it (nextRef mutates counters) */
 function qaPreviewRef(prefix){
@@ -512,6 +528,7 @@ QuickAdd.render = () => {
   // preview device-px per mm — the footprint spans ~40% of the shorter side, board context
   // around; the wheel-zoom factor magnifies on top (big parts: zoom in to align pins)
   const pxPerMm = Math.min(PW, PH) / (extMm * 2 * 2.6) * (QuickAdd.pvZoom || 1);
+  QuickAdd._pxPerMm = pxPerMm;   // device px per mm — used to map a preview drag back to world px
 
   // re-render the board into the preview at our own pan/zoom (centred on the part). drawWorld
   // reads View.zoom / View.panX / View.panY, so temporarily override them and restore after.
@@ -632,6 +649,54 @@ QuickAdd.wire = () => {
     else if (e.key === c.ccw) QuickAdd.rotate(-90);
     else if (e.key === c.place) QuickAdd.place();
   });
+  // dialog-level keys: nudge / rotate / place / cancel keep working even when focus has
+  // left the text field (e.g. after clicking the preview) — the input's own handler still
+  // owns keys while it's focused (typing, bare-modifier taps for capitals).
+  $("#qa-dialog").addEventListener("keydown", (e) => {
+    if (!QuickAdd.active || e.target === inp) return;
+    if (e.repeat) return;                     // holding a modifier auto-repeats keydown
+    const c = cfg();
+    const step = State.pxPerMm * 0.25;        // 0.25 mm
+    if (e.key === "ArrowLeft"){ e.preventDefault(); QuickAdd.nudge(-step, 0); return; }
+    if (e.key === "ArrowRight"){ e.preventDefault(); QuickAdd.nudge(step, 0); return; }
+    if (e.key === "ArrowUp"){ e.preventDefault(); QuickAdd.nudge(0, -step); return; }
+    if (e.key === "ArrowDown"){ e.preventDefault(); QuickAdd.nudge(0, step); return; }
+    if (e.key === "Escape"){ e.preventDefault(); QuickAdd.close(); return; }
+    // rotate / place via the configured bindings — bare modifiers fire on keydown here
+    // (no text field to protect), everything else via the modifier-aware combo string
+    const ck = comboKey(e);
+    if (ck === c.cw){ e.preventDefault(); QuickAdd.rotate(90); return; }
+    if (ck === c.ccw){ e.preventDefault(); QuickAdd.rotate(-90); return; }
+    if (ck === c.place || (c.place === "Enter" && e.key === "Enter")){ e.preventDefault(); QuickAdd.place(); return; }
+  });
+
+  // drag anywhere on the preview to nudge the part (alternative to the arrow keys); the
+  // part stays pinned to the preview centre and the board scrolls under it, exactly like
+  // arrow nudging. Right-click the preview rotates (Shift = counter-clockwise).
+  const pv = $("#qa-preview");
+  let pvDrag = null;
+  pv.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    pvDrag = { x: e.clientX, y: e.clientY };
+    try { pv.setPointerCapture(e.pointerId); } catch(ex){}
+    pv.style.cursor = "grabbing";
+  });
+  pv.addEventListener("pointermove", (e) => {
+    if (!pvDrag) return;
+    const dpr = View.dpr || 1;
+    // CSS px → world px: inverse of the preview's world→device scale (QuickAdd._pxPerMm)
+    const f = (State.pxPerMm * dpr) / (QuickAdd._pxPerMm || (State.pxPerMm * dpr));
+    const fx = View.flip ? -1 : 1;            // flipped view mirrors world x on screen
+    const dxw = (e.clientX - pvDrag.x) * f * fx;
+    const dyw = (e.clientY - pvDrag.y) * f;
+    pvDrag.x = e.clientX; pvDrag.y = e.clientY;
+    QuickAdd.nudge(dxw, dyw);
+  });
+  const pvStop = (e) => { if (pvDrag){ pvDrag = null; pv.style.cursor = ""; } };
+  pv.addEventListener("pointerup", pvStop);
+  pv.addEventListener("pointercancel", pvStop);
+  pv.addEventListener("contextmenu", (e) => { e.preventDefault(); QuickAdd.rotate(e.shiftKey ? -90 : 90); });
+
   // mouse wheel over the preview zooms it (large parts make pin alignment hard otherwise)
   $("#qa-preview").addEventListener("wheel", (e) => {
     e.preventDefault();

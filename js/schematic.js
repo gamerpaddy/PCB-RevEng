@@ -216,7 +216,7 @@ function schConnectedWires(w){
    Map netId -> {groups:[[{key,x,y}]...], complete}; complete = all pins in ONE group
    (single-pin nets count complete). Ratlines are drawn BETWEEN the groups so the
    missing links are visible; a wire colours green only when its net is complete. */
-function schConnectivity(comps, geo){
+function schConnectivity(comps, geo, ignoreLabels){
   geo = geo || Sch.geo();
   comps = comps || State.components.filter(c => geo.has(c.id) && typeof c.schX === "number");
   const pinsByNet = new Map();                  // netId -> [{key,x,y}]
@@ -243,12 +243,19 @@ function schConnectivity(comps, geo){
       for (let j = i + 1; j < pins.length; j++)
         if (Math.abs(pins[i].x - pins[j].x) < 0.02 && Math.abs(pins[i].y - pins[j].y) < 0.02)
           union(pinNodes[i], pinNodes[j]);
-    // shared net labels → one common bus node for every labelled pin of the net
-    let busN = null;
-    for (let i = 0; i < pins.length; i++)
-      if (labelled.has(pins[i].key)){ if (busN == null) busN = node("lbl:" + nid); union(pinNodes[i], busN); }
-    // drawn wires (anchored ends + wire→wire T junctions)
-    const wires = State.schWires.filter(w => w.netId === nid);
+    // shared net labels → one common bus node for every labelled pin of the net.
+    // The exporter passes ignoreLabels=true: for the LABEL-STRIP gate a net counts as
+    // "complete" only when wires/contact truly join it, NOT when manual labels bridge it
+    // (those labels are never exported, so a label-only net would electrically split in
+    // KiCad if its pin labels were stripped as "already wired").
+    if (!ignoreLabels){
+      let busN = null;
+      for (let i = 0; i < pins.length; i++)
+        if (labelled.has(pins[i].key)){ if (busN == null) busN = node("lbl:" + nid); union(pinNodes[i], busN); }
+    }
+    // drawn wires (anchored ends + wire→wire T junctions). A wire's effective net is
+    // re-derived from its anchors so a wire drawn while its pin was net-less still counts.
+    const wires = State.schWires.filter(w => schWireNet(w) === nid);
     for (const w of wires){
       const wn = node("w:" + w.id);
       const ends = [[w.a, w.points[0]], [w.b, w.points[w.points.length - 1]]];
@@ -268,7 +275,9 @@ function schConnectivity(comps, geo){
 /* {complete} view over schConnectivity for the .kicad_sch exporter (label gating) */
 function schNetStatus(){
   const stat = new Map();
-  for (const [nid, info] of schConnectivity(null, Sch.geo())) stat.set(nid, { complete: info.complete });
+  // ignoreLabels=true — a net may skip its exported labels only when wires/contact fully
+  // connect it, not when manual (never-exported) net labels are the only thing joining it
+  for (const [nid, info] of schConnectivity(null, Sch.geo(), true)) stat.set(nid, { complete: info.complete });
   return stat;
 }
 
@@ -441,13 +450,16 @@ Sch.arrangeAI = async () => {
   if (typeof AI === "undefined" || !AI.enabled("arrange")){
     UI.toast("Enable AI schematic auto-arrange in 🔬 Experimental → AI Connect first"); return;
   }
-  const hadWires = State.schWires.length > 0;
   if (!Sch.confirmArrangeClearsWires()) return;
   (UI.warn || UI.toast)("AI is arranging the schematic… (may take a moment / cost a request) — debug log in 🔬 Experimental → AI Connect");
   try {
     const placements = await AI.arrangeSchematic();
     const byRef = new Map(placements.map(p => [String(p.ref), p]));
     pushUndo("AI arrange schematic");
+    // the UI stayed live during the await — re-check for wires NOW (not the pre-await
+    // snapshot) so wires drawn meanwhile are cleared instead of left dangling on the
+    // moved symbols, and clear every stale wire selection.
+    const hadWires = State.schWires.length > 0;
     if (hadWires){ State.schWires = []; Sch.selWire = null; Sch.selWires = null; Sch.selSeg = null; }
     let n = 0;
     for (const c of State.components){
@@ -551,6 +563,7 @@ Sch.render = () => {
   const conn = schConnectivity(comps, geo);
   schDrawRatlines(ctx, comps, geo, conn);
   schDrawWires(ctx, conn);
+  schDrawJunctions(ctx);
   for (const c of comps) schDrawSymbol(ctx, c, geo.get(c.id));
   schDrawPowerPins(ctx, comps, geo);
   schDrawNetLabels(ctx, comps, geo);
@@ -800,11 +813,13 @@ function schDrawWires(ctx, conn){
     if (!pts || pts.length < 2) continue;
     const sel = w === Sch.selWire || (Sch.selWires && Sch.selWires.includes(w));
     // an end counts as landed when anchored to a pin OR sitting on another wire
-    // of the same net (T junction — drawn as a filled dot)
-    const sameNet = State.schWires.filter(x => x !== w && (!x.netId || !w.netId || x.netId === w.netId));
+    // of the same net (T junction — drawn as a filled dot). Net comparison uses the
+    // EFFECTIVE net (re-derived from anchors) so a wire drawn while net-less still matches.
+    const wn = schWireNet(w);
+    const sameNet = State.schWires.filter(x => { if (x === w) return false; const xn = schWireNet(x); return !xn || !wn || xn === wn; });
     const aOn = !!w.a || !!schWireOnPoint(pts[0], w, sameNet);
     const bOn = !!w.b || !!schWireOnPoint(pts[pts.length-1], w, sameNet);
-    const good = aOn && bOn && (!w.netId || (stat.get(w.netId) || { complete: true }).complete);
+    const good = aOn && bOn && (!wn || (stat.get(wn) || { complete: true }).complete);
     ctx.strokeStyle = sel ? "#4da3ff" : (good ? SCH_WIRE_OK : SCH_WIRE_BAD);
     ctx.lineWidth = sel ? 2.4 : 1.6;
     ctx.lineJoin = "round"; ctx.lineCap = "round";
@@ -829,6 +844,59 @@ function schDrawWires(ctx, conn){
       ctx.moveTo(schX2S(a.x), schY2S(a.y)); ctx.lineTo(schX2S(b.x), schY2S(b.y));
       ctx.stroke();
     }
+  }
+}
+
+/* junction dots where 3+ wire conductors meet — a small filled node, sized to about half a
+   pin-name letter and scaling with zoom, so a real branch point reads clearly without the
+   heavy blob. A point's incidence count decides it (≥3 → junction):
+     · each wire SEGMENT contributes +1 at each of its two endpoints, so a polyline's
+       interior VERTEX (a corner) accrues +2 and a plain end +1;
+     · an ANCHORED wire end adds +1 more — the pin it lands on is itself a conductor, so a
+       wire whose end merely TOUCHES another wire's anchored end still totals 3 (fixes the
+       "no dot on a corner / anchor" case);
+     · a wire vertex landing on the INTERIOR of another wire's straight run adds +2 (that
+       run passes through — a T onto a mid-segment).
+   Pins are never counted on their own, so two part pins touching (with a single wire on
+   them) stay a plain 2-conductor node — no dot. Crossings with no shared vertex/end aren't
+   junctions either (KiCad semantics). */
+function schDrawJunctions(ctx){
+  const wires = State.schWires;
+  if (!wires || wires.length < 2 || wires.length > 4000) return;
+  const key = (x, y) => Math.round(x * 10) + "," + Math.round(y * 10);
+  const inc = new Map();                              // key -> {x,y,n}
+  const bump = (x, y, n) => { const k = key(x, y); let e = inc.get(k); if (!e) inc.set(k, e = { x, y, n: 0 }); e.n += n; };
+  // (1) segment endpoints (corners score +2, ends +1) and (1b) the pin behind an anchor
+  for (const w of wires){
+    const p = w.points; if (!p || p.length < 2) continue;
+    for (let i = 0; i + 1 < p.length; i++){ bump(p[i].x, p[i].y, 1); bump(p[i+1].x, p[i+1].y, 1); }
+    if (w.a) bump(p[0].x, p[0].y, 1);
+    if (w.b) bump(p[p.length - 1].x, p[p.length - 1].y, 1);
+  }
+  // (2) a vertex landing mid-segment of ANOTHER wire → that wire passes through (+2)
+  for (const w of wires){
+    const p = w.points; if (!p || p.length < 2) continue;
+    for (const v of p){
+      const vk = key(v.x, v.y);
+      for (const o of wires){
+        if (o === w) continue;
+        const op = o.points; if (!op || op.length < 2) continue;
+        let atVertex = false;
+        for (const q of op){ if (key(q.x, q.y) === vk){ atVertex = true; break; } }
+        if (atVertex) continue;                         // shared vertex — already counted in (1)
+        for (let i = 0; i + 1 < op.length; i++)
+          if (distToSeg(v.x, v.y, op[i], op[i+1]) <= 0.05){ bump(v.x, v.y, 2); break; }
+      }
+    }
+  }
+  // size: ~half a pin-name letter (font is 1.15·zoom px tall), scaling with zoom
+  const r = Math.max(1.8, 0.3 * Sch.zoom);
+  ctx.fillStyle = SCH_WIRE_OK;
+  for (const e of inc.values()){
+    if (e.n < 3) continue;
+    ctx.beginPath();
+    ctx.arc(schX2S(e.x), schY2S(e.y), r, 0, Math.PI * 2);
+    ctx.fill();
   }
 }
 
@@ -958,6 +1026,16 @@ function schNetOfAnchor(an){
   return c ? (c.pins[an.pin] || {}).netId || null : null;
 }
 
+/* a wire's EFFECTIVE net: its stored netId if set, else re-derived live from whichever
+   end is anchored to a pin. A wire drawn from a then-netless pin keeps netId:null forever
+   even after the pin gets a net in the Visual editor — trusting the stored value alone
+   would leave the net reporting incomplete (ratlines linger, exporter never suppresses
+   its labels). Deriving it lazily keeps connectivity + export honest without mutating the
+   stored wire. */
+function schWireNet(w){
+  return (w && w.netId) || schNetOfAnchor(w && w.a) || schNetOfAnchor(w && w.b) || null;
+}
+
 /* a board component is being deleted — remove the schematic wires anchored to its pins
    and any manual net labels pinned to it, so nothing is left dangling on a ghost part.
    Called from the delete paths (inside their pushUndo, so it's part of that undo step). */
@@ -1000,8 +1078,13 @@ function schUpdateWiresFor(comp){
       pts[endIdx] = { x: p.x, y: p.y };
       touched = true;
     }
-    // short fully-anchored wire → just re-route it as a clean straight/L run
-    if (touched && w.a && w.b && w.points.length <= 3){
+    // short wire with a moved anchored end → re-route it as a clean straight/L run so it
+    // never goes diagonal. This also covers a 2-point wire with ONE free end (every
+    // T-junction branch is a:null,b:pin, or vice-versa): its free/T-landed end stays put
+    // (keeping the junction) while an inserted elbow keeps the 90° invariant that
+    // schWireSegPoint / schSegDir / the overlap tests all rely on. Only `touched` wires
+    // reach here, so at least one end is anchored to the moved part.
+    if (touched && w.points.length <= 3){
       const A = w.points[0], B = w.points[w.points.length - 1];
       w.points = (Math.abs(A.x-B.x) < 0.01 || Math.abs(A.y-B.y) < 0.01)
         ? [A, B] : [A, { x: B.x, y: A.y }, B];
@@ -1598,12 +1681,15 @@ Sch.nudgeSelection = (dx, dy) => {
   const targets = Sch.boxSel.length ? Sch.boxSel
                 : (UI.sel && UI.sel.type === "comp" && typeof UI.sel.comp.schX === "number") ? [UI.sel.comp] : [];
   if (!targets.length) return false;
+  // skip locked symbols; an all-locked selection is still "consumed" (arrows don't pan
+  // the view over it) but must NOT push an empty undo step
+  const movable = targets.filter(c => !compSchMoveLocked(c));
+  if (!movable.length) return true;
   // coalesce rapid arrow presses into one undo step
   const now = Date.now();
   if (!Sch._nudgeAt || now - Sch._nudgeAt > 1500) pushUndo("move schematic selection");
   Sch._nudgeAt = now;
-  for (const c of targets){
-    if (compSchMoveLocked(c)) continue;
+  for (const c of movable){
     c.schX = schSnap(c.schX + dx * SCH_GRID);
     c.schY = schSnap(c.schY + dy * SCH_GRID);
     schUpdateWiresFor(c);
@@ -1991,20 +2077,23 @@ Sch.wire = () => {
         else if (t.length === 1) Sch.rotate(t[0]);
         else {
           // rotate the whole selection as ONE block: every symbol spins 90° AND its
-          // position orbits the group's centre (not each part spinning in place)
-          pushUndo("rotate schematic selection");
-          let cx = 0, cy = 0;
-          for (const c of t){ cx += c.schX; cy += c.schY; }
-          cx = schSnap(cx / t.length); cy = schSnap(cy / t.length);
-          for (const c of t){
-            if (compSchMoveLocked(c)) continue;   // a locked symbol stays put — don't orbit it
-            const dx = c.schX - cx, dy = c.schY - cy;
-            c.schX = schSnap(cx + dy);   // 90° CCW on screen (y-down): (dx,dy) → (dy,−dx)
-            c.schY = schSnap(cy - dx);
-            c.schRot = (schRotOf(c) + 90) % 360;
-            schUpdateWiresFor(c);
+          // position orbits the group's centre (not each part spinning in place).
+          // Bail without an undo step if every symbol in the selection is locked.
+          const movable = t.filter(c => !compSchMoveLocked(c));
+          if (movable.length){
+            pushUndo("rotate schematic selection");
+            let cx = 0, cy = 0;
+            for (const c of t){ cx += c.schX; cy += c.schY; }
+            cx = schSnap(cx / t.length); cy = schSnap(cy / t.length);
+            for (const c of movable){
+              const dx = c.schX - cx, dy = c.schY - cy;
+              c.schX = schSnap(cx + dy);   // 90° CCW on screen (y-down): (dx,dy) → (dy,−dx)
+              c.schY = schSnap(cy - dx);
+              c.schRot = (schRotOf(c) + 90) % 360;
+              schUpdateWiresFor(c);
+            }
+            Sch.render();
           }
-          Sch.render();
         }
       }
     } else if (k === "x" || k === "X" || k === "y" || k === "Y"){
@@ -2012,9 +2101,12 @@ Sch.wire = () => {
       const t = Sch.targets();
       if (!t.length){ /* consumed — X must not toggle the board X-ray from this tab */ }
       else if (t.length > 1){
-        pushUndo("flip schematic selection");
-        for (const c of t){ if (compSchMoveLocked(c)) continue; schFlipComp(c, vert); schUpdateWiresFor(c); }
-        Sch.render();
+        const movable = t.filter(c => !compSchMoveLocked(c));
+        if (movable.length){
+          pushUndo("flip schematic selection");
+          for (const c of movable){ schFlipComp(c, vert); schUpdateWiresFor(c); }
+          Sch.render();
+        }
       } else Sch.flip(t[0], vert);
     } else if (k === "n" || k === "N"){
       if (!Sch._lastP) return;
