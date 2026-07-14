@@ -841,7 +841,7 @@ function wireDialogs(){
   });
   $("#options-close").addEventListener("click", ()=> $("#options-dialog").close());
   $("#history-close").addEventListener("click", ()=> $("#history-dialog").close());
-  $("#checker-close").addEventListener("click", ()=>{ $("#checker-dialog").close(); View.checkMarks = null; View.shortMarks = null; requestRender(); });
+  $("#checker-close").addEventListener("click", ()=>{ $("#checker-dialog").close(); stopCheckMarks(); });
   $("#export-close").addEventListener("click", ()=> $("#export-dialog").close());
   $("#export-copy").addEventListener("click", ()=>{
     navigator.clipboard?.writeText($("#export-preview").value);

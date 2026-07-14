@@ -83,6 +83,14 @@ function fadeCheckMarks(){
   }, 60);
 }
 
+/* clear checker rings AND stop the fade interval — call when dismissing the checker early
+   (closing the dialog) so the 60ms interval doesn't keep firing requestRender for up to 5s */
+function stopCheckMarks(){
+  if (_checkFadeTimer){ clearInterval(_checkFadeTimer); _checkFadeTimer = null; }
+  View.checkMarks = null; View.shortMarks = null;
+  requestRender();
+}
+
 function viewInit(canvas){
   View.canvas = canvas;
   View.ctx = canvas.getContext("2d");
