@@ -194,6 +194,7 @@ function mergeNets(aId, bId){
     for (const p of c.pins) if (p.netId === drop.id) p.netId = keep.id;
   for (const v of State.vias)   if (v.netId === drop.id) v.netId = keep.id;
   for (const t of State.traces) if (t.netId === drop.id) t.netId = keep.id;
+  for (const w of State.schWires) if (w.netId === drop.id) w.netId = keep.id;
   State.nets = State.nets.filter(n => n.id !== drop.id);
   return keep.id;
 }
@@ -239,6 +240,7 @@ function pruneNets(){
   for (const c of State.components) for (const p of c.pins) if (p.netId) used.add(p.netId);
   for (const v of State.vias)   if (v.netId) used.add(v.netId);
   for (const t of State.traces) if (t.netId) used.add(t.netId);
+  for (const w of State.schWires) if (w.netId) used.add(w.netId);
   State.nets = State.nets.filter(n => used.has(n.id) || !n.auto);
 }
 
@@ -299,7 +301,10 @@ function snapshot(){
     copperOz: State.copperOz,
     copperOzInner: State.copperOzInner,
     focusDim: State.focusDim,
-    components: State.components,
+    // `_fp` is a RUNTIME footprint cache — strip it (like serializeProject) so undo
+    // snapshots don't balloon on big imported boards, and so a mere cache regeneration
+    // isn't reported as an "edit" by diffSnapshots / selectiveUndo.
+    components: State.components.map(c => { const { _fp, ...rest } = c; return rest; }),
     vias: State.vias,
     traces: State.traces,
     notes: State.notes,
@@ -352,6 +357,7 @@ function applySnapshot(json){
   State.copperOzInner = s.copperOzInner || 0.5;
   State.focusDim = (s.focusDim != null) ? s.focusDim : 0.16;
   State.components = s.components;
+  State.components.forEach(c => { c._fp = null; });   // snapshots no longer carry _fp — regenerate on demand
   State.vias = s.vias;
   State.traces = s.traces;
   State.notes = s.notes || [];

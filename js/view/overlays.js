@@ -1,4 +1,4 @@
-/* ===== view/overlays.js — ratsnest, coverage mask, sticky-note bubbles ===== */
+/* ===== view/overlays.js — ratsnest, sticky-note bubbles ===== */
 "use strict";
 
 
@@ -133,76 +133,8 @@ function renderRatsnest(ctx, selNet){
   ctx.restore();
 }
 
-/* ---------- coverage mask: REMOVED (Jul 2026) ----------
-   The coverage-mask overlay was dropped; the helper is retained-as-dead only if
-   referenced. All wiring/buttons/keymap removed. */
-let _maskCv = null;
-function renderMask_removed(ctx){
-  if (!_maskCv) _maskCv = document.createElement("canvas");
-  const mc = _maskCv;
-  // only resize when the canvas actually changed — assigning width/height reallocates the
-  // buffer (and clears it), so doing it every frame the mask is on is pure waste
-  if (mc.width !== View.canvas.width || mc.height !== View.canvas.height){
-    mc.width = View.canvas.width; mc.height = View.canvas.height;
-  }
-  const m = mc.getContext("2d");
-  m.setTransform(1,0,0,1,0,0);
-  m.clearRect(0,0,mc.width,mc.height);   // clear ourselves since we no longer realloc each frame
-  m.setTransform(View.dpr,0,0,View.dpr,0,0);
-  const fx = View.flip ? -1 : 1;
-  m.translate(View.panX + View._paneDX, View.panY);
-  m.scale(View.zoom * fx, View.zoom);
-  // strong dark-red tint over every visible photo area (covered areas get punched
-  // out below, so they stay bright — high contrast against the darkened rest)
-  const tintLayers = (style) => {
-    m.fillStyle = style;
-    for (const l of State.layers){
-      if (!l.visible || !l.img || !l.img.width) continue;
-      m.save();
-      m.translate(l.tx, l.ty);
-      if (l.warp) m.transform(l.warp.a, l.warp.b, l.warp.c, l.warp.d, 0, 0);
-      else { m.rotate(l.rot*Math.PI/180); m.scale(l.scale*(l.mirror?-1:1), l.scale); }
-      m.fillRect(-l.img.width/2, -l.img.height/2, l.img.width, l.img.height);
-      m.restore();
-    }
-  };
-  tintLayers("rgba(8,9,12,0.62)");    // darken
-  tintLayers("rgba(255,55,55,0.42)"); // then red
-  // punch holes that follow each component's actual footprint shape (+ margin),
-  // so a wide connector only clears its own outline, not a huge circle
-  m.globalCompositeOperation = "destination-out";
-  m.fillStyle = "#000";
-  const margin = 1.5 * State.pxPerMm; // 1.5 mm halo around the part
-  for (const c of State.components){
-    const fp = compFootprint(c);
-    const s = State.pxPerMm * (c.scale||1);
-    m.save();
-    m.translate(c.x, c.y);
-    m.rotate(c.rot * Math.PI/180);
-    if (c.side === "back") m.scale(-1,1);
-    if (fp.body.shape === "circle"){
-      const br = Math.max(fp.body.w, fp.body.h)*s/2 + margin;
-      m.beginPath(); m.arc(0,0,br,0,Math.PI*2); m.fill();
-    } else {
-      const bw = fp.body.w*s + margin*2, bh = fp.body.h*s + margin*2;
-      m.fillRect(-bw/2, -bh/2, bw, bh);
-    }
-    // also clear around each pad (covers pads that stick out past the body)
-    for (const pin of fp.pins){
-      const pr = Math.max(pin.w, pin.h)*s/2 + margin*0.6;
-      m.beginPath(); m.arc(pin.xmm*s, pin.ymm*s, pr, 0, Math.PI*2); m.fill();
-    }
-    m.restore();
-  }
-  for (const v of State.vias){
-    m.beginPath(); m.arc(v.x, v.y, (v.r||State.viaR) + margin*0.6, 0, Math.PI*2); m.fill();
-  }
-  // composite onto the main canvas in device space
-  ctx.save();
-  ctx.setTransform(1,0,0,1,0,0);
-  ctx.drawImage(mc, 0, 0);
-  ctx.restore();
-}
+/* coverage-mask overlay REMOVED (Jul 2026): the whole feature (flag, button, keymap,
+   render helper) was dropped — nothing references it any more. */
 
 /* ---------- sticky-note annotations ----------
    Non-obstructing by design: a small constant-size marker is always shown, but the

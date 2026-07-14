@@ -842,6 +842,8 @@ function wireDialogs(){
   $("#options-close").addEventListener("click", ()=> $("#options-dialog").close());
   $("#history-close").addEventListener("click", ()=> $("#history-dialog").close());
   $("#checker-close").addEventListener("click", ()=>{ $("#checker-dialog").close(); stopCheckMarks(); });
+  // also clear the rings when the dialog is dismissed with Esc (native cancel → close event)
+  $("#checker-dialog").addEventListener("close", ()=> stopCheckMarks());
   $("#export-close").addEventListener("click", ()=> $("#export-dialog").close());
   $("#export-copy").addEventListener("click", ()=>{
     navigator.clipboard?.writeText($("#export-preview").value);

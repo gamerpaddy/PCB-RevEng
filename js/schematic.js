@@ -29,6 +29,11 @@ const EditorTabs = {
     $("#main").style.display           = name === "visual"    ? "" : "none";
     $("#schematic-pane").style.display = name === "schematic" ? "" : "none";
     $("#bom-pane").style.display       = name === "bom"       ? "" : "none";
+    // leaving the schematic tab: kill the search-jump flash interval so it doesn't keep
+    // firing renders at the hidden canvas for up to 5s
+    if (name !== "schematic" && typeof Sch !== "undefined" && Sch._flashTimer){
+      clearInterval(Sch._flashTimer); Sch._flashTimer = null; Sch.flashMark = null;
+    }
     // the board tool / view button groups only apply to the visual editor —
     // the schematic and BOM tabs carry their own toolsets
     for (const sel of ["#toolbar", "#tb-view"]){
@@ -60,6 +65,7 @@ const EditorTabs = {
     // F1 / F2 / F3 switch tabs from anywhere (capture, ahead of the browser's F1 help)
     window.addEventListener("keydown", (e) => {
       if (!/^F[123]$/.test(e.key) || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
+      if (e.target && e.target.matches && e.target.matches("input,select,textarea")) return;
       if (document.querySelector("dialog[open]")) return;
       e.preventDefault();
       if (e.key === "F1") EditorTabs.show("visual");
@@ -350,7 +356,7 @@ Sch.flashAt = (x, y) => {
     if (!Sch.flashMark || now - Sch.flashMark.t0 >= 5000){
       clearInterval(Sch._flashTimer); Sch._flashTimer = null; Sch.flashMark = null;
     }
-    Sch.render();
+    Sch.requestRender();   // no-op when the schematic tab isn't showing (guards the hidden canvas)
   }, 60);
 };
 
@@ -913,6 +919,26 @@ function schNetOfAnchor(an){
   return c ? (c.pins[an.pin] || {}).netId || null : null;
 }
 
+/* a board component is being deleted — remove the schematic wires anchored to its pins
+   and any manual net labels pinned to it, so nothing is left dangling on a ghost part.
+   Called from the delete paths (inside their pushUndo, so it's part of that undo step). */
+function schForgetComp(compId){
+  if (State.schWires && State.schWires.length)
+    State.schWires = State.schWires.filter(w =>
+      !(w.a && w.a.comp === compId) && !(w.b && w.b.comp === compId));
+  if (State.schLabels && State.schLabels.length)
+    State.schLabels = State.schLabels.filter(l => l.comp !== compId);
+}
+
+/* may a dragged free wire end of `w` legally land on `pin` ({comp,pin})? Only when they
+   share a net (or either side is still net-less). Keeps an end from snapping onto — or
+   anchoring to — a different-net pin. */
+function schWireEndPinOK(w, pin){
+  const wireNet = w.netId || schNetOfAnchor(w.a) || schNetOfAnchor(w.b);
+  const pinNet = schNetOfAnchor({ comp: pin.comp.id, pin: pin.pin });
+  return !wireNet || !pinNet || wireNet === pinNet;
+}
+
 /* wires whose endpoint is anchored to a pin of `comp` follow the pin when the part
    moves/rotates/flips; the neighbouring point is shifted to keep every bend at 90° */
 function schUpdateWiresFor(comp){
@@ -1195,6 +1221,7 @@ function schPtInBody(c, mx, my){
 /* rotate a symbol 90° CCW (R key) — wires anchored to its pins follow */
 Sch.rotate = (c) => {
   if (!c) return;
+  if (compSchMoveLocked(c)){ UI.toast(c.ref + " symbol is locked 🔒"); return; }
   pushUndo("rotate schematic symbol");
   c.schRot = (schRotOf(c) + 90) % 360;
   schUpdateWiresFor(c);
@@ -1204,6 +1231,7 @@ Sch.rotate = (c) => {
 /* flip a symbol horizontally (X) or vertically (Y) — schematic only */
 Sch.flip = (c, vert) => {
   if (!c) return;
+  if (compSchMoveLocked(c)){ UI.toast(c.ref + " symbol is locked 🔒"); return; }
   pushUndo("flip schematic symbol");
   schFlipComp(c, vert);
   schUpdateWiresFor(c);
@@ -1476,7 +1504,10 @@ Sch.onMove = (p, e) => {
     }
     if (d.kind === "wireend"){
       if (!d.armed){ pushUndo("move wire end"); d.armed = true; }
-      const pin = schFindPin(p.x, p.y);   // snapping to a pin lets a stray end re-connect
+      const rawPin = schFindPin(p.x, p.y);   // snapping to a pin lets a stray end re-connect
+      // only snap onto a pin the end may legally join — a different-net pin is ignored so
+      // the end can't visually attach where it can't electrically connect
+      const pin = (rawPin && schWireEndPinOK(d.w, rawPin)) ? rawPin : null;
       Sch.hotPin = pin;
       const pt = d.w.points[d.idx];
       const tgt = pin ? pin.pos : { x: schSnap(mx), y: schSnap(my) };
@@ -1487,7 +1518,12 @@ Sch.onMove = (p, e) => {
     }
     if (d.kind === "comp" || d.kind === "group"){
       const items = d.kind === "comp" ? [{ c: d.comp, dx: d.dx, dy: d.dy }] : d.group;
-      const lead = items[0];
+      // the shift is measured from a LEAD item's position each frame, so the lead must be
+      // one that actually moves — a locked lead never updates its schX, making shX grow
+      // every frame and flinging the unlocked parts across the sheet. Lead off a movable one.
+      const movable = items.filter(it => !compSchMoveLocked(it.c));
+      if (!movable.length) return;                 // whole selection locked → nothing to move
+      const lead = movable[0];
       const nx = schSnap(mx - lead.dx), ny = schSnap(my - lead.dy);
       if (nx === lead.c.schX && ny === lead.c.schY) return;
       if (!d.armed){
@@ -1495,11 +1531,11 @@ Sch.onMove = (p, e) => {
         d.armed = true;
         // record which pins are touching a stationary same-net pin right now, so pulling
         // them apart can drop a wire in the gap (see schSpawnTouchWires on release)
-        d.touchPairs = schTouchingPairs(items.map(it => it.c));
+        d.touchPairs = schTouchingPairs(movable.map(it => it.c));
       }
       d.moved = true;
       const shX = nx - lead.c.schX, shY = ny - lead.c.schY;
-      for (const it of items){ if (compSchMoveLocked(it.c)) continue; it.c.schX += shX; it.c.schY += shY; schUpdateWiresFor(it.c); }
+      for (const it of movable){ it.c.schX += shX; it.c.schY += shY; schUpdateWiresFor(it.c); }
       Sch.render();
       return;
     }
@@ -1541,6 +1577,26 @@ function schContextMenu(clientX, clientY, p){
   const pin = schFindPin(p.x, p.y, 12);
   const w = schWireHit(p.x, p.y);
   const c = Sch.hit(mx, my);
+  const boxSel = (Sch.boxSel && Sch.boxSel.length) ? Sch.boxSel.slice() : null;
+  // "Lock/Unlock movement" — pins the symbol's sheet position (schLockMove). Group form
+  // toggles the whole box selection together (lock all unless every one is already locked).
+  const groupLockItem = () => {
+    const lockAll = boxSel.some(x => !x.schLockMove);
+    return { label: (lockAll ? "Lock movement" : "Unlock movement") + " · " + boxSel.length + " symbol" + (boxSel.length===1?"":"s"),
+      action: () => {
+        pushUndo();
+        for (const x of boxSel) x.schLockMove = lockAll;
+        UI.toast(boxSel.length + " symbol" + (boxSel.length===1?"":"s") + (lockAll ? " locked 🔒" : " unlocked"));
+        UI.refreshInspector(); Sch.render();
+      } };
+  };
+  const singleLockItem = (cc) => ({ label: cc.schLockMove ? "Unlock movement" : "Lock movement",
+    action: () => {
+      pushUndo();
+      cc.schLockMove = !cc.schLockMove;
+      UI.toast(cc.ref + (cc.schLockMove ? " symbol locked 🔒" : " symbol unlocked"));
+      UI.refreshInspector(); Sch.render();
+    } });
   if (lab){
     Sch.selLabel = lab; Sch.render();
     items.push({ label: "Edit net name…", action: () => Sch.editLabel(lab) });
@@ -1557,11 +1613,15 @@ function schContextMenu(clientX, clientY, p){
       UI.select(null); Sch.render();
     }});
   } else if (c){
-    UI.select({ type: "comp", comp: c }); Sch.render();
+    // right-clicking a boxed part keeps the box selection and acts on the whole group
+    const inBox = boxSel && boxSel.length > 1 && boxSel.includes(c);
+    if (!inBox){ UI.select({ type: "comp", comp: c }); Sch.render(); }
     items.push({ label: "Rotate 90°  [R]", action: () => Sch.rotate(c) });
     items.push({ label: "Flip horizontal  [X]", action: () => Sch.flip(c, false) });
     items.push({ label: "Flip vertical  [Y]", action: () => Sch.flip(c, true) });
     items.push({ label: "Edit ref / value…", action: () => UI.openQuickEdit(c) });
+    items.push({ sep: true });
+    items.push(inBox ? groupLockItem() : singleLockItem(c));
     items.push({ sep: true });
     items.push({ label: "Show on board (Visual)", action: () => schJumpToVisual(c) });
   } else if (w){
@@ -1573,6 +1633,8 @@ function schContextMenu(clientX, clientY, p){
       Sch.render();
     }});
   } else {
+    // empty space with a box selection → offer to lock/unlock the whole group
+    if (boxSel){ items.push(groupLockItem()); items.push({ sep: true }); }
     items.push({ label: Sch.mode === "wire" ? "Wire mode off  [W/Esc]" : "Wire mode  [W]", action: () => Sch.setMode(Sch.mode === "wire" ? "select" : "wire") });
     items.push({ label: "Zoom to fit", action: () => Sch.fit() });
   }
@@ -1778,11 +1840,13 @@ Sch.wire = () => {
       if (pin){
         const wireNet = d.w.netId || schNetOfAnchor(d.w.a) || schNetOfAnchor(d.w.b);
         const pinNet = schNetOfAnchor({ comp: pin.comp.id, pin: pin.pin });
-        if (!wireNet || !pinNet || wireNet === pinNet){
+        if (schWireEndPinOK(d.w, pin)){
           const key = d.idx === 0 ? "a" : "b";
           d.w[key] = { comp: pin.comp.id, pin: pin.pin };
           d.w.points[d.idx] = { x: pin.pos.x, y: pin.pos.y };
           if (!d.w.netId) d.w.netId = wireNet || pinNet || null;
+        } else {
+          UI.warn("Different net — " + (getNet(wireNet)?.name || "?") + " can't connect to " + (getNet(pinNet)?.name || "?"));
         }
       }
       d.w.points = schCleanPoints(d.w.points);
@@ -1870,6 +1934,7 @@ Sch.wire = () => {
           for (const c of t){ cx += c.schX; cy += c.schY; }
           cx = schSnap(cx / t.length); cy = schSnap(cy / t.length);
           for (const c of t){
+            if (compSchMoveLocked(c)) continue;   // a locked symbol stays put — don't orbit it
             const dx = c.schX - cx, dy = c.schY - cy;
             c.schX = schSnap(cx + dy);   // 90° CCW on screen (y-down): (dx,dy) → (dy,−dx)
             c.schY = schSnap(cy - dx);
@@ -1885,7 +1950,7 @@ Sch.wire = () => {
       if (!t.length){ /* consumed — X must not toggle the board X-ray from this tab */ }
       else if (t.length > 1){
         pushUndo("flip schematic selection");
-        for (const c of t){ schFlipComp(c, vert); schUpdateWiresFor(c); }
+        for (const c of t){ if (compSchMoveLocked(c)) continue; schFlipComp(c, vert); schUpdateWiresFor(c); }
         Sch.render();
       } else Sch.flip(t[0], vert);
     } else if (k === "n" || k === "N"){

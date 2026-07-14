@@ -69,7 +69,7 @@ Cache-buster: bump `?v=` in `index.html` when editing a file so the browser relo
 | `hittest.js` | `hitTest` (topmost object under cursor), `snapToConductor`, segment math (`distToSeg`, `projectOnSeg`, `segsIntersect`, `minSegDist`), `tracesOverlap`, `tracesTouch`. |
 | `render.js` | `requestRender` (rAF-coalesced), `render`, per-pane orchestration, visibility (`activeSide`, `effXray`, `compBodyVisible`, `traceVisible`, `viaVisible`), `drawWorld` main pass, crop/pad-edit/measure overlays, second-cursor mirror in split view. |
 | `draw.js` | Color/highlight (`currentHighlightNet`, `netColor`, `focusAlpha`), `drawTrace`/`pathTrace`, `drawVia` (blind/buried arm rendering, `computeLabViaSet`, `viaArmCount`), `drawComponent` (bodies + pads + refs), align-tool banner and 4-point overlay, `captureAlignThumb`. |
-| `overlays.js` | Ratsnest (`netNodes`, `mstEdges`, star-mode, hover-cap), coverage-mask tint (`renderMask`), sticky-note bubbles (`drawNotes`, `drawNoteBubble`, `roundRect`, `noteColor`). |
+| `overlays.js` | Ratsnest (`netNodes`, `mstEdges`, star-mode, hover-cap), sticky-note bubbles (`drawNotes`, `drawNoteBubble`, `roundRect`, `noteColor`). |
 
 ## Load order (see `index.html`)
 

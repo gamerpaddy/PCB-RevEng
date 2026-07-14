@@ -5,7 +5,6 @@ const View = {
   canvas: null, ctx: null,
   panX: 0, panY: 0, zoom: 1,
   flip: false,            // true = look at the board from the back (mirror X)
-  mask: false,            // coverage mask overlay
   width: 0, height: 0,
   hoverNetId: null,       // net under cursor → highlights the WHOLE net (only when nothing is selected)
   hoverObj: null,         // trace/via under cursor → highlighted on its own (the "just this thing" hover cue)

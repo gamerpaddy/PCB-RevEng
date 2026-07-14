@@ -415,6 +415,9 @@ function duplicateSelection(){
   copy.id = nextId(); copy.ref = ref;
   copy.x += 30/View.zoom; copy.y += 30/View.zoom;
   // pin names + nets are inherited from the source part (deep-copied above)
+  // drop the schematic placement so the copy re-seeds its own sheet spot (not stacked
+  // exactly on the original's symbol) and never inherits a symbol-position lock
+  delete copy.schX; delete copy.schY; delete copy.schLockMove;
   copy.lockMove = copy.lockEdit = false; delete copy.locked;
   delete copy._fp;
   State.components.push(copy);

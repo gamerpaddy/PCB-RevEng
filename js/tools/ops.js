@@ -150,6 +150,7 @@ function deleteSelection(){
   pushUndo();
   if (sel.type === "comp"){
     State.components = State.components.filter(c => c !== sel.comp);
+    if (typeof schForgetComp === "function") schForgetComp(sel.comp.id);   // drop its schematic wires/labels
   } else if (sel.type === "via"){
     State.vias = State.vias.filter(v => v !== sel.via);
     pruneCollinearAnchors(sel.via.x, sel.via.y);   // drop the anchor vertex the via added, if still straight
@@ -176,7 +177,10 @@ function deleteBoxSelection(){
   const total = delComps.size + delVias.size + delTraces.size + delNotes.size;
   if (!total){ UI.toast(locked.length ? "All boxed parts are edit-locked" : "Nothing to delete"); return; }
   pushUndo("delete " + total + " objects");
-  if (delComps.size) State.components = State.components.filter(c => !delComps.has(c));
+  if (delComps.size){
+    State.components = State.components.filter(c => !delComps.has(c));
+    if (typeof schForgetComp === "function") for (const c of delComps) schForgetComp(c.id);   // drop their schematic wires/labels
+  }
   if (delVias.size){
     State.vias = State.vias.filter(v => !delVias.has(v));
     for (const v of delVias) pruneCollinearAnchors(v.x, v.y);
@@ -339,6 +343,15 @@ function splitNetByConnectivity(netId){
       else it.trace.netId = nn.id;
     }
   }
+  // schematic wires drawn on the old net follow their anchor pin to whatever net it now
+  // carries (a branch wire with no anchor keeps the largest island's net — best available)
+  if (State.schWires) for (const w of State.schWires){
+    if (w.netId !== netId) continue;
+    const an = w.a || w.b;
+    if (!an) continue;
+    const cc = getComp(an.comp), np = cc && cc.pins[an.pin];
+    if (np && np.netId) w.netId = np.netId;
+  }
   return islands.length;
 }
 
@@ -447,10 +460,21 @@ function compEditLocked(c){ return !!(c.lockEdit || c.locked); }
 function compSchMoveLocked(c){ return !!c.schLockMove; }
 
 function toggleLockSelection(){
-  const c = UI.sel && UI.sel.comp;
-  if (!c) return;
-  // in the schematic tab the lock pins the SYMBOL, not the board part
+  // in the schematic tab the lock pins the SYMBOL, not the board part — and a box
+  // selection locks/unlocks every symbol in it together
   if (typeof EditorTabs !== "undefined" && EditorTabs.current === "schematic"){
+    const box = (typeof Sch !== "undefined" && Sch.boxSel && Sch.boxSel.length) ? Sch.boxSel.slice() : null;
+    if (box){
+      pushUndo();
+      const lockAll = box.some(x => !x.schLockMove);   // any unlocked → lock all; else unlock all
+      for (const x of box) x.schLockMove = lockAll;
+      UI.toast(box.length + " symbol" + (box.length===1?"":"s") + (lockAll ? " locked 🔒" : " unlocked"));
+      UI.refreshInspector();
+      if (typeof Sch !== "undefined") Sch.render();
+      return;
+    }
+    const c = UI.sel && UI.sel.comp;
+    if (!c) return;
     pushUndo();
     c.schLockMove = !c.schLockMove;
     UI.toast(c.ref + (c.schLockMove ? " symbol locked 🔒" : " symbol unlocked"));
@@ -458,6 +482,8 @@ function toggleLockSelection(){
     if (typeof Sch !== "undefined") Sch.render();
     return;
   }
+  const c = UI.sel && UI.sel.comp;
+  if (!c) return;
   pushUndo();
   migrateLock(c);
   c.lockMove = !c.lockMove;

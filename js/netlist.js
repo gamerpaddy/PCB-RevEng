@@ -878,11 +878,20 @@ function exportKiCadSch(mode){
       L.push('    (uuid ' + _uuid() + '))');
     }
   }
-  // hand-drawn schematic wires (manual arrangement only) — one KiCad wire per segment
+  // hand-drawn schematic wires (manual arrangement only) — one KiCad wire per segment.
+  // A wire exports when BOTH ends are landed: anchored to a pin (w.a/w.b), or — for a
+  // T-junction branch — sitting on another same-net wire. Only truly dangling mid-air
+  // drafts skip. (Previously any wire with a null anchor was dropped, silently losing the
+  // branch connection while its pin's label was suppressed as "already wired".)
   if (exportWires) for (const w of State.schWires){
-    if (!w.a || !w.b) continue;                       // dangling drafts don't export
-    for (let i=0; i+1 < w.points.length; i++){
-      const a = w.points[i], b = w.points[i+1];
+    const pts = w.points;
+    if (!pts || pts.length < 2) continue;
+    const sameNet = State.schWires.filter(x => x !== w && (!x.netId || !w.netId || x.netId === w.netId));
+    const aOn = !!w.a || (typeof schWireOnPoint === "function" && !!schWireOnPoint(pts[0], w, sameNet));
+    const bOn = !!w.b || (typeof schWireOnPoint === "function" && !!schWireOnPoint(pts[pts.length-1], w, sameNet));
+    if (!aOn || !bOn) continue;                       // truly dangling draft — don't export
+    for (let i=0; i+1 < pts.length; i++){
+      const a = pts[i], b = pts[i+1];
       if (Math.abs(a.x-b.x) < 0.001 && Math.abs(a.y-b.y) < 0.001) continue;
       L.push('  (wire (pts (xy ' + F(a.x) + ' ' + F(a.y) + ') (xy ' + F(b.x) + ' ' + F(b.y) + '))');
       L.push('    (stroke (width 0) (type default)) (uuid ' + _uuid() + '))');

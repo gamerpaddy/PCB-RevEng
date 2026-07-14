@@ -29,7 +29,7 @@ const AI = {
     return ({
       anthropic:  "claude-sonnet-5",
       openai:     "gpt-4o-mini",
-      openrouter: "anthropic/claude-sonnet-4",
+      openrouter: "anthropic/claude-sonnet-5",
       gemini:     "gemini-2.0-flash",
       local:      "local-model",
     })[p] || "";

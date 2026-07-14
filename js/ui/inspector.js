@@ -293,6 +293,12 @@ UI.inspectComponent = (c, selPin) => {
     pushUndo("clear part values " + c.ref);
     c.value = ""; c.part = ""; c.kicad = ""; c.symOverride = null;
     for (const p of c.pins){ p.name = ""; p.netId = null; }
+    // schematic wires anchored to this part's now net-less pins re-derive from their far
+    // end (or become net-less) so they don't keep pointing at a stale/soon-pruned net
+    if (State.schWires) for (const w of State.schWires){
+      if ((w.a && w.a.comp === c.id) || (w.b && w.b.comp === c.id))
+        w.netId = (typeof schNetOfAnchor === "function" ? (schNetOfAnchor(w.a) || schNetOfAnchor(w.b)) : null) || null;
+    }
     c._fp = null;
     pruneNets();
     UI.refreshInspector(); UI.refreshNets(); requestRender();
