@@ -89,7 +89,8 @@ const Sch = {
   hotPin: null,                    // pin under the cursor in wire mode {comp,pin,pos}
   wireDraft: null,                 // {points:[{x,y}mm], a:{comp,pin}, preview:[{x,y}]|null}
   axisPref: null,                  // "h"|"v"|null — R while drafting toggles which leg comes first
-  selWire: null,                   // selected schematic wire (Delete removes it)
+  selWire: null,                   // primary clicked schematic wire (drag / delete anchor)
+  selWires: null,                  // whole connected net highlighted with it (Delete removes all)
   selSeg: null,                    // shift-selected single segment {w,i} (Delete removes just that leg)
   selLabel: null,                  // selected manual net label (Delete removes it)
   boxSel: [],                      // box-selected components (schematic-local selection)
@@ -177,6 +178,33 @@ function schWireOnPoint(p, except, wires){
       if (distToSeg(p.x, p.y, pts[i], pts[i+1]) <= 0.05) return w;
   }
   return null;
+}
+
+/* every wire electrically connected to `w` (transitively): shared net + a shared
+   anchored pin, or one wire's endpoint sitting on the other (T junction / touching
+   ends). Missing netId acts as a wildcard, matching the render's same-net logic. */
+function schConnectedWires(w){
+  const all = State.schWires;
+  const netEq = (a, b) => !a.netId || !b.netId || a.netId === b.netId;
+  const anchorsOf = x => [x.a, x.b].filter(Boolean).map(an => an.comp + ":" + an.pin);
+  const endsOf = x => [x.points[0], x.points[x.points.length - 1]];
+  const touches = (a, b) => {
+    const aa = anchorsOf(a), bb = anchorsOf(b);
+    if (aa.some(k => bb.includes(k))) return true;
+    if (endsOf(a).some(p => schWireOnPoint(p, a, [b]))) return true;
+    if (endsOf(b).some(p => schWireOnPoint(p, b, [a]))) return true;
+    return false;
+  };
+  const result = new Set([w]);
+  const queue = [w];
+  while (queue.length){
+    const cur = queue.pop();
+    for (const other of all){
+      if (result.has(other)) continue;
+      if (netEq(cur, other) && touches(cur, other)){ result.add(other); queue.push(other); }
+    }
+  }
+  return [...result];
 }
 
 /* ---------- net connectivity ----------
@@ -420,7 +448,7 @@ Sch.arrangeAI = async () => {
     const placements = await AI.arrangeSchematic();
     const byRef = new Map(placements.map(p => [String(p.ref), p]));
     pushUndo("AI arrange schematic");
-    if (hadWires){ State.schWires = []; Sch.selWire = null; }
+    if (hadWires){ State.schWires = []; Sch.selWire = null; Sch.selWires = null; }
     let n = 0;
     for (const c of State.components){
       const p = byRef.get(String(c.ref));
@@ -759,7 +787,7 @@ function schDrawWires(ctx, conn){
   for (const w of State.schWires){
     const pts = w.points;
     if (!pts || pts.length < 2) continue;
-    const sel = w === Sch.selWire;
+    const sel = w === Sch.selWire || (Sch.selWires && Sch.selWires.includes(w));
     // an end counts as landed when anchored to a pin OR sitting on another wire
     // of the same net (T junction — drawn as a filled dot)
     const sameNet = State.schWires.filter(x => x !== w && (!x.netId || !w.netId || x.netId === w.netId));
@@ -1275,7 +1303,7 @@ Sch.addLabel = (comp, pin) => {
   const lab = { id: nextId(), comp: comp.id, pin, dx, dy };
   State.schLabels.push(lab);
   Sch.selLabel = lab;
-  Sch.selWire = null;
+  Sch.selWire = null; Sch.selWires = null;
   Sch.render();
   return lab;
 };
@@ -1294,7 +1322,7 @@ Sch.deleteSegment = (seg) => {
     State.schWires.push({ id: nextId(), netId: w.netId, points: before, a: w.a || null, b: null });
   if (after.length >= 2)
     State.schWires.push({ id: nextId(), netId: w.netId, points: after, a: null, b: w.b || null });
-  Sch.selSeg = null; Sch.selWire = null;
+  Sch.selSeg = null; Sch.selWire = null; Sch.selWires = null;
   Sch.render();
 };
 
@@ -1625,13 +1653,22 @@ function schContextMenu(clientX, clientY, p){
     items.push({ sep: true });
     items.push({ label: "Show on board (Visual)", action: () => schJumpToVisual(c) });
   } else if (w){
-    Sch.selWire = w; Sch.render();
+    const net = schConnectedWires(w);
+    Sch.selWire = w; Sch.selWires = net; Sch.render();
     items.push({ label: "Delete wire", danger: true, action: () => {
       pushUndo("delete schematic wire");
       State.schWires = State.schWires.filter(x => x !== w);
-      if (Sch.selWire === w) Sch.selWire = null;
+      if (Sch.selWire === w){ Sch.selWire = null; Sch.selWires = null; }
       Sch.render();
     }});
+    if (net.length > 1)
+      items.push({ label: "Delete connected wires (" + net.length + ")", danger: true, action: () => {
+        const kill = new Set(net);
+        pushUndo("delete schematic wires");
+        State.schWires = State.schWires.filter(x => !kill.has(x));
+        Sch.selWire = null; Sch.selWires = null;
+        Sch.render();
+      }});
   } else {
     // empty space with a box selection → offer to lock/unlock the whole group
     if (boxSel){ items.push(groupLockItem()); items.push({ sep: true }); }
@@ -1728,7 +1765,7 @@ Sch.wire = () => {
     if (lab){
       const c = getComp(lab.comp);
       const pinPos = c ? schPinPos(c, lab.pin) : null;
-      Sch.selLabel = lab; Sch.selWire = null;
+      Sch.selLabel = lab; Sch.selWire = null; Sch.selWires = null;
       Sch.drag = pinPos ? { kind: "label", lab, pin: pinPos, offX: mx - pinPos.x - lab.dx, offY: my - pinPos.y - lab.dy, armed: false, moved: false } : null;
       Sch.render();
       return;
@@ -1742,7 +1779,7 @@ Sch.wire = () => {
     if (endHit){
       const cOver = Sch.hit(mx, my);
       if (!(cOver && schPtInBody(cOver, mx, my))){
-        Sch.selWire = endHit.w; Sch.selSeg = null;
+        Sch.selWire = endHit.w; Sch.selWires = schConnectedWires(endHit.w); Sch.selSeg = null;
         Sch.drag = { kind: "wireend", w: endHit.w, idx: endHit.idx, armed: false, moved: false };
         UI.select(null);
         Sch.render();
@@ -1760,7 +1797,7 @@ Sch.wire = () => {
       // a symbol-locked part can be selected/inspected but not dragged on the sheet
       if (compSchMoveLocked(c) && !Sch.boxSel.includes(c)){
         Sch.boxSel = [];
-        Sch.selWire = null; Sch.selLabel = null; Sch.selSeg = null;
+        Sch.selWire = null; Sch.selWires = null; Sch.selLabel = null; Sch.selSeg = null;
         if (e.shiftKey){ schJumpToVisual(c); return; }
         if (!(UI.sel && UI.sel.type === "comp" && UI.sel.comp === c)) UI.select({ type: "comp", comp: c });
         UI.setHint && UI.setHint(c.ref + " symbol is locked — press " + (Keymap.keyFor ? Keymap.keyFor("edit.lock") : "L") + " to unlock");
@@ -1773,7 +1810,7 @@ Sch.wire = () => {
         // select the grabbed part right away so the previously-selected object doesn't
         // stay highlighted while this one is being dragged
         Sch.boxSel = [];
-        Sch.selWire = null; Sch.selLabel = null; Sch.selSeg = null;
+        Sch.selWire = null; Sch.selWires = null; Sch.selLabel = null; Sch.selSeg = null;
         if (!(UI.sel && UI.sel.type === "comp" && UI.sel.comp === c)) UI.select({ type: "comp", comp: c });
         Sch.drag = { kind: "comp", comp: c, dx: mx - c.schX, dy: my - c.schY, armed: false, moved: false, clickComp: c, shift: e.shiftKey };
         Sch.render();
@@ -1786,13 +1823,14 @@ Sch.wire = () => {
     // ONLY the clicked segment (Delete then removes that leg, splitting the wire).
     if (ws){
       Sch.selWire = ws.w;
+      Sch.selWires = schConnectedWires(ws.w);          // highlight the whole connected net
       Sch.selSeg = e.shiftKey ? { w: ws.w, i: ws.i } : null;
       Sch.drag = e.shiftKey ? null : { kind: "wireseg", w: ws.w, i: ws.i, armed: false, moved: false };
       UI.select(null);
       Sch.render();
       return;
     }
-    if (Sch.selWire || Sch.selSeg){ Sch.selWire = null; Sch.selSeg = null; }
+    if (Sch.selWire || Sch.selSeg){ Sch.selWire = null; Sch.selWires = null; Sch.selSeg = null; }
     // empty space: box select (left-drag pan is gone — pan with wheel-click / Space)
     Sch.boxSel = [];
     UI.select(null);
@@ -1847,6 +1885,16 @@ Sch.wire = () => {
           if (!d.w.netId) d.w.netId = wireNet || pinNet || null;
         } else {
           UI.warn("Different net — " + (getNet(wireNet)?.name || "?") + " can't connect to " + (getNet(pinNet)?.name || "?"));
+        }
+      } else if (d.moved){
+        // not on a pin — did the end land on another wire? allow it, but warn (like pins
+        // do) when that wire is a different net so a stray touch isn't mistaken for a join
+        const ep = d.w.points[d.idx];
+        const hit = ep ? schWireOnPoint(ep, d.w, State.schWires) : null;
+        if (hit){
+          const wireNet = d.w.netId || schNetOfAnchor(d.w.a) || schNetOfAnchor(d.w.b);
+          if (wireNet && hit.netId && wireNet !== hit.netId)
+            UI.warn("Different net — " + (getNet(wireNet)?.name || "?") + " is touching " + (getNet(hit.netId)?.name || "?") + " but won't connect");
         }
       }
       d.w.points = schCleanPoints(d.w.points);
@@ -1965,16 +2013,17 @@ Sch.wire = () => {
         : "Wire mode off");
     } else if (k === "Escape"){
       if (Sch.mode === "wire"){ Sch.wireDraft = null; Sch.setMode("select"); UI.toast("Wire mode off"); }
-      else if (Sch.selWire || Sch.selLabel || Sch.selSeg){ Sch.selWire = null; Sch.selLabel = null; Sch.selSeg = null; Sch.render(); }
+      else if (Sch.selWire || Sch.selLabel || Sch.selSeg){ Sch.selWire = null; Sch.selWires = null; Sch.selLabel = null; Sch.selSeg = null; Sch.render(); }
       else if (Sch.boxSel.length){ Sch.boxSel = []; Sch.render(); }
       else return;   // let the global Esc (deselect) run
     } else if (k === "Delete"){
       if (Sch.selLabel){ Sch.deleteLabel(Sch.selLabel); }
       else if (Sch.selSeg){ Sch.deleteSegment(Sch.selSeg); }
       else if (Sch.selWire){
-        pushUndo("delete schematic wire");
-        State.schWires = State.schWires.filter(w => w !== Sch.selWire);
-        Sch.selWire = null;
+        const kill = new Set(Sch.selWires && Sch.selWires.length ? Sch.selWires : [Sch.selWire]);
+        pushUndo(kill.size > 1 ? "delete schematic wires" : "delete schematic wire");
+        State.schWires = State.schWires.filter(w => !kill.has(w));
+        Sch.selWire = null; Sch.selWires = null;
         Sch.render();
       }
       // always consumed: Delete on this tab must never delete the part from the BOARD
@@ -2001,7 +2050,7 @@ Sch.wire = () => {
     const hadWires = State.schWires.length > 0;
     if (!Sch.confirmArrangeClearsWires()) return;
     pushUndo("arrange schematic");
-    if (hadWires){ State.schWires = []; Sch.selWire = null; }
+    if (hadWires){ State.schWires = []; Sch.selWire = null; Sch.selWires = null; }
     const geo = (Sch.invalidate(), Sch.geo());
     const pos = schArrange(mode, geo);
     for (const c of State.components){

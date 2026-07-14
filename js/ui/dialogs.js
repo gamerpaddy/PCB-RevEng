@@ -131,9 +131,13 @@ UI._wireBomColResize = (table) => {
       e.preventDefault(); e.stopPropagation();
       grip.classList.add("dragging");
       const startX = e.clientX, startW = th.getBoundingClientRect().width;
-      // freeze every column at its current width so only the grabbed one changes
+      // freeze every column at its CURRENT rendered width, then switch to fixed layout.
+      // Measuring must happen BEFORE tableLayout=fixed — under fixed layout the browser
+      // redistributes any width-less columns to equal widths, which would freeze them all
+      // to the same size the first time a grip is dragged.
+      const widths = ths.map(t => t.getBoundingClientRect().width);
+      ths.forEach((t, k) => { if (!t.style.width) t.style.width = widths[k] + "px"; });
       table.style.tableLayout = "fixed";
-      ths.forEach(t => { if (!t.style.width) t.style.width = t.getBoundingClientRect().width + "px"; });
       const mv = (ev) => {
         const w = Math.max(36, startW + ev.clientX - startX);
         th.style.width = w + "px";
