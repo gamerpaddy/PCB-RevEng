@@ -1112,16 +1112,17 @@ function schWireSegHit(sx, sy){
   return null;
 }
 
-/* a FREE wire endpoint (not anchored to a pin) within tol screen px, or null.
-   Used to grab and drag a stray/unconnected wire end around. */
+/* a wire endpoint within tol screen px, or null. Grabs EITHER a free/stray end OR one
+   anchored to a pin — dragging a pin-anchored end pulls it off that pin (it re-anchors if
+   dropped on another compatible pin, else becomes a free end), matching how a T-junction /
+   free end already drags. */
 function schWireEndHit(sx, sy){
   const tol = 7;
   for (let k = State.schWires.length - 1; k >= 0; k--){
     const w = State.schWires[k];
     const pts = w.points;
-    const ends = [[0, !w.a], [pts.length - 1, !w.b]];
-    for (const [idx, free] of ends){
-      if (!free || idx < 0) continue;
+    for (const idx of [0, pts.length - 1]){
+      if (idx < 0) continue;
       const dx = schX2S(pts[idx].x) - sx, dy = schY2S(pts[idx].y) - sy;
       if (dx*dx + dy*dy <= tol*tol) return { w, idx };
     }
@@ -1974,27 +1975,28 @@ Sch.wire = () => {
     if (d.kind === "wireend"){
       Sch.hotPin = null;
       if (!d.moved && d.armed){ cancelUndo(); Sch.render(); return; }
-      // dropped on a pin? anchor the end to it (net-compatible only) so it re-connects
+      // dropped on a pin? anchor the end to it (net-compatible only) so it re-connects.
+      // The end may have STARTED anchored to a pin (we now allow grabbing those): if it
+      // was dragged off, clear the old anchor so it doesn't snap back on the next part move.
+      const key = d.idx === 0 ? "a" : "b";
+      const wireNet = d.w.netId || schNetOfAnchor(d.w.a) || schNetOfAnchor(d.w.b);
       const pin = d.moved ? schFindPin(Sch._lastP ? Sch._lastP.x : -1, Sch._lastP ? Sch._lastP.y : -1) : null;
-      if (pin){
-        const wireNet = d.w.netId || schNetOfAnchor(d.w.a) || schNetOfAnchor(d.w.b);
+      if (pin && schWireEndPinOK(d.w, pin)){
         const pinNet = schNetOfAnchor({ comp: pin.comp.id, pin: pin.pin });
-        if (schWireEndPinOK(d.w, pin)){
-          const key = d.idx === 0 ? "a" : "b";
-          d.w[key] = { comp: pin.comp.id, pin: pin.pin };
-          d.w.points[d.idx] = { x: pin.pos.x, y: pin.pos.y };
-          if (!d.w.netId) d.w.netId = wireNet || pinNet || null;
-        } else {
-          UI.warn("Different net — " + (getNet(wireNet)?.name || "?") + " can't connect to " + (getNet(pinNet)?.name || "?"));
-        }
+        d.w[key] = { comp: pin.comp.id, pin: pin.pin };
+        d.w.points[d.idx] = { x: pin.pos.x, y: pin.pos.y };
+        if (!d.w.netId) d.w.netId = wireNet || pinNet || null;
       } else if (d.moved){
-        // not on a pin — did the end land on another wire? allow it, but warn (like pins
-        // do) when that wire is a different net so a stray touch isn't mistaken for a join
-        const ep = d.w.points[d.idx];
-        const hit = ep ? schWireOnPoint(ep, d.w, State.schWires) : null;
-        if (hit){
-          const wireNet = d.w.netId || schNetOfAnchor(d.w.a) || schNetOfAnchor(d.w.b);
-          if (wireNet && hit.netId && wireNet !== hit.netId)
+        if (d.w[key]) d.w[key] = null;      // pulled off its old pin → now a free end
+        if (pin){                            // dropped on an incompatible-net pin
+          const pinNet = schNetOfAnchor({ comp: pin.comp.id, pin: pin.pin });
+          UI.warn("Different net — " + (getNet(wireNet)?.name || "?") + " can't connect to " + (getNet(pinNet)?.name || "?"));
+        } else {
+          // not on a pin — did the end land on another wire? allow it, but warn (like pins
+          // do) when that wire is a different net so a stray touch isn't mistaken for a join
+          const ep = d.w.points[d.idx];
+          const hit = ep ? schWireOnPoint(ep, d.w, State.schWires) : null;
+          if (hit && wireNet && hit.netId && wireNet !== hit.netId)
             UI.warn("Different net — " + (getNet(wireNet)?.name || "?") + " is touching " + (getNet(hit.netId)?.name || "?") + " but won't connect");
         }
       }
