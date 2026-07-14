@@ -245,6 +245,10 @@ function toggleSplit(){
 
 function afterHistory(){
   State.components.forEach(c => c._fp = null);
+  // undo/redo swaps in freshly-deserialized objects, so any schematic-local selection
+  // still points at wires/labels that no longer exist — clear them (a stale selSeg could
+  // otherwise resurrect a deleted wire on the next Delete).
+  if (typeof Sch !== "undefined" && Sch.clearSelection) Sch.clearSelection();
   markDirty();
   UI.select(null);
   UI.rebuildSideSelect(); syncSettings();

@@ -614,6 +614,7 @@ function loadProject(json, done){
   State.notes = s.notes || [];
   State.schWires = s.schWires || [];
   State.schLabels = s.schLabels || [];
+  if (typeof Sch !== "undefined" && Sch.clearSelection) Sch.clearSelection();   // stale refs point at the old project's wires
   State.layers = [];
   Undo.stack.length = 0; Undo.redo.length = 0;
   _imgVault.clear(); _imgVaultSeq = 1;   // fresh project → drop any cached bitmaps
@@ -672,6 +673,7 @@ function resetProject(){
   State.notes = [];
   State.schWires = [];
   State.schLabels = [];
+  if (typeof Sch !== "undefined" && Sch.clearSelection) Sch.clearSelection();
   State.nets = [];
   State.bomColumns = [];
   State._id = 1;

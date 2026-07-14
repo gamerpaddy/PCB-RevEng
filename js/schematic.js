@@ -448,7 +448,7 @@ Sch.arrangeAI = async () => {
     const placements = await AI.arrangeSchematic();
     const byRef = new Map(placements.map(p => [String(p.ref), p]));
     pushUndo("AI arrange schematic");
-    if (hadWires){ State.schWires = []; Sch.selWire = null; Sch.selWires = null; }
+    if (hadWires){ State.schWires = []; Sch.selWire = null; Sch.selWires = null; Sch.selSeg = null; }
     let n = 0;
     for (const c of State.components){
       const p = byRef.get(String(c.ref));
@@ -508,6 +508,17 @@ function schParseBody(str){
   _schBodyCache.set(str, out);
   return out;
 }
+
+/* Drop every schematic-local selection/interaction reference. Call after any wholesale
+   State swap (undo/redo, project load/reset) or bulk wire clear (arrange), because those
+   REPLACE the very objects these fields point at — a stale selSeg/selWire otherwise still
+   references a wire that no longer exists in State.schWires, and a Delete on it can even
+   resurrect the deleted wire's fragments (see Sch.deleteSegment). */
+Sch.clearSelection = () => {
+  Sch.selWire = null; Sch.selWires = null; Sch.selSeg = null; Sch.selLabel = null;
+  Sch.boxSel = []; Sch.hover = null; Sch.drag = null;
+  Sch.wireDraft = null; Sch.hotPin = null;
+};
 
 /* ---------- rendering ---------- */
 Sch.render = () => {
@@ -1313,6 +1324,10 @@ Sch.addLabel = (comp, pin) => {
 Sch.deleteSegment = (seg) => {
   const w = seg.w, i = seg.i;
   if (!w || !w.points || i + 1 >= w.points.length) return;
+  // the selected segment may reference a wire that was already removed (undo/redo or an
+  // arrange cleared State.schWires without this stale selSeg noticing) — splitting it
+  // would push its fragments back in, resurrecting a deleted wire. Bail if it's gone.
+  if (!State.schWires.includes(w)){ Sch.selSeg = null; Sch.selWire = null; Sch.selWires = null; return; }
   pushUndo("delete wire segment");
   const pts = w.points;
   const before = pts.slice(0, i + 1);      // keeps w.a
@@ -2050,7 +2065,7 @@ Sch.wire = () => {
     const hadWires = State.schWires.length > 0;
     if (!Sch.confirmArrangeClearsWires()) return;
     pushUndo("arrange schematic");
-    if (hadWires){ State.schWires = []; Sch.selWire = null; Sch.selWires = null; }
+    if (hadWires){ State.schWires = []; Sch.selWire = null; Sch.selWires = null; Sch.selSeg = null; }
     const geo = (Sch.invalidate(), Sch.geo());
     const pos = schArrange(mode, geo);
     for (const c of State.components){

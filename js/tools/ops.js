@@ -379,6 +379,23 @@ function removeFreePin(comp, idx){
   comp.fpParams.pinList.splice(idx, 1);
   comp.pins.splice(idx, 1);
   comp._fp = null;
+  // Schematic wires/labels anchor to a pin by INDEX (w.a/w.b = {comp,pin}, label.pin).
+  // The splice shifts every higher pin down one, so without fixing them up a wire/label
+  // would silently rebind to a DIFFERENT pin (wrong net + wrong position). Drop the ones
+  // on the removed pad and decrement every anchor above it.
+  if (State.schWires && State.schWires.length){
+    State.schWires = State.schWires.filter(w =>
+      !(w.a && w.a.comp === comp.id && w.a.pin === idx) &&
+      !(w.b && w.b.comp === comp.id && w.b.pin === idx));
+    for (const w of State.schWires){
+      if (w.a && w.a.comp === comp.id && w.a.pin > idx) w.a.pin--;
+      if (w.b && w.b.comp === comp.id && w.b.pin > idx) w.b.pin--;
+    }
+  }
+  if (State.schLabels && State.schLabels.length){
+    State.schLabels = State.schLabels.filter(l => !(l.comp === comp.id && l.pin === idx));
+    for (const l of State.schLabels) if (l.comp === comp.id && l.pin > idx) l.pin--;
+  }
   pruneNets();
 }
 
