@@ -361,6 +361,30 @@ function schSpawnTouchWires(pairs){
   if (made) UI.toast("Touching pins pulled apart — " + made + " wire" + (made === 1 ? "" : "s") + " keep" + (made === 1 ? "s" : "") + " them connected");
 }
 
+/* after moving a symbol/selection: if any moved pin now sits ON a wire of a DIFFERENT
+   net, the pin visually touches the wire (and its green dot) but nothing actually
+   connects them — warn, exactly like the wire-end drop does. Same-net contact is a real
+   join (no warning); pins with no net or wires whose net can't be resolved are ignored. */
+function schWarnForeignPinWires(comps){
+  if (!State.schWires || !State.schWires.length) return;
+  const geo = Sch.geo();
+  for (const c of comps){
+    if (!c || typeof c.schX !== "number") continue;
+    for (let i = 0; i < c.pins.length; i++){
+      const nid = c.pins[i].netId; if (!nid) continue;
+      const pos = schPinPos(c, i, geo); if (!pos) continue;
+      const hit = schWireOnPoint(pos, null, State.schWires);
+      if (!hit) continue;
+      const wn = schWireNet(hit);
+      if (wn && wn !== nid){
+        UI.warn("Different net — " + (getNet(nid)?.name || (c.ref + " pin " + (i+1))) +
+          " is touching " + (getNet(wn)?.name || "?") + " but won't connect");
+        return;                       // one warning per drop is enough
+      }
+    }
+  }
+}
+
 const SCH_WIRE_OK  = "#54c66a";
 const SCH_WIRE_BAD = "#e05555";
 
@@ -1300,11 +1324,13 @@ function schDrawSymbol(ctx, c, g){
         ctx.fillText(val, X + (hw + 0.8) * s, Y + 0.55 * s);
       }
     } else {
-      ctx.fillText(c.ref, X, Y - (hh + 1.4) * s);
+      // snug to the body: gap chosen so the bold ref's descenders / the value's
+      // ascenders clear the top/bottom edge by a hair without touching it
+      ctx.fillText(c.ref, X, Y - (hh + 0.7) * s);
       if (val){
         ctx.fillStyle = "#cfd6df";
         ctx.font = (1.35 * s) + "px sans-serif";
-        ctx.fillText(val, X, Y + (hh + 2.2) * s);
+        ctx.fillText(val, X, Y + (hh + 1.3) * s);
       }
     }
   }
@@ -2042,6 +2068,8 @@ Sch.wire = () => {
       // a moved symbol/group that pulled touching pins apart leaves a wire behind
       if ((d.kind === "comp" || d.kind === "group") && d.touchPairs && d.touchPairs.length)
         schSpawnTouchWires(d.touchPairs);
+      if (d.kind === "comp" || d.kind === "group")
+        schWarnForeignPinWires(d.kind === "comp" ? [d.comp] : d.group.map(it => it.c));
       Sch.render();                  // drop the drag highlight
     } else if (d.kind === "label" && !d.moved && d.armed){
       cancelUndo();
