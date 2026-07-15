@@ -1678,14 +1678,20 @@ Sch.onMove = (p, e) => {
         }
       }
       const A = pts[d.i], B = pts[d.i+1];
-      // prospective new position, then reject it if the segment would lie ON TOP of any
-      // other wire (crossings are fine — only collinear overlap is blocked)
+      // prospective new position, then reject it if the segment would lie ON TOP of a
+      // DIFFERENT net's wire (crossings are fine, and same-net overlap is a legitimate
+      // join — blocking it also trapped a jogged segment away from its original row,
+      // since the row it came from still carries a same-net wire). Missing nets act as
+      // wildcards, matching schConnectedWires' netEq.
       const nA = { x: A.x, y: A.y }, nB = { x: B.x, y: B.y };
       if (dir === "h"){ const y = schSnap(my); nA.y = y; nB.y = y; }
       else            { const x = schSnap(mx); nA.x = x; nB.x = x; }
       let overlaps = false;
+      const myNet = schWireNet(d.w);
       for (const ow of State.schWires){
         if (ow === d.w) continue;
+        const on = schWireNet(ow);
+        if (!myNet || !on || on === myNet) continue;
         for (let k = 0; k + 1 < ow.points.length && !overlaps; k++)
           if (schSegOverlapLen(nA, nB, ow.points[k], ow.points[k+1]) > 0.05) overlaps = true;
         if (overlaps) break;
