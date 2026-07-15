@@ -99,6 +99,44 @@ Footprints.register({
 });
 
 Footprints.register({
+  id:"tocan", name:"TO-5 / 8 / 18 / 39 / 46 / 52 / 72 (metal can)", prefix:"Q",
+  params:[{key:"pkg",label:"Package",type:"select",def:"TO-18",
+           options:["TO-5","TO-8","TO-18","TO-39","TO-46","TO-52","TO-72"]},
+          {key:"pins",label:"Pins",type:"select",def:"3",options:["2","3","4","6","8","10"]}],
+  gen(p){
+    // Geometry from the KiCad Package_TO_SOT_THT metal-can footprints:
+    // leads equally spaced on a pin circle, pin 1 leftmost, counting clockwise
+    // (through +y) when viewed from above. [body Ø, pin-circle r, lead pad Ø, drill Ø]
+    const dims = {
+      "TO-5":[8.5,2.54,1.2,0.7], "TO-39":[8.5,2.54,1.2,0.7],
+      "TO-8":[14.4,3.55,1.6,1.1],
+      "TO-18":[4.8,1.27,1.2,0.7], "TO-46":[4.8,1.27,1.2,0.7],
+      "TO-52":[4.8,1.27,1.2,0.7], "TO-72":[4.8,1.27,1.2,0.7] };
+    const [bodyD,pcr0,pad,drill] = dims[p.pkg] || dims["TO-18"];
+    const n = parseInt(p.pins,10);
+    // TO-5/TO-39 8- and 10-lead (TO-99/TO-100 opamp cans) sit on a Ø5.84 circle
+    const pcr = (pcr0===2.54 && n>=8) ? 2.92 : pcr0;
+    // Lead angles (deg, y-down): 2/3/4-lead use the 4-slot circle, 6-lead the
+    // 8-slot circle skipping two opposite slots, 8/10 fully populated.
+    const ANG = { 2:[180,0], 3:[180,90,0], 4:[180,90,0,-90],
+                  6:[180,135,90,0,-45,-90],
+                  8:[180,135,90,45,0,-45,-90,-135],
+                  10:[180,144,108,72,36,0,-36,-72,-108,-144] };
+    const names = n===3 ? ["E","B","C"] : null;   // classic BJT can: tab next to pin 1 = E
+    const pins = (ANG[n]||ANG[3]).map((a,i)=>{
+      const rad = a*Math.PI/180;
+      return _pin(i+1, +(pcr*Math.cos(rad)).toFixed(3), +(pcr*Math.sin(rad)).toFixed(3),
+                  {shape:"circle",w:pad,h:pad,...(names?{name:names[i]}:{})});
+    });
+    const known = { "TO-5":[2,3,4,6,8,10], "TO-39":[2,3,4,6,8,10], "TO-8":[2,3],
+                    "TO-18":[2,3,4], "TO-46":[2,3,4], "TO-52":[2,3], "TO-72":[4] };
+    const fp = { label:p.pkg+"-"+n, pins, body:{w:bodyD,h:bodyD,shape:"circle"} };
+    if ((known[p.pkg]||[]).includes(n)) fp.kicad = "Package_TO_SOT_THT:"+p.pkg+"-"+n;
+    return fp;
+  }
+});
+
+Footprints.register({
   id:"to220", name:"TO-220 / 247 / 3P / 264 / 126", prefix:"Q",
   params:[{key:"pkg",label:"Package",type:"select",def:"TO-220",
            options:["TO-220","TO-247","TO-3P","TO-264","TO-126"]},

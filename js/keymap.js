@@ -40,6 +40,7 @@ const KeyActions = [
   { id:"view.ratsnest",  label:"Cycle ratsnest mode",           def:"",       btn:"#btn-ratsnest",   run:clickBtn("#btn-ratsnest") },
   { id:"view.stack3d",   label:"3D layer stack",                def:"",       btn:"#btn-stack3d",    run:clickBtn("#btn-stack3d") },
   { id:"view.history",   label:"Undo timeline",                 def:"",       btn:"#btn-history",    run:clickBtn("#btn-history") },
+  { id:"view.multiplayer",label:"Multiplayer dialog",           def:"",       btn:"#btn-mp",         run:clickBtn("#btn-mp") },
   { id:"view.check",     label:"Netless-pad checker",           def:"",       btn:"#btn-check",      run:clickBtn("#btn-check") },
   { id:"view.options",   label:"Options dialog",                def:"",       btn:"#btn-options",    run:clickBtn("#btn-options") },
   { id:"view.keys",      label:"Hotkey editor",                 def:"",       btn:"#btn-keys",       run:clickBtn("#btn-keys") },

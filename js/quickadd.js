@@ -111,6 +111,11 @@ function qaMatchFootprint(t){
 
   if (/^to-?92$/.test(s)) return { fpId:"to92", params:{} };
   if (/^to-?3$/.test(s)) return { fpId:"to3", params:{} };   // the metal can, NOT TO-3P
+  // small metal cans with optional pin count: to5 / to-18-4 / to39-8 / to99 (=TO-5-8) / to100 (=TO-5-10)
+  if ((m = /^to-?(18|39|46|52|72|5|8)(?:-?(2|3|4|6|8|10))?$/.exec(s)))
+    return { fpId:"tocan", params:{pkg:"TO-"+m[1], pins:m[2] || (m[1]==="72" ? "4" : "3")} };
+  if (/^to-?99$/.test(s))  return { fpId:"tocan", params:{pkg:"TO-5", pins:"8"} };
+  if (/^to-?100$/.test(s)) return { fpId:"tocan", params:{pkg:"TO-5", pins:"10"} };
   // TO-220 family with optional pin count: to220-5 / to-247 / to3p / to264 / to126
   if ((m = /^to-?(220|247|264|126|3p)(?:-?([235]))?$/.exec(s))){
     const pkg = { "220":"TO-220", "247":"TO-247", "264":"TO-264", "126":"TO-126", "3p":"TO-3P" }[m[1]];
