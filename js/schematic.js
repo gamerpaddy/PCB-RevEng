@@ -162,6 +162,28 @@ function schHalfExt(c, g){
   return { hw: (swap ? g.h : g.w)/2, hh: (swap ? g.w : g.h)/2 };
 }
 
+/* half-extents (mm) of a symbol's DRAWN body (its actual artwork bounds) in SCREEN axes,
+   after the symbol's 90° rotation step. g.w/g.h are the looser grid cell — for a passive
+   the visible body is much smaller (a resistor rect is only ~2mm across its short side),
+   so ref/value labels keyed off schHalfExt end up floating well clear of the part and
+   colliding with neighbours. This hugs the real outline instead. Falls back to the grid
+   box for box/IC symbols or an unparsable body. */
+function schBodyHalfExt(c, g){
+  let minX=Infinity, minY=Infinity, maxX=-Infinity, maxY=-Infinity;
+  const acc = (x, y) => { if (x<minX) minX=x; if (x>maxX) maxX=x; if (y<minY) minY=y; if (y>maxY) maxY=y; };
+  for (const str of (g.body || [])){
+    const b = schParseBody(str); if (!b) continue;
+    if (b.kind === "rect"){ acc(b.x1, b.y1); acc(b.x2, b.y2); }
+    else if (b.kind === "poly"){ for (const p of b.pts) acc(p[0], p[1]); }
+    else if (b.kind === "arc"){ acc(b.sx, b.sy); acc(b.mx, b.my); acc(b.ex, b.ey); }
+  }
+  if (!isFinite(minX)) return schHalfExt(c, g);
+  const bhx = Math.max(Math.abs(minX), Math.abs(maxX));   // bodies are centred on origin
+  const bhy = Math.max(Math.abs(minY), Math.abs(maxY));
+  const swap = schRotOf(c) % 180 !== 0;
+  return { hw: swap ? bhy : bhx, hh: swap ? bhx : bhy };
+}
+
 /* power nets draw as fixed symbols (GND bar / supply arrow) instead of ratlines */
 function schIsPowerNet(net){
   return !!net && (net.protected || /^(gnd|agnd|dgnd|vss|vee|vcc|vdd|vbat|[+-]?\d+(\.\d+)?v\d*)$/i.test(net.name));
@@ -1299,7 +1321,12 @@ function schDrawSymbol(ctx, c, g){
   // Vertical (90/270) 2-pin parts have their pins — and net labels — sticking out of
   // the top/bottom, so the texts move BESIDE the body (ref left, value right) to keep
   // clear of the pin labels.
+  // hw/hh = the grid box — still what the lock badge + selection rect key off (they must
+  // match schHitComp's hit area). Passive LABELS instead key off the DRAWN body below:
+  // the grid box leaves them floating ~2mm off a thin resistor and colliding with the
+  // neighbour's texts.
   const { hw, hh } = schHalfExt(c, g);
+  const be = g.isBox ? null : schBodyHalfExt(c, g);
   if (showText){
     const vertical = schRotOf(c) % 180 !== 0;
     const val = c.value || c.part || "";
@@ -1315,22 +1342,23 @@ function schDrawSymbol(ctx, c, g){
         ctx.fillText(val, X, Y + (hh + 1.6) * s);
       }
     } else if (vertical){
+      // beside the body (ref left, value right), hugging the real outline
       ctx.textAlign = "right";
-      ctx.fillText(c.ref, X - (hw + 0.8) * s, Y + (val ? -0.3 : 0.55) * s);
+      ctx.fillText(c.ref, X - (be.hw + 0.9) * s, Y + (val ? -0.3 : 0.55) * s);
       if (val){
         ctx.fillStyle = "#cfd6df";
         ctx.font = (1.35 * s) + "px sans-serif";
         ctx.textAlign = "left";
-        ctx.fillText(val, X + (hw + 0.8) * s, Y + 0.55 * s);
+        ctx.fillText(val, X + (be.hw + 0.9) * s, Y + 0.55 * s);
       }
     } else {
-      // snug to the body: gap chosen so the bold ref's descenders / the value's
-      // ascenders clear the top/bottom edge by a hair without touching it
-      ctx.fillText(c.ref, X, Y - (hh + 0.7) * s);
+      // ref above / value below, snug: the gap clears the bold ref's descenders and
+      // the value's ascenders against the real body edge by a hair without touching
+      ctx.fillText(c.ref, X, Y - (be.hh + 0.9) * s);
       if (val){
         ctx.fillStyle = "#cfd6df";
         ctx.font = (1.35 * s) + "px sans-serif";
-        ctx.fillText(val, X, Y + (hh + 1.3) * s);
+        ctx.fillText(val, X, Y + (be.hh + 1.5) * s);
       }
     }
   }
@@ -1388,6 +1416,7 @@ Sch.rotate = (c) => {
   pushUndo("rotate schematic symbol");
   c.schRot = (schRotOf(c) + 90) % 360;
   schUpdateWiresFor(c);
+  schWarnForeignPinWires([c]);
   Sch.render();
 };
 
@@ -1398,6 +1427,7 @@ Sch.flip = (c, vert) => {
   pushUndo("flip schematic symbol");
   schFlipComp(c, vert);
   schUpdateWiresFor(c);
+  schWarnForeignPinWires([c]);
   Sch.render();
 };
 
@@ -1739,6 +1769,7 @@ Sch.nudgeSelection = (dx, dy) => {
     c.schY = schSnap(c.schY + dy * SCH_GRID);
     schUpdateWiresFor(c);
   }
+  schWarnForeignPinWires(movable);
   Sch.render();
   return true;
 };
@@ -2140,6 +2171,7 @@ Sch.wire = () => {
               c.schRot = (schRotOf(c) + 90) % 360;
               schUpdateWiresFor(c);
             }
+            schWarnForeignPinWires(movable);
             Sch.render();
           }
         }
@@ -2153,6 +2185,7 @@ Sch.wire = () => {
         if (movable.length){
           pushUndo("flip schematic selection");
           for (const c of movable){ schFlipComp(c, vert); schUpdateWiresFor(c); }
+          schWarnForeignPinWires(movable);
           Sch.render();
         }
       } else Sch.flip(t[0], vert);
