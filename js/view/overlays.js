@@ -103,7 +103,7 @@ function renderRatsnestStar(ctx){
 
 function renderRatsnest(ctx, selNet){
   if (View.ratsnestMode === "star"){ renderRatsnestStar(ctx); return; }
-  const focused = selNet && selNet !== -1;
+  const focused = !!selNet;
   ctx.save();
   ctx.lineCap = "round";
   ctx.setLineDash([5/View.zoom, 4/View.zoom]);

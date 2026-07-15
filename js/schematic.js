@@ -79,7 +79,15 @@ const EditorTabs = {
       else if (e.key === "F2"){ if (SchEnabled()) EditorTabs.show("schematic"); else UI.toast("Schematic tab is off — enable it in 🔬 Experimental"); }
       else if (e.key === "F3") EditorTabs.show("bom");
       else if (e.key === "F4") EditorTabs.show("nets");
-      else EditorTabs.show("projects");
+      else {
+        EditorTabs.show("projects");
+        // F5 no longer reloads the page — say so once, or "why is my app stale"
+        // debugging sessions happen (reload = Ctrl+R / the browser button)
+        if (!EditorTabs._f5Hinted){
+          EditorTabs._f5Hinted = true;
+          UI.toast("F5 opens the Projects tab now — reload the page with Ctrl+R");
+        }
+      }
     }, true);
   },
 };

@@ -28,11 +28,72 @@ function projSetActive(id){
     if (id) localStorage.setItem("pcbreveng.activeProject", id);
     else localStorage.removeItem("pcbreveng.activeProject");
   } catch(e){}
+  Projects.refreshBadge();
 }
+
+/* the tab bar's right-side "📁 project name" label — follows the active project */
+Projects.refreshBadge = async () => {
+  const el = $("#active-project");
+  if (!el) return;
+  let name = null;
+  if (Projects.supported && Projects.activeId){
+    const meta = await projReadMeta(Projects.activeId);
+    if (meta) name = meta.name;
+  }
+  el.style.display = name ? "" : "none";
+  el.textContent = name ? "📁 " + name : "";
+  el.title = name ? "Current project “" + name + "” — the board you are editing belongs to it. Click to open the Projects tab." : "";
+};
 
 function projNewId(prefix){
   return (prefix || "p") + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 }
+
+/* ---------------- autosave mirror ---------------- */
+/* While a project is ACTIVE, the periodic autosave also writes the live board into it —
+   no manual 💾 Save needed to keep the project current. While NO project is active (a
+   new board, or one opened from a file/import), the board mirrors into this special
+   pseudo-project instead: it can be opened, downloaded and cleared, but never shared,
+   versioned or deleted — save the board as a real project to graduate out of it. */
+const PROJ_AUTOSAVE_ID = "_autosave";
+
+async function projAutosaveMirror(json){
+  if (!Projects.supported) return;
+  let meta = Projects.activeId ? await projReadMeta(Projects.activeId) : null;
+  if (!meta){
+    meta = await projReadMeta(PROJ_AUTOSAVE_ID) || {
+      id: PROJ_AUTOSAVE_ID, name: "Autosave",
+      created: Date.now(), modified: 0, size: 0, stats: null, thumb: null, versions: [],
+    };
+    meta.kind = "autosave";
+  }
+  await projSaveInto(meta, json, null);   // keeps the existing thumbnail
+}
+
+/* refresh the mirror target's thumbnail from the live board — done when the Projects
+   tab opens (the board canvas is hidden then, so the zoom-to-fit capture can't flash) */
+async function projRefreshMirrorThumb(){
+  try {
+    if (!Projects.supported || typeof boardHasContent !== "function" || !boardHasContent()) return;
+    const meta = await projReadMeta(Projects.activeId || PROJ_AUTOSAVE_ID);
+    if (!meta) return;
+    const t = projCaptureThumb();
+    if (t){ meta.thumb = t; await projWriteMeta(meta); }
+  } catch(e){}
+}
+
+/* the live board just got saved into a REAL project — the Autosave slot's copy of it
+   is now redundant (and would linger as a stale duplicate), so drop it silently */
+async function projDropAutosaveSlot(){
+  try { const root = await projRootDir(); await root.removeEntry(PROJ_AUTOSAVE_ID, { recursive: true }); } catch(e){}
+}
+
+Projects.clearAutosave = async () => {
+  if (!confirm("Clear the Autosave slot? The board you are editing stays open — only the stored autosave copy is emptied. While the board isn't saved as a project, the slot fills up again on the next change.")) return;
+  try { const root = await projRootDir(); await root.removeEntry(PROJ_AUTOSAVE_ID, { recursive: true }); } catch(e){}
+  UI.toast("Autosave slot cleared");
+  Projects.render();
+};
 
 /* ---------------- OPFS I/O ---------------- */
 async function projRootDir(){
@@ -174,6 +235,7 @@ Projects.saveAsNew = async () => {
   };
   await projSaveInto(meta, serializeProject(), projCaptureThumb());
   projSetActive(meta.id);
+  await projDropAutosaveSlot();   // the board graduated into a real project
   UI.toast("Saved board as project “" + meta.name + "”");
   Projects.render();
 };
@@ -185,6 +247,7 @@ Projects.save = async (pid) => {
       !confirm("Overwrite “" + meta.name + "” with the board you are editing now? Its previous state is lost unless it was frozen as a version.")) return;
   await projSaveInto(meta, serializeProject(), projCaptureThumb());
   projSetActive(pid);
+  await projDropAutosaveSlot();   // the board graduated into a real project
   UI.toast("Saved board into “" + meta.name + "”");
   Projects.render();
 };
@@ -207,6 +270,7 @@ Projects.addVersion = async (pid) => {
   });
   await projSaveInto(meta, json, thumb);
   projSetActive(pid);
+  await projDropAutosaveSlot();   // the board graduated into a real project
   Projects.expanded.add(pid);
   UI.toast("Version “" + meta.versions[0].label + "” saved in “" + meta.name + "”");
   Projects.render();
@@ -227,7 +291,8 @@ Projects.open = async (pid, vid) => {
       UI.refreshLayerList(); UI.refreshNets(); UI.refreshInspector();
       zoomToFit();
       markImagesDirty(); // adopt the opened project (incl. images) into the autosave slot
-      projSetActive(pid);
+      // opening the autosave slot itself keeps the board "unsaved" (no active project)
+      projSetActive(pid === PROJ_AUTOSAVE_ID ? null : pid);
       EditorTabs.show("visual");
       UI.toast("Opened " + what + " — " + State.components.length + " components, " + State.nets.length + " nets");
     });
@@ -245,6 +310,95 @@ Projects.download = async (pid, vid) => {
   const fname = safe(meta.name) + (ver ? "-" + safe(ver.label) : "") + ".pcbrev.json";
   downloadFile(fname, text, "application/json");
   UI.toast("Downloaded " + fname);
+};
+
+/* ---------------- image-layer zip export ---------------- */
+/* minimal ZIP writer (store method, no compression — the images are already
+   compressed PNG/JPEG). Local file headers + central directory + end record. */
+const PROJ_CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++){
+    let c = n;
+    for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+    t[n] = c;
+  }
+  return t;
+})();
+function projCrc32(bytes){
+  let c = 0xFFFFFFFF;
+  for (let i = 0; i < bytes.length; i++) c = PROJ_CRC_TABLE[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8);
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+function projBuildZip(files){   // files: [{name, bytes:Uint8Array}]
+  const enc = new TextEncoder();
+  const u16 = (v) => [v & 255, (v >> 8) & 255];
+  const u32 = (v) => [v & 255, (v >> 8) & 255, (v >> 16) & 255, (v >>> 24) & 255];
+  const parts = [], central = [];
+  let offset = 0;
+  for (const f of files){
+    const nameB = enc.encode(f.name);
+    const crc = projCrc32(f.bytes);
+    const head = new Uint8Array([0x50,0x4B,0x03,0x04, ...u16(20), ...u16(0), ...u16(0),
+      ...u16(0), ...u16(0), ...u32(crc), ...u32(f.bytes.length), ...u32(f.bytes.length),
+      ...u16(nameB.length), ...u16(0)]);
+    parts.push(head, nameB, f.bytes);
+    central.push(new Uint8Array([0x50,0x4B,0x01,0x02, ...u16(20), ...u16(20), ...u16(0), ...u16(0),
+      ...u16(0), ...u16(0), ...u32(crc), ...u32(f.bytes.length), ...u32(f.bytes.length),
+      ...u16(nameB.length), ...u16(0), ...u16(0), ...u16(0), ...u16(0), ...u32(0), ...u32(offset)]), nameB);
+    offset += head.length + nameB.length + f.bytes.length;
+  }
+  let cdSize = 0;
+  for (const c of central) cdSize += c.length;
+  const end = new Uint8Array([0x50,0x4B,0x05,0x06, ...u16(0), ...u16(0), ...u16(files.length),
+    ...u16(files.length), ...u32(cdSize), ...u32(offset), ...u16(0)]);
+  return new Blob([...parts, ...central, end], { type: "application/zip" });
+}
+function projDownloadBlob(fname, blob){
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = fname;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+}
+function projSafeName(s){
+  return (s || "project").replace(/[^\w.-]+/g, "_").replace(/^_+|_+$/g, "") || "project";
+}
+
+/* download every stored image layer of a project as <name>-images.zip. Hosted (URL)
+   layers keep no bytes in the project, so they can't be included and are counted out. */
+Projects.downloadImages = async (pid) => {
+  const meta = await projReadMeta(pid);
+  const raw = await projVersionText(pid, null);
+  if (!meta || !raw){ UI.toast("Could not read that saved project"); return; }
+  let p;
+  try { p = JSON.parse(raw); } catch(e){ UI.toast("Could not parse that project"); return; }
+  const files = [];
+  const used = new Set();
+  let hosted = 0;
+  (p.layers || []).forEach((l, i) => {
+    const m = /^data:image\/([a-z0-9.+-]+);base64,(.+)$/i.exec(l.dataURL || "");
+    if (!m){ if (l.url) hosted++; return; }
+    let ext = m[1].toLowerCase();
+    if (ext === "jpeg") ext = "jpg";
+    if (ext === "svg+xml") ext = "svg";
+    const bin = atob(m[2]);
+    const bytes = new Uint8Array(bin.length);
+    for (let j = 0; j < bin.length; j++) bytes[j] = bin.charCodeAt(j);
+    let base = projSafeName(l.name || ("layer" + (i + 1)));
+    let name = base + "." + ext, k = 2;
+    while (used.has(name)) name = base + "-" + (k++) + "." + ext;
+    used.add(name);
+    files.push({ name, bytes });
+  });
+  if (!files.length){
+    UI.toast(hosted ? "This project's image layers are URL-hosted — no image bytes are stored to zip"
+                    : "This project has no image layers");
+    return;
+  }
+  const fname = projSafeName(meta.name) + "-images.zip";
+  projDownloadBlob(fname, projBuildZip(files));
+  UI.toast("Downloaded " + fname + " (" + files.length + " image" + (files.length === 1 ? "" : "s") +
+           (hosted ? " — " + hosted + " URL-hosted layer" + (hosted === 1 ? "" : "s") + " not included" : "") + ")");
 };
 
 Projects.remove = async (pid) => {
@@ -285,6 +439,7 @@ Projects.rename = async (pid, name) => {
   if (!name || name === meta.name){ Projects.render(); return; }
   meta.name = name;
   await projWriteMeta(meta);
+  Projects.refreshBadge();
   Projects.render();
 };
 
@@ -327,14 +482,14 @@ Projects.importFiles = async (files) => {
 /* ---------------- pastebin share / import ---------------- */
 /* Share = upload a project's JSON to dpaste.com (a pastebin that, unlike
    pastebin.com, allows browser uploads — no API key, CORS open; pastes expire
-   after PASTE_EXPIRY_DAYS). Big boards carry megabytes of photo dataURLs that no
-   paste site accepts, so images are stripped from the shared copy past ~1 MB and
-   the recipient is told. Import accepts a paste URL (dpaste.com is fetched
-   directly; pastebin.com and friends block browser reads, so the dialog also has
-   a "paste the raw text" box that works with ANY pastebin). */
+   after PASTE_EXPIRY_DAYS). Board photos are NEVER included in a paste — their
+   dataURLs are megabytes of base64 that no paste site accepts — so the user is
+   warned up front (confirm) and again in the result dialog. Import accepts a
+   paste URL (dpaste.com is fetched directly; pastebin.com and friends block
+   browser reads, so the dialog also has a "paste the raw text" box that works
+   with ANY pastebin). */
 const PASTE_API = "https://dpaste.com/api/v2/";
 const PASTE_EXPIRY_DAYS = 30;
-const PASTE_STRIP_OVER = 1024 * 1024;
 
 function projStripImages(text){
   try {
@@ -351,14 +506,16 @@ Projects.share = async (pid) => {
   const meta = await projReadMeta(pid);
   const raw = await projVersionText(pid, null);
   if (!meta || !raw){ UI.toast("Could not read that saved project"); return; }
-  let body = raw, note = "";
-  if (raw.length > PASTE_STRIP_OVER){
-    const s = projStripImages(raw);
-    if (s.stripped){
-      body = s.text;
-      note = "Board photos were left out (" + projFmtSize(raw.length) +
-             " is too big for a paste site) — share image layers as files instead.";
-    }
+  const s = projStripImages(raw);
+  let body = s.text, note = "";
+  if (s.stripped){
+    if (!confirm("⚠ Board photos are NOT included when sharing to a paste site — the image data (" +
+                 projFmtSize(raw.length) + " here) is far too much for a paste.\n\n" +
+                 "The link will carry the full board — parts, nets, traces, vias, notes — but no photo layers. " +
+                 "Use ⬇ File to pass the complete project including its images.\n\nShare “" +
+                 meta.name + "” without the photos?")) return;
+    note = "⚠ Board photos were NOT included (too much data for a paste site) — " +
+           "send the .pcbrev.json file (⬇ File) if the recipient needs them.";
   }
   UI.toast("Uploading “" + meta.name + "” to dpaste.com…");
   let url;
@@ -384,7 +541,7 @@ Projects.share = async (pid) => {
   const dlg = $("#paste-share-dialog");
   $("#paste-share-url").value = url;
   $("#paste-share-note").textContent =
-    "Anyone with this link can import the board (Projects → 🌐 Import from pastebin). " +
+    "Anyone with this link can import the board (Projects → 🌐 Import from URL). " +
     "It expires in " + PASTE_EXPIRY_DAYS + " days. " + note;
   try { await navigator.clipboard.writeText(url); UI.toast("Paste link copied to clipboard"); } catch(e){}
   dlg.showModal();
@@ -414,7 +571,7 @@ async function projImportFromPasteDialog(){
   const status = $("#paste-import-status");
   const urlIn = $("#paste-import-url").value.trim();
   let text = $("#paste-import-text").value.trim();
-  let name = "Pastebin import";
+  let name = "URL import";
   if (!text && urlIn){
     const raw = projPasteRawUrl(urlIn);
     if (!raw){ status.textContent = "That doesn't look like a http(s) paste URL."; return; }
@@ -476,49 +633,101 @@ function projVersionRow(meta, v){
 }
 
 function projCard(meta){
-  const card = projEl("div", "proj-card" + (meta.id === Projects.activeId ? " active" : ""));
+  const isAuto = meta.kind === "autosave";
+  const card = projEl("div", "proj-card" + (isAuto ? " special" : "") +
+                             (!isAuto && meta.id === Projects.activeId ? " active" : ""));
   card.appendChild(projThumbEl(meta.thumb, "proj-thumb"));
 
   const nameRow = projEl("div", "proj-name-row");
-  const name = projEl("input", "proj-name");
-  name.value = meta.name;
-  name.title = "Project name — click to rename";
-  name.addEventListener("change", () => Projects.rename(meta.id, name.value));
-  name.addEventListener("keydown", (e) => { if (e.key === "Enter") name.blur(); });
-  nameRow.appendChild(name);
-  if (meta.id === Projects.activeId)
-    nameRow.appendChild(projEl("span", "proj-badge", "current"));
+  if (isAuto){
+    const name = projEl("div", "proj-name-static", "Autosave");
+    name.title = "The special autosave slot — the board you are editing lands here automatically while it isn't saved as a project";
+    nameRow.appendChild(name);
+    nameRow.appendChild(projEl("span", "proj-badge special", "autosave"));
+  } else {
+    const name = projEl("input", "proj-name");
+    name.value = meta.name;
+    name.title = "Project name — click to rename";
+    name.addEventListener("change", () => Projects.rename(meta.id, name.value));
+    name.addEventListener("keydown", (e) => { if (e.key === "Enter") name.blur(); });
+    nameRow.appendChild(name);
+    if (meta.id === Projects.activeId)
+      nameRow.appendChild(projEl("span", "proj-badge", "current"));
+  }
   card.appendChild(nameRow);
 
   const det = projEl("div", "proj-meta");
   det.appendChild(projEl("div", null, projStatsLabel(meta.stats)));
   det.appendChild(projEl("div", null, projFmtSize(meta.size) + " · saved " + projFmtDate(meta.modified)));
-  det.appendChild(projEl("div", null, "created " + projFmtDate(meta.created)));
+  det.appendChild(projEl("div", null, isAuto
+    ? "Not a saved project — “＋ Save current project as new project” makes it one"
+    : "created " + projFmtDate(meta.created)));
   card.appendChild(det);
 
   const acts = projEl("div", "proj-actions");
-  acts.appendChild(projBtn("Open", "Load this project onto the board (replaces the current board)", () => Projects.open(meta.id)));
-  acts.appendChild(projBtn("💾 Save", meta.id === Projects.activeId
-    ? "Save the board you are editing into this project"
-    : "Overwrite this project with the board you are editing (asks first)", () => Projects.save(meta.id)));
-  acts.appendChild(projBtn("＋ Version", "Freeze the board you are editing as a named version of this project", () => Projects.addVersion(meta.id)));
-  acts.appendChild(projBtn("⬇ File", "Download this project as a .pcbrev.json file", () => Projects.download(meta.id)));
-  acts.appendChild(projBtn("🌐 Share", "Upload this project to dpaste.com and get a link anyone can import (expires after " + PASTE_EXPIRY_DAYS + " days)", () => Projects.share(meta.id)));
-  acts.appendChild(projBtn("🗑", "Delete this project from browser storage", () => Projects.remove(meta.id)));
+  acts.appendChild(projBtn("Open", isAuto
+    ? "Load the autosaved board (replaces the current board)"
+    : "Load this project onto the board (replaces the current board)", () => Projects.open(meta.id)));
+  if (!isAuto){
+    acts.appendChild(projBtn("💾 Save", meta.id === Projects.activeId
+      ? "Save the board you are editing into this project (it also autosaves here while it is current)"
+      : "Overwrite this project with the board you are editing (asks first)", () => Projects.save(meta.id)));
+    acts.appendChild(projBtn("＋ Version", "Freeze the board you are editing as a named version of this project", () => Projects.addVersion(meta.id)));
+  }
+  acts.appendChild(projBtn("⬇ File", "Download this " + (isAuto ? "autosaved board" : "project") + " as a .pcbrev.json file", () => Projects.download(meta.id)));
+  acts.appendChild(projBtn("🖼 Images", "Download this project's stored image layers as a .zip", () => Projects.downloadImages(meta.id)));
+  if (isAuto){
+    acts.appendChild(projBtn("⌫ Clear", "Empty the autosave slot (the board you are editing stays open)", () => Projects.clearAutosave()));
+  } else {
+    acts.appendChild(projBtn("🌐 Share", "Upload this project to dpaste.com and get a link anyone can import (expires after " + PASTE_EXPIRY_DAYS + " days). Board photos are NOT included — use ⬇ File for the complete project.", () => Projects.share(meta.id)));
+    acts.appendChild(projBtn("🗑", "Delete this project from browser storage", () => Projects.remove(meta.id)));
+  }
   card.appendChild(acts);
 
-  const vs = projEl("div", "proj-versions");
-  const open = Projects.expanded.has(meta.id);
-  const vn = meta.versions.length;
-  const tog = projBtn((open ? "▾ " : "▸ ") + vn + " version" + (vn === 1 ? "" : "s"),
-    "Version history — frozen snapshots of this project", () => {
-      if (open) Projects.expanded.delete(meta.id); else Projects.expanded.add(meta.id);
-      Projects.render();
-    });
-  tog.className = "proj-ver-toggle";
-  vs.appendChild(tog);
-  if (open) for (const v of meta.versions) vs.appendChild(projVersionRow(meta, v));
-  card.appendChild(vs);
+  if (!isAuto){
+    const vs = projEl("div", "proj-versions");
+    const open = Projects.expanded.has(meta.id);
+    const vn = meta.versions.length;
+    const tog = projBtn((open ? "▾ " : "▸ ") + vn + " version" + (vn === 1 ? "" : "s"),
+      "Version history — frozen snapshots of this project", () => {
+        if (open) Projects.expanded.delete(meta.id); else Projects.expanded.add(meta.id);
+        Projects.render();
+      });
+    tog.className = "proj-ver-toggle";
+    vs.appendChild(tog);
+    if (open) for (const v of meta.versions) vs.appendChild(projVersionRow(meta, v));
+    card.appendChild(vs);
+  }
+  return card;
+}
+
+/* the bundled sample board, presented as a permanent read-only "example" card:
+   open only — it can't be deleted, versioned, shared or downloaded from here */
+function projExampleCard(){
+  const card = projEl("div", "proj-card special");
+  const img = projEl("img", "proj-thumb");
+  img.src = "sample-thumb.jpg?v=1";
+  img.alt = "";
+  img.addEventListener("error", () => { img.replaceWith(projEl("div", "proj-thumb empty", "no preview")); });
+  card.appendChild(img);
+  const nameRow = projEl("div", "proj-name-row");
+  const name = projEl("div", "proj-name-static", "Example board");
+  name.title = "The sample project bundled with the app";
+  nameRow.appendChild(name);
+  nameRow.appendChild(projEl("span", "proj-badge special", "example"));
+  card.appendChild(nameRow);
+  const det = projEl("div", "proj-meta");
+  det.appendChild(projEl("div", null, "The bundled sample project — a small demo board to explore the app with."));
+  det.appendChild(projEl("div", null, "Built in — always available, never changes."));
+  card.appendChild(det);
+  const acts = projEl("div", "proj-actions");
+  acts.appendChild(projBtn("Open", "Load the example board (replaces the current board)", async () => {
+    if (boardHasContent() && !confirm("Open the example board? This replaces the current board. Unsaved work will be lost.")) return;
+    projSetActive(null);
+    await loadDefaultProject();
+    EditorTabs.show("visual");
+  }));
+  card.appendChild(acts);
   return card;
 }
 
@@ -540,16 +749,28 @@ Projects.render = async () => {
     empty.textContent = "Could not read browser storage: " + e.message;
     return;
   }
-  $("#projects-count").textContent = metas.length ? "(" + metas.length + ")" : "";
+  // the autosave slot and the built-in example are pinned in their own section,
+  // clearly apart from real saved projects
+  const specials = metas.filter(m => m.kind === "autosave");
+  const normal = metas.filter(m => m.kind !== "autosave");
+  $("#projects-count").textContent = normal.length ? "(" + normal.length + ")" : "";
   const store = $("#proj-storage");
   projStorageLabel().then(t => { store.textContent = t; });
-  empty.style.display = metas.length ? "none" : "";
-  empty.textContent = "No saved projects yet — “＋ Save board as project” stores the board you are editing here, or drop a .pcbrev.json file anywhere on this tab.";
+  empty.style.display = normal.length ? "none" : "";
+  empty.textContent = "No saved projects yet — “＋ Save current project as new project” stores the board you are editing here, or drop a .pcbrev.json file anywhere on this tab.";
   grid.innerHTML = "";
-  for (const m of metas) grid.appendChild(projCard(m));
+  grid.appendChild(projEl("div", "proj-sep", "Autosave & example — not saved projects"));
+  for (const m of specials) grid.appendChild(projCard(m));
+  grid.appendChild(projExampleCard());
+  grid.appendChild(projEl("div", "proj-sep", "Saved projects"));
+  for (const m of normal) grid.appendChild(projCard(m));
 };
 
-Projects.enter = () => { Projects.render(); };
+Projects.enter = () => {
+  // refresh the current mirror target's thumbnail first (the board canvas is hidden
+  // while this tab shows, so the capture can't visibly flash), then draw the grid
+  projRefreshMirrorThumb().finally(() => Projects.render());
+};
 
 Projects.wire = () => {
   const pane = $("#projects-pane");
@@ -569,6 +790,8 @@ Projects.wire = () => {
     catch(e){ $("#paste-share-url").select(); document.execCommand("copy"); }
   });
   $("#paste-share-close").addEventListener("click", () => $("#paste-share-dialog").close());
+  $("#active-project").addEventListener("click", () => EditorTabs.show("projects"));
+  Projects.refreshBadge();
   // drag & drop upload anywhere on the pane
   ["dragenter", "dragover"].forEach(ev => pane.addEventListener(ev, (e) => {
     e.preventDefault(); pane.classList.add("dragover");

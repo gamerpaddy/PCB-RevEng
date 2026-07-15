@@ -225,7 +225,7 @@ function drawWorld(ctx){
         for (const t of State.traces){
           // a focused net stays visible on every layer, even ones the active-side
           // filter would normally hide — that is the "show the net across all layers" cue
-          const focused = selNet && selNet !== -1 && t.netId === selNet;
+          const focused = selNet && t.netId === selNet;
           if (!traceVisible(t) && !focused) continue;
           if ((t.side === aSide) !== activeSidePass) continue;
           drawTrace(ctx, t, selNet);
@@ -269,7 +269,7 @@ function drawWorld(ctx){
   if (!View.hideVias) for (const v of State.vias){
     // a focused net keeps its vias visible across every layer (matches traces above);
     // otherwise a blind/buried via is hidden on layers it doesn't reach
-    const focused = selNet && selNet !== -1 && v.netId === selNet;
+    const focused = selNet && v.netId === selNet;
     if (!viaVisible(v) && !focused) continue;
     drawVia(ctx, v, selNet);
   }

@@ -22,6 +22,7 @@ UI.refreshLayerList = () => {
         <label title="Mirror image horizontally (back-side photos usually need this so they align with the front)">
           <input type="checkbox" class="mir" ${l.mirror?"checked":""}>⇋</label>
         <label title="Lock layer against accidental dragging"><input type="checkbox" class="lock" ${l.locked?"checked":""}>🔒</label>
+        <button class="repl" title="Replace this layer's image with another file — position, scale, rotation, mirror and alignment are kept">🖼⇆</button>
       </div>
       <input type="range" class="op" min="0" max="100" value="${Math.round(l.opacity*100)}" title="Opacity">`;
     card.querySelector(".side-sel").value = l.side;
@@ -62,6 +63,17 @@ UI.refreshLayerList = () => {
       requestRender();
     });
     card.querySelector(".lock").addEventListener("change", (e)=>{ l.locked = e.target.checked; });
+    card.querySelector(".repl").addEventListener("click", (e)=>{
+      UI.showContextMenu(e.clientX, e.clientY, [
+        { label:"Replace from file…", action:()=>{
+            UI._replaceLayerId = l.id;
+            $("#file-layer-replace").click();
+          } },
+        { label:"Replace from URL… (loaded live, not saved)", action:()=>{
+            UI.openUrlDialog((u)=> replaceLayerImageFromURL(l, u));
+          } },
+      ]);
+    });
     card.querySelector(".op").addEventListener("input", (e)=>{ l.opacity = e.target.value/100; requestRender(); });
     list.appendChild(card);
   }

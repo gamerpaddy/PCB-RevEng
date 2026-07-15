@@ -77,6 +77,28 @@ Footprints.register({
 });
 
 Footprints.register({
+  id:"to3", name:"TO-3 (metal can)", prefix:"Q",
+  params:[{key:"case",label:"Case pads",type:"select",def:"yes",options:["yes","no"]}],
+  gen(p){
+    // JEDEC TO-204AA (classic 2N3055 can), dimensions from the KiCad TO-3 footprint:
+    // two leads 10.92 mm apart, offset 1.8 mm from the mounting-hole axis; mounting
+    // holes 30.2 mm apart (Ø4 drill, Ø6.35 pad). The CASE is the collector, contacted
+    // through the mounting holes — so they're pads (named C), not just holes.
+    // Package centre = midpoint between the mounting holes; leads sit to its left.
+    const pins = [
+      _pin(1,-1.8,-5.46,{shape:"circle",w:2.6,h:2.6,name:"B"}),
+      _pin(2,-1.8, 5.46,{shape:"circle",w:2.6,h:2.6,name:"E"}),
+    ];
+    if (p.case !== "no"){
+      pins.push(_pin(3,-15.1,0,{shape:"circle",w:6.35,h:6.35,name:"C"}),
+                _pin(4, 15.1,0,{shape:"circle",w:6.35,h:6.35,name:"C"}));
+    }
+    return { label:"TO-3", pins, body:{w:39.4,h:26.7},
+      kicad:"Package_TO_SOT_THT:TO-3" };
+  }
+});
+
+Footprints.register({
   id:"to220", name:"TO-220 / 247 / 3P / 264 / 126", prefix:"Q",
   params:[{key:"pkg",label:"Package",type:"select",def:"TO-220",
            options:["TO-220","TO-247","TO-3P","TO-264","TO-126"]},

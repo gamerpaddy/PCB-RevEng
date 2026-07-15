@@ -36,7 +36,29 @@ function inspRow(label, inputHtml){
   return `<div class="insp-row"><label>${label}</label>${inputHtml}</div>`;
 }
 
-/* marquee (box) selection panel: object counts + a mass Delete */
+/* every pad (pin) whose centre falls inside the last box-select bounds — SMD pads only
+   count when their component body is shown on this side (same rule as hit-testing) */
+function boxSelPads(){
+  const b = UI.boxSelBounds;
+  if (!b) return [];
+  const out = [];
+  for (const c of State.components){
+    const fp = compFootprint(c);
+    const bodyShown = compBodyVisible(c);
+    for (let i=0;i<fp.pins.length;i++){
+      const fpin = fp.pins[i]; if (!fpin) continue;
+      const tht = fpin.shape === "circle" && fpin.tht !== false;
+      if (!tht && !bodyShown) continue;                       // hidden-side SMD pad
+      const p = pinWorldPos(c, fpin);
+      if (p.x >= b.lx && p.x <= b.hx && p.y >= b.ly && p.y <= b.hy) out.push({ comp:c, pinIdx:i });
+    }
+  }
+  return out;
+}
+
+/* marquee (box) selection panel: object counts, keep-only filters, bulk edits + mass
+   Delete. "Pads" converts the box into a pin multi-selection (bulk net assign panel);
+   a vias-only box gets bulk size/drill fields, a traces-only box a bulk width field. */
 UI.inspectBoxSel = () => {
   const box = $("#inspector");
   const n = { comp:0, via:0, trace:0, note:0 };
@@ -46,13 +68,72 @@ UI.inspectBoxSel = () => {
   if (n.via)   parts.push(n.via + " via" + (n.via===1?"":"s"));
   if (n.trace) parts.push(n.trace + " trace" + (n.trace===1?"":"s"));
   if (n.note)  parts.push(n.note + " note" + (n.note===1?"":"s"));
+  const kinds = (n.comp?1:0)+(n.via?1:0)+(n.trace?1:0)+(n.note?1:0);
+  const padCount = boxSelPads().length;
+  // keep-only filter buttons: shown while the box holds more than one kind of object
+  // (Pads is offered whenever any pad centre lies in the box — parts don't have to)
+  const filt = [];
+  if (kinds > 1 && n.comp)  filt.push(`<button id="i-box-fcomp" title="Keep only the components — drop vias, traces and notes from this selection">Parts (${n.comp})</button>`);
+  if (kinds > 1 && n.via)   filt.push(`<button id="i-box-fvia" title="Keep only the vias — bulk size/drill editing appears once only vias are selected">Vias (${n.via})</button>`);
+  if (kinds > 1 && n.trace) filt.push(`<button id="i-box-ftrace" title="Keep only the traces — bulk width editing appears once only traces are selected">Traces (${n.trace})</button>`);
+  if (padCount)             filt.push(`<button id="i-box-fpad" title="Select the individual pads inside the box instead (bulk net assignment)">Pads (${padCount})</button>`);
+  // vias only → bulk size + drill; traces only → bulk width
+  const viasOnly   = n.via   && n.via   === UI.boxSel.length;
+  const tracesOnly = n.trace && n.trace === UI.boxSel.length;
+  let bulk = "";
+  if (viasOnly){
+    const rs = [...new Set(UI.boxSel.map(s => s.via.r || State.viaR))];
+    const hs = [...new Set(UI.boxSel.map(s => s.via.hole != null ? s.via.hole : State.viaHole))];
+    bulk = inspRow("Size Ø", UI.viaSizeInputs(rs[0], "i-bxvr-", rs.length === 1))
+         + inspRow("Drill Ø", UI.viaSizeInputs(hs[0], "i-bxvh-", hs.length === 1))
+         + `<div class="panel-hint">Size / drill apply to ALL ${n.via} selected vias.</div>`;
+  } else if (tracesOnly){
+    const ws = [...new Set(UI.boxSel.map(s => s.trace.width || 3))];
+    bulk = inspRow("Width", UI.traceWidthInputs(ws[0], "i-bxtw", ws.length === 1))
+         + `<div class="panel-hint">Width applies to ALL ${n.trace} selected traces.</div>`;
+  }
   const sec = document.createElement("div");
-  sec.className = "insp-sec";
+  sec.className = "insp-section";
   sec.innerHTML = `<div class="insp-title">Box selection (${UI.boxSel.length})</div>
     <div class="panel-hint">${parts.join(" · ") || "nothing"}</div>
-    <div class="insp-actions"><button id="i-box-del" class="danger">Delete all</button></div>`;
+    ${filt.length ? `<div class="insp-row"><label>Keep only</label><div style="display:flex;gap:4px;flex-wrap:wrap;flex:1">${filt.join("")}</div></div>` : ""}
+    ${bulk}
+    <div class="insp-actions"><button id="i-box-del" class="danger">Delete all</button><button id="i-box-clear">Clear selection</button></div>`;
   box.appendChild(sec);
+  const keep = (type) => {
+    UI.boxSel = UI.boxSel.filter(s => s.type === type);
+    UI.refreshInspector(); requestRender();
+  };
+  sec.querySelector("#i-box-fcomp") ?.addEventListener("click", () => keep("comp"));
+  sec.querySelector("#i-box-fvia")  ?.addEventListener("click", () => keep("via"));
+  sec.querySelector("#i-box-ftrace")?.addEventListener("click", () => keep("trace"));
+  sec.querySelector("#i-box-fpad") ?.addEventListener("click", () => {
+    UI.pinSel = boxSelPads();
+    UI.boxSel = [];
+    UI.refreshInspector(); requestRender();
+  });
+  if (viasOnly){
+    const vias = UI.boxSel.map(s => s.via);
+    const applyR = (mm) => { if (!(mm > 0)) return; pushUndo("via size ×" + vias.length);
+      for (const v of vias) v.r = Math.max(1, mm*State.pxPerMm/2);
+      UI.refreshInspector(); requestRender(); };
+    const applyH = (mm) => { if (!(mm > 0)) return; pushUndo("via drill ×" + vias.length);
+      for (const v of vias) v.hole = Math.max(0.5, mm*State.pxPerMm/2);
+      UI.refreshInspector(); requestRender(); };
+    sec.querySelector("#i-bxvr-mm").addEventListener("change",  e => applyR(parseFloat(e.target.value)||0));
+    sec.querySelector("#i-bxvr-mil").addEventListener("change", e => applyR((parseFloat(e.target.value)||0) * MM_PER_MIL));
+    sec.querySelector("#i-bxvh-mm").addEventListener("change",  e => applyH(parseFloat(e.target.value)||0));
+    sec.querySelector("#i-bxvh-mil").addEventListener("change", e => applyH((parseFloat(e.target.value)||0) * MM_PER_MIL));
+  } else if (tracesOnly){
+    const traces = UI.boxSel.map(s => s.trace);
+    const applyW = (px) => { if (!(px > 0)) return; pushUndo("trace width ×" + traces.length);
+      for (const t of traces) t.width = Math.max(0.05, px);
+      UI.refreshInspector(); requestRender(); };
+    sec.querySelector("#i-bxtwmm").addEventListener("change",  e => applyW((parseFloat(e.target.value)||0) * State.pxPerMm));
+    sec.querySelector("#i-bxtwmil").addEventListener("change", e => applyW((parseFloat(e.target.value)||0) * MM_PER_MIL * State.pxPerMm));
+  }
   sec.querySelector("#i-box-del").addEventListener("click", () => deleteBoxSelection());
+  sec.querySelector("#i-box-clear").addEventListener("click", () => { UI.boxSel = []; UI.refreshInspector(); requestRender(); });
 };
 
 /* shift-click multi-pin panel: one net field for all selected pins */
@@ -628,14 +709,19 @@ UI.traceWidthInputs = (widthPx, idBase, uniform) => {
 };
 
 /* via/PTH size as side-by-side mm + mil DIAMETER inputs (stored internally as a px radius).
-   ids: mm = idBase+"mm", mil = idBase+"mil" */
-UI.viaSizeInputs = (rPx, idBase) => {
+   ids: mm = idBase+"mm", mil = idBase+"mil". uniform=false → blank with a "mixed"
+   placeholder (multi-via bulk edit where sizes differ). */
+UI.viaSizeInputs = (rPx, idBase, uniform) => {
+  uniform = uniform !== false;
   const mm = (rPx * 2) / State.pxPerMm;      // diameter
   const mil = mm / MM_PER_MIL;
+  const mmV  = uniform ? mm.toFixed(3)  : "";
+  const milV = uniform ? mil.toFixed(1) : "";
+  const ph = uniform ? "" : "mixed";
   return `<span style="display:flex;gap:4px;flex:1;min-width:0;align-items:center">
-    <input id="${idBase}mm" type="number" step="0.05" min="0.1" value="${mm.toFixed(3)}" style="flex:1;min-width:0;width:0" title="Via diameter in millimetres">
+    <input id="${idBase}mm" type="number" step="0.05" min="0.1" value="${mmV}" placeholder="${ph}" style="flex:1;min-width:0;width:0" title="Via diameter in millimetres">
     <span style="color:#8b96a5;font-size:10px">mm</span>
-    <input id="${idBase}mil" type="number" step="1" min="1" value="${mil.toFixed(1)}" style="flex:1;min-width:0;width:0" title="Via diameter in mils (thou)">
+    <input id="${idBase}mil" type="number" step="1" min="1" value="${milV}" placeholder="${ph}" style="flex:1;min-width:0;width:0" title="Via diameter in mils (thou)">
     <span style="color:#8b96a5;font-size:10px">mil</span></span>`;
 };
 

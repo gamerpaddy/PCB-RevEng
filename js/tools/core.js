@@ -310,6 +310,10 @@ function onPointerUp(e){
       applyBoxSelect(d.sx, d.sy, d.x, d.y);
       const n = UI.boxSelCount();
       UI.toast(n ? n + " object" + (n===1?"":"s") + " selected — Del to delete" : "Nothing in the box");
+      // click + click&hold-drag registers as a double-click in the browser — without this
+      // flag, releasing the box would ALSO fire onDoubleClick and pop an editor/menu for
+      // whatever sits under the cursor
+      Tools._dragEndedAt = Date.now();
     }
   }
   requestRender();
@@ -457,17 +461,21 @@ function handleDrag(pt, w, e){
 }
 
 /* collect every selectable object whose position falls inside the world-space box into
-   UI.boxSel (respecting the hide-traces / hide-vias toggles). A component/via/note counts
-   when its centre is inside; a trace when any vertex is inside. */
+   UI.boxSel. A component/via/note counts when its centre is inside; a trace when any
+   vertex is inside. Only VISIBLE objects are taken — the same traceVisible/viaVisible
+   rules the renderer and hit-testing use, so a box can't grab a trace on a hidden side
+   or a blind via that isn't on this layer. Components always show at least their pads,
+   so they always count. The box bounds are kept for the inspector's "pads only" filter. */
 function applyBoxSelect(x0, y0, x1, y1){
   const lx = Math.min(x0,x1), hx = Math.max(x0,x1), ly = Math.min(y0,y1), hy = Math.max(y0,y1);
   const inside = (x,y) => x >= lx && x <= hx && y >= ly && y <= hy;
   const out = [];
   for (const c of State.components) if (inside(c.x, c.y)) out.push({ type:"comp", comp:c });
-  if (!View.hideVias) for (const v of State.vias) if (inside(v.x, v.y)) out.push({ type:"via", via:v });
-  if (!View.hideTraces) for (const t of State.traces) if (t.points.some(p => inside(p.x, p.y))) out.push({ type:"trace", trace:t });
+  for (const v of State.vias) if (viaVisible(v) && inside(v.x, v.y)) out.push({ type:"via", via:v });
+  for (const t of State.traces) if (traceVisible(t) && t.points.some(p => inside(p.x, p.y))) out.push({ type:"trace", trace:t });
   for (const n of State.notes) if (inside(n.x, n.y)) out.push({ type:"note", note:n });
   UI.boxSel = out;
+  UI.boxSelBounds = { lx, hx, ly, hy };
   UI.refreshInspector();
 }
 

@@ -3,8 +3,11 @@
 
 
 function currentHighlightNet(){
-  if (View.blinkNet && View.blinkOn) return View.blinkNet;
-  if (View.blinkNet && !View.blinkOn) return -1; // suppress other highlights mid-blink-off
+  // While blinking, the net stays focused through BOTH phases — the rest of the board
+  // renders exactly like the steady focused state, and only the blinking net itself
+  // alternates bright/dim (blinkDimmed). The old "-1 = dim everything" off-frame made
+  // every other net (and the ratsnest, and the merged-trace pass) pulse along.
+  if (View.blinkNet) return View.blinkNet;
   // Whole-net hover highlight ONLY when nothing is selected. With a selection active,
   // hovering a different net must not light up that whole net — just the single hovered
   // object is emphasised (see drawTrace/drawVia/drawComponent), and the selection's net
@@ -33,24 +36,27 @@ function isDarkHex(c){
   return (0.299*r + 0.587*g + 0.114*b) < 70;
 }
 
+/* blink-off phase for THIS net: it drops to the dim level while everything else on
+   the board keeps its steady focused-state look */
+function blinkDimmed(netId){ return !!View.blinkNet && View.blinkNet === netId && !View.blinkOn; }
+
 /* when a net is focused (selected/hovered), everything not on it is dimmed so the
-   focused net pops; selNet === -1 is the blink-off frame (dim everything). */
+   focused net pops; the focused net itself flashes bright/dim while blinking. */
 function focusAlpha(netId, selNet){
   if (!selNet) return 1;
   const dim = (State.focusDim != null) ? State.focusDim : 0.16;
-  if (selNet === -1) return dim;
-  return netId === selNet ? 1 : dim;
+  return (netId === selNet && !blinkDimmed(netId)) ? 1 : dim;
 }
 
 function drawTrace(ctx, t, selNet){
   // the single hovered trace glows and stays full-bright even when it's not on the
   // focused net (so a selection can be held while pointing at another net's trace)
   const isHover = View.hoverObj === t;
-  const hl = (selNet && selNet !== -1 && t.netId === selNet) || isHover;
+  const hl = (selNet && t.netId === selNet && !blinkDimmed(t.netId)) || isHover;
   // while a net is highlighted, traces on a layer other than the active one are drawn
   // at half opacity so the active-layer copper reads clearly on top (xray has its own
   // dimming, so leave it alone there)
-  const otherDim = (selNet && selNet !== -1 && t.side !== effDrawSide() && !effXray()) ? 0.5 : 1;
+  const otherDim = (selNet && t.side !== effDrawSide() && !effXray()) ? 0.5 : 1;
   const fa = (isHover ? 1 : focusAlpha(t.netId, selNet)) * xrayDim(t.side) * otherDim;
   ctx.save();
   ctx.lineCap = "round"; ctx.lineJoin = "round";
@@ -136,7 +142,7 @@ function drawVia(ctx, v, selNet){
   const pth = v.kind === "pth";
   const r = v.r || State.viaR;
   const isHover = View.hoverObj === v;   // single hovered via glows on its own
-  const hl = (selNet && selNet !== -1 && v.netId === selNet) || isHover;
+  const hl = (selNet && v.netId === selNet && !blinkDimmed(v.netId)) || isHover;
   const fa = isHover ? 1 : focusAlpha(v.netId, selNet);
   const sel = UI.sel && UI.sel.type==="via" && UI.sel.via===v;
   ctx.save();
@@ -229,10 +235,10 @@ function drawComponent(ctx, c, selNet, padsOnly){
 
   const sideCol = c.side === "back" ? "#7da0ff" : "#ffd24d";
   // dim the whole part when a different net is focused (pads on the focused net stay bright)
-  const onFocusNet = selNet && selNet !== -1 && c.pins.some(p => p.netId === selNet);
+  const onFocusNet = selNet && c.pins.some(p => p.netId === selNet);
   const dim = (State.focusDim != null) ? State.focusDim : 0.16;
   // an off-net component body stays a touch brighter than its pads so it still reads
-  const compFa = ((!selNet) ? 1 : (onFocusNet ? 1 : (selNet === -1 ? dim : Math.min(1, dim*1.9)))) * xrayDim(c.side);
+  const compFa = ((!selNet) ? 1 : (onFocusNet ? 1 : Math.min(1, dim*1.9))) * xrayDim(c.side);
   const padDim = (padsOnly ? 0.45 : 1) * compFa;
   if (!padsOnly){
     // body (dashed outline = locked)
@@ -264,12 +270,13 @@ function drawComponent(ctx, c, selNet, padsOnly){
     // the single hovered pad glows on its own (the "just this thing" hover cue), so a
     // selection can be held while pointing at another net's pad
     const isHoverPad = View.hoverPin && View.hoverPin.comp === c && View.hoverPin.pinIdx === pi;
-    const hl = (selNet && st.netId === selNet) || isHoverPad;
+    const hl = (selNet && st.netId === selNet && !blinkDimmed(st.netId)) || isHoverPad;
     const x=fpin.xmm*s, y=fpin.ymm*s, w=fpin.w*s, h=fpin.h*s;
     const selPin = (UI.sel && UI.sel.type==="pin" && UI.sel.comp===c && UI.sel.pinIdx===pi) ||
                    UI.isPinSelected(c, pi);
     // a pad on the focused net (or the hovered pad) stays full-bright even if its component is dimmed
-    const padA = ((selNet && selNet !== -1 && st.netId === selNet) || isHoverPad) ? (padsOnly?0.45:1) : padDim;
+    // a pad on the blinking net follows the flash (dim on the off phase)
+    const padA = ((selNet && st.netId === selNet && !blinkDimmed(st.netId)) || isHoverPad) ? (padsOnly?0.45:1) : padDim;
     if (hl){
       ctx.fillStyle="#fff"; ctx.globalAlpha=.5;
       ctx.beginPath(); ctx.arc(x,y,Math.max(w,h)/2+4/View.zoom,0,Math.PI*2); ctx.fill();

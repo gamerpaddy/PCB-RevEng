@@ -329,6 +329,10 @@ function snapshot(){
     layersMeta: State.layers.map(l => ({
       id:l.id, name:l.name, side:l.side, visible:l.visible, opacity:l.opacity,
       tx:l.tx, ty:l.ty, scale:l.scale, rot:l.rot, mirror:l.mirror, locked:l.locked,
+      // url rides in the metadata: undoing "replace from URL" must restore the
+      // hosted/uploaded state too, not just the bitmap (else a reload re-fetches
+      // the new URL over the undone image)
+      url:l.url || null,
       warp:l.warp || null, imgId: ensureLayerImgId(l)
     })),
   });

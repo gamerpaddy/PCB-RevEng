@@ -60,7 +60,8 @@ function wireToolbar(){
   $("#btn-new").addEventListener("click", ()=>{
     if (!confirm("Start a new project? Unsaved work will be lost.")) return;
     resetProject(); UI.select(null); UI.activeLayerId = null;
-    if (Autosave.db){ idbDel("autosave"); idbDel("autosave_imgs"); idbDel("autosave_undo"); idbDel("autosave_meta"); }
+    if (typeof projSetActive === "function") projSetActive(null);   // a new board belongs to no project (autosaves to the Autosave slot)
+    if (Autosave.ready){ storeDel("autosave"); storeDel("autosave_imgs"); storeDel("autosave_undo"); storeDel("autosave_meta"); }
     Autosave.dirty = false; Autosave.lastSaved = null; updateSaveStatus();
     UI.rebuildSideSelect(); syncSettings();
     UI.refreshLayerList(); UI.refreshNets(); requestRender();
@@ -69,12 +70,7 @@ function wireToolbar(){
   $("#btn-open").addEventListener("click", ()=> $("#file-project").click());
   $("#btn-export").addEventListener("click", ()=> UI.openExport());
   $("#btn-add-layer").addEventListener("click", ()=> $("#file-images").click());
-  $("#btn-add-url").addEventListener("click", ()=> {
-    const inp = $("#url-input");
-    if (inp) inp.value = "";
-    $("#url-dialog").showModal();
-    if (inp) inp.focus();
-  });
+  $("#btn-add-url").addEventListener("click", ()=> UI.openUrlDialog(null));
   $("#draw-side").addEventListener("change", e => {
     // in split view, the draw side controls the focused pane's trace/copper side
     if (View.split){
@@ -950,6 +946,12 @@ function wireFiles(){
     if (f) openProjectFile(f);
     e.target.value = "";
   });
+  $("#file-layer-replace").addEventListener("change", e => {
+    const f = e.target.files[0];
+    const l = getLayer(UI._replaceLayerId);
+    if (f && l) replaceLayerImage(l, f);
+    e.target.value = "";
+  });
   $("#opt-export").addEventListener("click", exportOptions);
   $("#opt-import").addEventListener("click", ()=> $("#file-options").click());
   $("#file-options").addEventListener("change", e => {
@@ -957,9 +959,23 @@ function wireFiles(){
     if (f) importOptions(f);
     e.target.value = "";
   });
-  // add-image-from-URL dialog
+  // add-image-from-URL dialog. The dialog is shared: normally the URL becomes a NEW
+  // hosted layer, but openUrlDialog(action) can point one showing at something else
+  // (the layer "replace from URL" path) — the override is consumed on use and every
+  // open resets it, so a cancelled dialog can't leak its action into the next one.
   const urlDlg = $("#url-dialog"), urlInput = $("#url-input");
-  const loadUrl = () => { const u = urlInput.value; urlDlg.close(); addImageLayerFromURL(u); };
+  const loadUrl = () => {
+    const u = urlInput.value; urlDlg.close();
+    const act = UI._urlDialogAction || addImageLayerFromURL;
+    UI._urlDialogAction = null;
+    act(u);
+  };
+  UI.openUrlDialog = (action) => {
+    UI._urlDialogAction = action || null;
+    urlInput.value = "";
+    urlDlg.showModal();
+    urlInput.focus();
+  };
   $("#url-ok").addEventListener("click", loadUrl);
   $("#url-cancel").addEventListener("click", ()=> urlDlg.close());
   urlInput.addEventListener("keydown", e => { if (e.key === "Enter"){ e.preventDefault(); loadUrl(); } });
@@ -1019,6 +1035,69 @@ function addImageLayer(file){
     img.src = reader.result;
   };
   reader.readAsDataURL(file);
+}
+
+/* Swap a layer's image for a new file, keeping its transform (position, scale,
+   rotation, mirror, warp/alignment) and settings. Undoable: pushUndo BEFORE the
+   bake captures the old bitmap in the image vault, commitLayerImage AFTER the
+   assignment mints a fresh vault id for the new one (see state.js). A hosted
+   (URL) layer becomes a normal uploaded layer — its bytes persist again. */
+function replaceLayerImage(layer, file){
+  const reader = new FileReader();
+  reader.onload = () => {
+    const img = new Image();
+    img.onload = () => {
+      pushUndo("replace layer image");
+      const wasUrl = !!layer.url;
+      layer.img = img;
+      layer.dataURL = reader.result;
+      layer.url = null;
+      layer.tiles = null;
+      buildLayerTiles(layer);
+      commitLayerImage(layer);
+      markImagesDirty();
+      UI.refreshLayerList(); requestRender();
+      UI.toast("Layer “" + layer.name + "” image replaced (" + img.width + "×" + img.height +
+               (layer.tiles ? " · tiled (LOD)" : "") + (wasUrl ? " · no longer hosted — saved in the project" : "") + ")");
+    };
+    img.onerror = () => UI.toast("Could not read image “" + file.name + "”");
+    img.src = reader.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+/* URL flavour of replaceLayerImage: the layer becomes a HOSTED layer (only the link
+   is persisted, the image is re-fetched on every load — same rules as “+ URL”).
+   CORS-first load with plain fallback, transform kept, undoable via the image vault. */
+function replaceLayerImageFromURL(layer, url){
+  url = (url || "").trim();
+  if (!url) return;
+  if (!/^https?:\/\//i.test(url)){ UI.toast("Enter a full http(s):// image URL"); return; }
+  const attempt = (useCors) => {
+    const img = new Image();
+    if (useCors) img.crossOrigin = "anonymous";
+    img.onload = () => {
+      if (!img.width){ UI.toast("That URL didn’t return a usable image"); return; }
+      pushUndo("replace layer image");
+      layer.img = img;
+      layer.dataURL = "";
+      layer.url = url;
+      layer.tiles = null;          // hosted layers are never tiled
+      commitLayerImage(layer);
+      markImagesDirty();
+      UI.refreshLayerList(); requestRender();
+      UI.toast("Layer “" + layer.name + "” image replaced (" + img.width + "×" + img.height + " · hosted)");
+      UI.warn("⚠ This layer now loads live from a URL — the image is NOT saved in your project. If the "
+        + "link changes or goes down, the layer will disappear. For anything important, "
+        + "download the image and replace from a file instead.");
+    };
+    img.onerror = () => {
+      if (useCors) attempt(false);   // server may just lack CORS headers — retry taint-mode
+      else UI.toast("Could not load image from that URL (blocked, offline, or not an image)");
+    };
+    img.src = url;
+  };
+  attempt(true);
 }
 
 /* Load a background image from a live URL. The bytes are NOT downloaded into the project
@@ -1114,6 +1193,7 @@ function openProjectFile(file){
       loadProject(reader.result, () => {
         UI.activeLayerId = State.layers[0]?.id ?? null;
         UI.select(null);
+        if (typeof projSetActive === "function") projSetActive(null);   // a file-opened board belongs to no project yet
         UI.rebuildSideSelect(); syncSettings();
         UI.refreshLayerList(); UI.refreshNets(); UI.refreshInspector();
         zoomToFit();
@@ -1158,6 +1238,7 @@ function importBoardFile(file){
     catch (err){ alert("Could not import board: " + err.message); return; }
     UI.activeLayerId = null;
     UI.select(null);
+    if (typeof projSetActive === "function") projSetActive(null);   // an imported boardview belongs to no project yet
     UI.rebuildSideSelect(); syncSettings();
     UI.refreshLayerList(); UI.refreshNets(); UI.refreshInspector();
     zoomToFit();

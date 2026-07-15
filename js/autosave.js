@@ -1,7 +1,12 @@
-/* ===== autosave.js — IndexedDB autosave (survives F5), sample-project loader ===== */
+/* ===== autosave.js — OPFS autosave (survives reloads), sample-project loader =====
+   The session is saved as real files in the Origin Private File System
+   (autosave/*.json — same storage the Projects tab uses), which is sturdier than
+   IndexedDB against "clear cookies and site data" style cleanups. Browsers without
+   OPFS fall back to the old IndexedDB key/value store, and an existing IndexedDB
+   autosave is migrated into OPFS once on startup. */
 "use strict";
 
-const Autosave = { db:null, dirty:false, restoring:false, interval:2500, _timer:null };
+const Autosave = { db:null, ready:false, dirty:false, restoring:false, interval:2500, _timer:null };
 
 /* autosave interval (ms) between a change and the save; 0 = off. Persisted. */
 function readAutosaveInterval(){
@@ -25,20 +30,30 @@ function setAutosaveInterval(ms){
    for the drop, so the timeline/undo isn't peppered with in-progress states). */
 function autosaveTick(){
   scheduleAutosave(); // arm the next tick regardless of what happens below
-  if (!Autosave.dirty || Autosave.restoring || !Autosave.db || Autosave.saving) return;
+  if (!Autosave.dirty || Autosave.restoring || !Autosave.ready || Autosave.saving) return;
   if (typeof Tools !== "undefined" && Tools.drag) return; // interaction in progress
   Autosave.dirty = false;
   Autosave.saving = true;
   updateSaveStatus(true);
-  const idle = window.requestIdleCallback || ((fn)=>setTimeout(()=>fn({timeRemaining:()=>5}),0));
+  // rIC with a timeout: a throttled/background tab may never go "idle", which would
+  // leave saving=true forever and block every later autosave
+  const idle = window.requestIdleCallback
+    ? ((fn)=>window.requestIdleCallback(fn, { timeout: 2000 }))
+    : ((fn)=>setTimeout(()=>fn({timeRemaining:()=>5}),0));
   idle(async () => {
     try {
-      await idbPut("autosave", serializeLight());
-      await idbPut("autosave_undo", JSON.stringify({ stack: Undo.stack, redo: Undo.redo }));
+      const full = serializeProject();   // one serialize feeds the session AND the project mirror
+      await storePut("autosave", serializeLight(full));
+      await storePut("autosave_undo", JSON.stringify({ stack: Undo.stack, redo: Undo.redo }));
       // clear imagesDirty only AFTER the image write succeeds, so a failure re-tries it
-      if (Autosave.imagesDirty){ await idbPut("autosave_imgs", serializeImages()); Autosave.imagesDirty = false; }
+      if (Autosave.imagesDirty){ await storePut("autosave_imgs", serializeImages()); Autosave.imagesDirty = false; }
       Autosave.lastSaved = Date.now();
-      await idbPut("autosave_meta", JSON.stringify({ savedAt: Autosave.lastSaved }));
+      await storePut("autosave_meta", JSON.stringify({ savedAt: Autosave.lastSaved }));
+      // mirror the board into its OPFS project: the ACTIVE project when one is open (so
+      // it stays current without a manual 💾 Save), else the special Autosave slot
+      if (typeof projAutosaveMirror === "function"){
+        try { await projAutosaveMirror(full); } catch(e){}
+      }
     } catch (e){
       // quota / write error — the change is NOT saved, so keep it pending for the next tick
       // (we optimistically cleared dirty above; put it back so we don't report a false save)
@@ -47,6 +62,60 @@ function autosaveTick(){
     Autosave.saving = false;
     updateSaveStatus();
   });
+}
+
+/* ---------- storage backend: OPFS files, IndexedDB fallback ---------- */
+const AS_OPFS = !!(navigator.storage && navigator.storage.getDirectory);
+const AS_KEYS = ["autosave", "autosave_undo", "autosave_imgs", "autosave_meta"];
+
+async function asDir(){
+  if (Autosave._dir) return Autosave._dir;
+  const root = await navigator.storage.getDirectory();
+  Autosave._dir = await root.getDirectoryHandle("autosave", { create:true });
+  return Autosave._dir;
+}
+async function storePut(key, val){
+  if (!AS_OPFS) return idbPut(key, val);
+  const dir = await asDir();
+  const fh = await dir.getFileHandle(key + ".json", { create:true });
+  const w = await fh.createWritable();
+  await w.write(val);
+  await w.close();
+}
+async function storeGet(key){
+  if (!AS_OPFS) return idbGet(key);
+  try {
+    const dir = await asDir();
+    const fh = await dir.getFileHandle(key + ".json");
+    return await (await fh.getFile()).text();
+  } catch(e){ return undefined; }
+}
+async function storeDel(key){
+  if (!AS_OPFS) return idbDel(key);
+  try { const dir = await asDir(); await dir.removeEntry(key + ".json"); } catch(e){}
+}
+
+/* one-time move of a pre-OPFS IndexedDB autosave into OPFS files. Runs only when
+   OPFS has no session yet; the IndexedDB copy is deleted after a successful move
+   (image blobs are megabytes — no point storing the session twice). */
+async function migrateIdbAutosave(){
+  try {
+    const existing = await storeGet("autosave");
+    if (existing != null) return;                     // OPFS session already present
+    Autosave.db = await idbOpen();                    // temporary handle for the move
+    const light = await idbGet("autosave");
+    if (light != null){
+      for (const k of AS_KEYS){
+        const v = await idbGet(k);
+        if (v != null) await storePut(k, v);
+      }
+      for (const k of AS_KEYS) await idbDel(k);
+    }
+  } catch(e){                                         // no old data / idb blocked — fine
+  } finally {
+    try { if (Autosave.db) Autosave.db.close(); } catch(e){}
+    Autosave.db = null;
+  }
 }
 
 function idbOpen(){
@@ -112,6 +181,7 @@ function loadDefaultProject(overlay, ltext){
       Autosave.restoring = true; // hold off autosave until the project is fully built
       loadProject(text, () => {
         Autosave.restoring = false;
+        if (typeof projSetActive === "function") projSetActive(null);   // the example is not a saved project
         UI.activeLayerId = State.layers[0]?.id ?? null;
         UI.rebuildSideSelect(); syncSettings();
         UI.refreshLayerList(); UI.refreshNets(); UI.refreshInspector();
@@ -131,9 +201,10 @@ function markImagesDirty(){ Autosave.imagesDirty = true; Autosave.dirty = true; 
 
 /* lightweight project JSON WITHOUT the base64 images (the slow part).
    Images are stored separately and only when they actually change, so the
-   2.5 s autosave no longer re-encodes megabytes every tick. */
-function serializeLight(){
-  const full = JSON.parse(serializeProject());
+   2.5 s autosave no longer re-encodes megabytes every tick. Pass an already
+   serialized full-project string to avoid serializing twice. */
+function serializeLight(fullText){
+  const full = JSON.parse(fullText || serializeProject());
   full.activeLayerId = UI.activeLayerId;   // remember the selected layer across page reloads
   full.layers = (full.layers || []).map(l => { const { dataURL, ...rest } = l; return rest; });
   return JSON.stringify(full);
@@ -180,18 +251,23 @@ function showWelcome(overlay, ltext){
 async function autosaveInit(){
   const overlay = document.getElementById("loading-overlay");
   const ltext = document.getElementById("loading-text");
-  try { Autosave.db = await idbOpen(); }
-  catch (e){ updateSaveStatus(); return; }
+  if (AS_OPFS){
+    await migrateIdbAutosave();   // adopt a pre-OPFS IndexedDB session once
+    Autosave.ready = true;
+  } else {
+    try { Autosave.db = await idbOpen(); Autosave.ready = true; }
+    catch (e){ updateSaveStatus(); return; }
+  }
   // restore a previous session (merge light project + stored images + undo timeline)
   try {
-    const light = await idbGet("autosave");
+    const light = await storeGet("autosave");
     if (light){
       if (overlay) overlay.classList.add("show");
-      const meta = await idbGet("autosave_meta");
+      const meta = await storeGet("autosave_meta");
       if (meta){ try { Autosave.lastSaved = JSON.parse(meta).savedAt; } catch(e){} }
       if (ltext && Autosave.lastSaved) ltext.textContent = "Wait, loading saved session… (saved " + relTime(Autosave.lastSaved) + ")";
-      const imgs = await idbGet("autosave_imgs");
-      const undoData = await idbGet("autosave_undo");
+      const imgs = await storeGet("autosave_imgs");
+      const undoData = await storeGet("autosave_undo");
       const proj = JSON.parse(light);
       if (imgs){
         const map = new Map(JSON.parse(imgs).map(i => [i.id, i.dataURL]));
