@@ -557,3 +557,40 @@ dialog::backdrop{background:rgba(0,0,0,.55);}
 .nt-focus{font-size:10px; padding:1px 7px; background:#232b35; color:#cdd5df;
   border:1px solid #3a4553; border-radius:4px; cursor:pointer; white-space:nowrap;}
 .nt-focus:hover{background:#2f3a47; color:#fff; border-color:#4a5766;}
+
+/* ---- Projects pane ---- */
+#projects-pane{flex:1 1 auto; min-height:0; display:flex; flex-direction:column; padding:8px 12px;}
+#projects-toolbar{display:flex; align-items:center; gap:8px; flex:0 0 auto;}
+#projects-pane.dragover{outline:2px dashed var(--accent); outline-offset:-6px;}
+#projects-grid{flex:1 1 auto; min-height:0; overflow:auto; display:flex; flex-wrap:wrap;
+  gap:12px; align-content:flex-start; padding:4px 2px;}
+.proj-card{width:300px; background:var(--bg2); border:1px solid var(--line); border-radius:8px;
+  padding:10px; display:flex; flex-direction:column; gap:7px;}
+.proj-card.active{border-color:var(--accent);}
+.proj-thumb{width:100%; height:150px; object-fit:cover; border-radius:5px;
+  background:#10141a; border:1px solid #1d242d;}
+.proj-thumb.empty,.proj-ver-thumb.empty{display:flex; align-items:center; justify-content:center;
+  color:var(--fg-dim); font-size:11px;}
+.proj-name-row{display:flex; align-items:center; gap:6px;}
+.proj-name{flex:1; min-width:0; font-size:13px; font-weight:600; padding:2px 5px;
+  border:1px solid transparent; border-radius:4px; background:transparent; color:var(--fg);}
+.proj-name:hover{border-color:var(--line);}
+.proj-name:focus{border-color:var(--accent); background:var(--bg); outline:none;}
+.proj-badge{flex:0 0 auto; font-size:10px; color:var(--accent); border:1px solid var(--accent);
+  border-radius:8px; padding:0 7px; line-height:15px;}
+.proj-meta{font-size:11px; color:var(--fg-dim); line-height:1.5;}
+.proj-actions{display:flex; gap:5px; flex-wrap:wrap;}
+.proj-actions button{font-size:11px; padding:3px 8px;}
+.proj-versions{border-top:1px solid #1d242d; padding-top:6px; display:flex;
+  flex-direction:column; gap:4px;}
+.proj-ver-toggle{align-self:flex-start; background:none; border:none; color:var(--fg-dim);
+  cursor:pointer; font-size:11px; padding:0 2px;}
+.proj-ver-toggle:hover{color:var(--fg);}
+.proj-ver{display:flex; align-items:center; gap:6px; font-size:11px;}
+.proj-ver-thumb{flex:0 0 auto; width:44px; height:28px; object-fit:cover; border-radius:3px;
+  background:#10141a; border:1px solid #1d242d;}
+.proj-ver .grow{flex:1; min-width:0; overflow:hidden;}
+.proj-ver-label{color:var(--fg); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.proj-ver-sub{color:var(--fg-dim); font-size:10px; white-space:nowrap; overflow:hidden;
+  text-overflow:ellipsis;}
+.proj-ver button{font-size:10px; padding:1px 6px;}

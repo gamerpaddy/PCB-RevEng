@@ -59,6 +59,7 @@ const KeyActions = [
   { id:"view.tabschematic", label:"Tab: Schematic editor",      def:"",       btn:"#tab-schematic",  run:clickBtn("#tab-schematic") },
   { id:"view.tabbom",       label:"Tab: BOM editor",            def:"",       btn:"#tab-bom",        run:clickBtn("#tab-bom") },
   { id:"view.tabnets",      label:"Tab: Nets",                  def:"",       btn:"#tab-nets",       run:clickBtn("#tab-nets") },
+  { id:"view.tabprojects",  label:"Tab: Projects",              def:"",       btn:"#tab-projects",   run:clickBtn("#tab-projects") },
   { id:"sch.arrange",    label:"Schematic: apply auto-arrangement", def:"",   btn:"#sch-arrange-go", run:clickBtn("#sch-arrange-go") },
   { id:"sch.fit",        label:"Schematic: zoom to fit",        def:"",       btn:"#sch-fit",        run:clickBtn("#sch-fit") },
   { id:"sch.wiretool",   label:"Schematic: wire tool (extra key — W is fixed)", def:"", btn:"#sch-wire", run:clickBtn("#sch-wire") },
