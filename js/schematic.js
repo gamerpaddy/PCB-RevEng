@@ -29,6 +29,7 @@ const EditorTabs = {
     $("#main").style.display           = name === "visual"    ? "" : "none";
     $("#schematic-pane").style.display = name === "schematic" ? "" : "none";
     $("#bom-pane").style.display       = name === "bom"       ? "" : "none";
+    $("#nets-pane").style.display      = name === "nets"      ? "" : "none";
     // leaving the schematic tab: kill the search-jump flash interval so it doesn't keep
     // firing renders at the hidden canvas for up to 5s
     if (name !== "schematic" && typeof Sch !== "undefined" && Sch._flashTimer){
@@ -39,7 +40,7 @@ const EditorTabs = {
     for (const sel of ["#toolbar", "#tb-view"]){
       const el = $(sel); if (el) el.style.display = name === "visual" ? "" : "none";
     }
-    for (const [sel, n] of [["#tab-visual","visual"],["#tab-schematic","schematic"],["#tab-bom","bom"]])
+    for (const [sel, n] of [["#tab-visual","visual"],["#tab-schematic","schematic"],["#tab-bom","bom"],["#tab-nets","nets"]])
       $(sel).classList.toggle("active", n === name);
     if (name === "visual"){ viewResize(); }
     else if (name === "schematic"){ Sch.enter(); }
@@ -47,6 +48,7 @@ const EditorTabs = {
       if (typeof loadKicadFootprints === "function") loadKicadFootprints();
       UI._renderBomTable();
     }
+    else if (name === "nets"){ NetsTab.enter(); }
   },
 
   /* show/hide the Schematic tab with its Lab toggle (falling back to Visual if
@@ -61,16 +63,18 @@ const EditorTabs = {
     $("#tab-visual").addEventListener("click",    () => EditorTabs.show("visual"));
     $("#tab-schematic").addEventListener("click", () => EditorTabs.show("schematic"));
     $("#tab-bom").addEventListener("click",       () => EditorTabs.show("bom"));
+    $("#tab-nets").addEventListener("click",      () => EditorTabs.show("nets"));
     EditorTabs.refreshLabTab();
-    // F1 / F2 / F3 switch tabs from anywhere (capture, ahead of the browser's F1 help)
+    // F1…F4 switch tabs from anywhere (capture, ahead of the browser's F1 help)
     window.addEventListener("keydown", (e) => {
-      if (!/^F[123]$/.test(e.key) || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
+      if (!/^F[1234]$/.test(e.key) || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
       if (e.target && e.target.matches && e.target.matches("input,select,textarea")) return;
       if (document.querySelector("dialog[open]")) return;
       e.preventDefault();
       if (e.key === "F1") EditorTabs.show("visual");
       else if (e.key === "F2"){ if (SchEnabled()) EditorTabs.show("schematic"); else UI.toast("Schematic tab is off — enable it in 🔬 Experimental"); }
-      else EditorTabs.show("bom");
+      else if (e.key === "F3") EditorTabs.show("bom");
+      else EditorTabs.show("nets");
     }, true);
   },
 };

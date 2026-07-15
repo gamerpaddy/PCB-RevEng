@@ -505,3 +505,55 @@ dialog::backdrop{background:rgba(0,0,0,.55);}
 #bom-pane{flex:1 1 auto; min-height:0; display:flex; flex-direction:column; padding:8px 12px;}
 #bom-toolbar{display:flex; align-items:center; gap:8px; flex:0 0 auto;}
 #bom-pane #bom-table-wrap{flex:1 1 auto; max-height:none; min-width:0;}
+
+/* ---- Nets pane ---- */
+#nets-pane{flex:1 1 auto; min-height:0; display:flex; flex-direction:column; padding:8px 12px;}
+#nets-toolbar{display:flex; align-items:center; gap:8px; flex:0 0 auto;}
+#nets-search{width:220px; padding:4px 7px; background:#1c222b; border:1px solid #2e3742;
+  border-radius:5px; color:#d7dde5; font-size:12px;}
+#nets-search:focus{border-color:var(--accent); outline:none;}
+#nets-table-wrap{flex:1 1 auto; min-height:0; overflow:auto;
+  border:1px solid var(--line); border-radius:6px;}
+.nets-table{width:100%; border-collapse:collapse; font-size:12px;}
+.nets-table thead th{position:sticky; top:0; z-index:1; background:var(--bg2); color:var(--fg-dim);
+  text-align:left; padding:4px 6px; border-bottom:1px solid var(--line); font-weight:600; white-space:nowrap;}
+.nets-table td{padding:2px 6px; border-bottom:1px solid #1d242d; vertical-align:middle;}
+.nets-table tbody tr.nt-row:hover{background:var(--bg3);}
+.nets-table tr.nt-row.open{background:var(--bg3);}
+.nt-expcell,.nt-colcell,.nt-protcell{width:1%; padding-right:0 !important;}
+.nt-exp{background:none; border:none; color:var(--fg-dim); cursor:pointer; font-size:11px; padding:0 2px;}
+.nt-exp:hover{color:var(--fg);}
+.nt-color{width:22px; height:18px; padding:0; border:1px solid var(--line); border-radius:3px;
+  background:none; cursor:pointer;}
+.nt-prot{background:none; border:none; cursor:pointer; font-size:12px; padding:0 2px;
+  filter:grayscale(1); opacity:.4;}
+.nt-prot:hover{opacity:.8;}
+.nt-prot.on{filter:none; opacity:1;}
+.nt-namecell{min-width:150px;}
+.nets-table input.nt-name{width:100%; min-width:120px; font-size:12px; padding:2px 5px;
+  border:1px solid transparent; border-radius:4px; background:transparent; color:var(--fg);}
+.nets-table input.nt-name:hover{border-color:var(--line);}
+.nets-table input.nt-name:focus{border-color:var(--accent); background:var(--bg); outline:none;}
+.nets-table input.nt-name.prot{color:var(--fg-dim); cursor:default;}
+.nt-num{color:var(--fg-dim); text-align:right; width:1%; padding-right:12px !important; white-space:nowrap;}
+.nt-gauge{color:var(--fg-dim); white-space:nowrap;}
+/* expanded net → its connection list */
+.nets-table tr.nt-detailrow > td{padding:0 0 6px 26px; background:#12161b;}
+.nt-sub{width:100%; border-collapse:collapse; font-size:11px;}
+.nt-sub th{text-align:left; color:var(--fg-dim); font-weight:600; padding:3px 6px;
+  border-bottom:1px solid #232b35;}
+.nt-sub td{padding:1px 6px; border-bottom:1px solid #1a2029;}
+.nt-sub tr:hover{background:#181d24;}
+.nt-kind{text-transform:uppercase; font-size:9px; letter-spacing:.05em; width:1%;
+  color:#8892a0; white-space:nowrap;}
+.nt-k-pad{color:#ffd24d;} .nt-k-via{color:#7da0ff;} .nt-k-trace{color:#66d96f;}
+.nt-what{white-space:nowrap; color:var(--fg);}
+.nt-detail{color:var(--fg-dim); white-space:nowrap;}
+.nt-netcell{width:150px; color:var(--fg-dim);}
+.nets-table input.nt-net{width:100%; min-width:100px; font-size:11px; padding:1px 4px;
+  border:1px solid transparent; border-radius:4px; background:transparent; color:var(--fg);}
+.nets-table input.nt-net:hover{border-color:var(--line);}
+.nets-table input.nt-net:focus{border-color:var(--accent); background:var(--bg); outline:none;}
+.nt-focus{font-size:10px; padding:1px 7px; background:#232b35; color:#cdd5df;
+  border:1px solid #3a4553; border-radius:4px; cursor:pointer; white-space:nowrap;}
+.nt-focus:hover{background:#2f3a47; color:#fff; border-color:#4a5766;}
