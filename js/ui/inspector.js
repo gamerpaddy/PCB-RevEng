@@ -79,7 +79,7 @@ UI.inspectMultiPins = () => {
     for (const p of UI.pinSel){
       const pin = p.comp.pins[p.pinIdx];
       if (pin.nc){ skipped++; continue; }                 // NC pins carry no net — leave them untouched
-      pin.netId = target.id; applied++;
+      pin.netId = target.id; releasePinWireNets(p.comp.id, p.pinIdx); applied++;
     }
     pruneNets();
     UI.toast(applied + " pins → " + target.name + (skipped ? " (" + skipped + " NC skipped)" : ""));
@@ -395,7 +395,7 @@ UI.inspectComponent = (c, selPin) => {
     const i = +e.target.dataset.i;
     pushUndo("pin NC " + c.ref + "." + c.pins[i].num);
     c.pins[i].nc = e.target.checked;
-    if (e.target.checked) c.pins[i].netId = null; // NC pins carry no net
+    if (e.target.checked){ c.pins[i].netId = null; releasePinWireNets(c.id, i); } // NC pins carry no net
     pruneNets(); UI.refreshNets(); UI.refreshInspector(); requestRender();
   }));
 

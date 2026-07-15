@@ -207,11 +207,23 @@ function renameNet(id, newName){
   if (net.protected && newName.toUpperCase() !== net.name){
     return false; // protected nets keep their name
   }
-  const existing = findNetByName(newName) ||
-                   (PROTECTED_NET_NAMES.includes(newName.toUpperCase()) ? findNetByName(newName.toUpperCase()) : null);
+  // collision lookup matches assignNetToObject's: exact name, else its uppercase form —
+  // so typing "data" merges with an existing "DATA" here exactly like assigning does
+  const existing = findNetByName(newName) || findNetByName(newName.toUpperCase());
   if (existing && existing.id !== id){
     // renaming onto an existing net merges them
-    return mergeNets(existing.id, id) !== null;
+    const sid = mergeNets(existing.id, id);
+    if (sid == null) return false;
+    // an explicit rename should end up CALLED what was typed: mergeNets' "user-named
+    // net wins" keep-rule may have kept the OLD name (merging onto an auto net) — put
+    // the typed name on the survivor unless it's protected or already matches (a
+    // case-insensitive match keeps the existing net's casing, like assign does)
+    const surv = getNet(sid);
+    if (surv && !surv.protected && surv.name.toUpperCase() !== newName.toUpperCase()){
+      surv.name = PROTECTED_NET_NAMES.includes(newName.toUpperCase()) ? newName.toUpperCase() : newName;
+      surv.auto = false;
+    }
+    return true;
   }
   if (PROTECTED_NET_NAMES.includes(newName.toUpperCase())){
     net.name = newName.toUpperCase();

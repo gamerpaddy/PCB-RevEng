@@ -267,11 +267,25 @@ function objNetId(obj){
    · scope "all"  → rename the whole current net (every pad/via/trace on it). Also the
                     natural path when the net has a single member.
    Returns false when blocked by net protection. */
+/* a pin's net just changed: schematic wires anchored to it may carry the OLD netId —
+   clear it so schWireNet() re-derives their net from the anchors (otherwise the wire
+   keeps rendering the old net, ghost-keeps it alive through pruneNets, and trips the
+   spurious "different net — touching but won't connect" warnings) */
+function releasePinWireNets(compId, pinIdx){
+  if (!State.schWires) return;
+  for (const w of State.schWires)
+    if ((w.a && w.a.comp === compId && w.a.pin === pinIdx) ||
+        (w.b && w.b.comp === compId && w.b.pin === pinIdx)) w.netId = null;
+}
+
 function assignNetToObject(obj, name, scope){
   name = (name || "").trim();
   scope = scope || "all";
   const setId = (id) => {
-    if (obj.type==="pin") obj.comp.pins[obj.pinIdx].netId = id;
+    if (obj.type==="pin"){
+      obj.comp.pins[obj.pinIdx].netId = id;
+      releasePinWireNets(obj.comp.id, obj.pinIdx);
+    }
     else if (obj.type==="via") obj.via.netId = id;
     else obj.trace.netId = id;
   };
@@ -318,7 +332,7 @@ function assignNetToConnected(obj, name){
   const { traces, vias, pads } = connectedCluster(obj);
   for (const t of traces) t.netId = nid;
   for (const v of vias)   v.netId = nid;
-  for (const { comp, pinIdx } of pads) comp.pins[pinIdx].netId = nid;
+  for (const { comp, pinIdx } of pads){ comp.pins[pinIdx].netId = nid; releasePinWireNets(comp.id, pinIdx); }
   pruneNets();
 }
 
@@ -353,6 +367,7 @@ function applyNetRename(obj, name, done){
         for (const c of State.components) for (const p of c.pins) if (p.netId === oldId) p.netId = null;
         for (const v of State.vias)   if (v.netId === oldId) v.netId = null;
         for (const t of State.traces) if (t.netId === oldId) t.netId = null;
+        for (const w of State.schWires) if (w.netId === oldId) w.netId = null;
         pruneNets();
       }
     } else if (!assignNetToObject(obj, name, scope)){
@@ -388,6 +403,7 @@ function clearNetScope(obj, scope){
     for (const c of State.components) for (const p of c.pins) if (p.netId === oldId) p.netId = null;
     for (const v of State.vias)   if (v.netId === oldId) v.netId = null;
     for (const t of State.traces) if (t.netId === oldId) t.netId = null;
+    for (const w of State.schWires) if (w.netId === oldId) w.netId = null;
   } else if (!assignNetToObject(obj, "", "one")){
     cancelUndo(); return;
   }

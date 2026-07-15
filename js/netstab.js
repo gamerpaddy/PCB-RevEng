@@ -55,7 +55,11 @@ function ntPadAttachments(comp, pinIdx){
     (w.b && w.b.comp === comp.id && w.b.pin === pinIdx));
   const fp = compFootprint(comp);
   const fpin = fp && fp.pins[pinIdx];
-  const traces = fpin ? State.traces.filter(t => padTouchesTrace(comp, fpin, t)) : [];
+  // only traces of the pad's OWN net: an unrelated net's trace merely crossing the pad
+  // geometrically doesn't describe the old connection and must not be deleted with it
+  const nid = comp.pins[pinIdx].netId;
+  const traces = fpin && nid
+    ? State.traces.filter(t => t.netId === nid && padTouchesTrace(comp, fpin, t)) : [];
   return { wires, traces };
 }
 
@@ -151,8 +155,10 @@ NetsTab.renameNet = (net, name) => {
   UI.refreshNets(); UI.refreshInspector(); requestRender();
 };
 
-NetsTab.setColor = (net, color) => {
-  pushUndo("net colour");
+/* `first` = first input of a picker session → one undo entry per session, not one per
+   drag tick (the browser fires "input" continuously while dragging inside the picker) */
+NetsTab.setColor = (net, color, first) => {
+  if (first) pushUndo("net colour");
   net.color = color;
   markDirty();
   requestRender();
@@ -250,7 +256,7 @@ function ntGaugeText(m){
   const ws = [...new Set(m.traces.map(t => _ntNum(_ntWidthMm(t), 3)))].sort((a, b) => a - b);
   if (ws.length) bits.push(ws.join(" / ") + " mm");
   const vs = [...new Set(m.vias.map(v => _ntNum(_ntMm((v.r || State.viaR) * 2), 2)))].sort((a, b) => a - b);
-  if (vs.length) bits.push("Ø " + vs.join(" / "));
+  if (vs.length) bits.push("Ø " + vs.join(" / ") + " mm");
   return bits.join(" · ") || "—";
 }
 
@@ -295,7 +301,9 @@ NetsTab.render = () => {
     col.type = "color"; col.className = "nt-color";
     col.value = /^#[0-9a-fA-F]{6}$/.test(net.color) ? net.color : "#888888";
     col.title = "Net colour";
-    col.addEventListener("input", () => NetsTab.setColor(net, col.value));
+    let colArmed = false;   // one undo entry per picker session (reset when the picker closes)
+    col.addEventListener("input", () => { NetsTab.setColor(net, col.value, !colArmed); colArmed = true; });
+    col.addEventListener("change", () => { colArmed = false; });
     cell("nt-colcell").appendChild(col);
 
     const prot = document.createElement("button");

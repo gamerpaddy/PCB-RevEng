@@ -575,7 +575,7 @@ function showCanvasContextMenu(cx, cy, w){
       items.push({ label:"Clear net at selected", action:()=>clearNetScope(h, "one") });
       items.push({ label:"Clear whole net “"+nn+"”", action:()=>clearNetScope(h, "all") });
     }
-    items.push({ label: p.nc ? "Unset no-connect" : "Mark no-connect (NC)", action:()=>{ pushUndo("pin NC"); p.nc=!p.nc; if(p.nc)p.netId=null; pruneNets(); UI.refreshNets(); UI.refreshInspector(); requestRender(); } });
+    items.push({ label: p.nc ? "Unset no-connect" : "Mark no-connect (NC)", action:()=>{ pushUndo("pin NC"); p.nc=!p.nc; if(p.nc){ p.netId=null; releasePinWireNets(c.id, h.pinIdx); } pruneNets(); UI.refreshNets(); UI.refreshInspector(); requestRender(); } });
     // visual pad editor — drag handles to resize / move this pad (free & generated alike)
     items.push({ sep:true });
     items.push({ label:"Edit pad size / position (drag)", action:()=>enterPadEdit(c, h.pinIdx) });

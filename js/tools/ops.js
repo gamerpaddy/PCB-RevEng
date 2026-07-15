@@ -143,6 +143,7 @@ function deleteSelection(){
     if (!p || !p.netId){ UI.toast("Pad has no net — select the component body to delete the whole part"); return; }
     pushUndo("clear pad net");
     p.netId = null;
+    releasePinWireNets(sel.comp.id, sel.pinIdx);
     pruneNets();
     UI.refreshNets(); UI.refreshInspector(); requestRender();
     return;
@@ -338,7 +339,7 @@ function splitNetByConnectivity(netId){
   for (let gi=1; gi<islands.length; gi++){
     const nn = createNet();
     for (const it of islands[gi]){
-      if (it.kind === "pin") it.comp.pins[it.pi].netId = nn.id;
+      if (it.kind === "pin"){ it.comp.pins[it.pi].netId = nn.id; releasePinWireNets(it.comp.id, it.pi); }
       else if (it.kind === "via") it.via.netId = nn.id;
       else it.trace.netId = nn.id;
     }

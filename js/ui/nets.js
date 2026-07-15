@@ -63,9 +63,15 @@ UI.refreshNets = () => {
       setNetProtected(n.id, !n.protected);
       UI.refreshNets(); UI.refreshInspector(); requestRender();
     });
+    // one undo entry per picker session, not one per drag tick ("input" fires
+    // continuously while dragging inside the picker); markDirty keeps later ticks
+    // autosave-covered since only the first one goes through pushUndo
+    let colArmed = false;
     item.querySelector(".net-color").addEventListener("input", e => {
-      pushUndo("net colour"); n.color = e.target.value; requestRender();
+      if (!colArmed){ pushUndo("net colour"); colArmed = true; }
+      n.color = e.target.value; markDirty(); requestRender();
     });
+    item.querySelector(".net-color").addEventListener("change", () => { colArmed = false; });
     // hovering a net row previews it on the board (and isolates its ratsnest)
     item.addEventListener("mouseenter", ()=>{ View.hoverNetId = n.id; requestRender(); });
     item.addEventListener("mouseleave", ()=>{ if (View.hoverNetId === n.id){ View.hoverNetId = null; requestRender(); } });
