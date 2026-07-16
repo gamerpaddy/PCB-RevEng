@@ -1192,6 +1192,7 @@ function openProjectFile(file){
     try {
       loadProject(reader.result, () => {
         UI.activeLayerId = State.layers[0]?.id ?? null;
+        UI.ensureVisibleLayer();   // all-hidden board (e.g. saved by a multiplayer guest) → show layer 1
         UI.select(null);
         if (typeof projSetActive === "function") projSetActive(null);   // a file-opened board belongs to no project yet
         UI.rebuildSideSelect(); syncSettings();

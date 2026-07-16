@@ -292,6 +292,7 @@ Projects.open = async (pid, vid) => {
   try {
     loadProject(text, () => {
       UI.activeLayerId = State.layers[0]?.id ?? null;
+      UI.ensureVisibleLayer();   // all-hidden board (e.g. saved by a multiplayer guest) → show layer 1
       UI.select(null);
       UI.rebuildSideSelect(); syncSettings();
       UI.refreshLayerList(); UI.refreshNets(); UI.refreshInspector();

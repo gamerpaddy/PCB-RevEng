@@ -97,6 +97,18 @@ UI.activeLayer = () => getLayer(UI.activeLayerId);
 UI.resolveActiveLayer = (preferId) => {
   UI.activeLayerId = (preferId != null && getLayer(preferId)) ? preferId : (State.layers[0]?.id ?? null);
 };
+/* after a project open / multiplayer join: if NO image layer is visible, auto-view the
+   active one (or layer 1) like pressing its number key — visible, drawable side, toast-less.
+   Boards arriving over multiplayer carry no visible/opacity (per-user view state), so
+   without this every layer started hidden and the board looked like a black void. */
+UI.ensureVisibleLayer = () => {
+  if (!State.layers.length || State.layers.some(l => l.visible)) return;
+  const l = UI.activeLayer() || State.layers[0];
+  l.visible = true;
+  l.opacity = Math.max(l.opacity || 0, 0.9);
+  UI.activeLayerId = l.id;
+  if (typeof UI.setDrawSide === "function") UI.setDrawSide(l.side);
+};
 UI.layerKeyMode = () => localStorage.getItem("pcbreveng.layerKeyMode") || "switch";
 
 /* mouse-wheel zoom sensitivity as a percent of the original speed (5–200).

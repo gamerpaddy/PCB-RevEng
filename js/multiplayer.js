@@ -366,7 +366,9 @@ function mpApplyCore(coreStr){
       ex.img = img; ex.dataURL = dataURL; ex.tiles = tiles;
       return ex;
     }
-    const l = { ...m, img: null, dataURL: "" };
+    // visible/opacity aren't in the core (per-user view state) — give the fresh
+    // layer sane view defaults instead of undefined (= invisible, NaN alpha)
+    const l = { visible: false, opacity: 1, ...m, img: null, dataURL: "" };
     if (m.url){
       const attempt = (useCors) => {
         const img = new Image();
@@ -389,6 +391,7 @@ function mpApplyCore(coreStr){
   if (typeof View !== "undefined"){ View.hoverPin = null; View.hoverObj = null; }
   if (typeof UI !== "undefined"){
     UI.resolveActiveLayer(UI.activeLayerId);
+    UI.ensureVisibleLayer();   // fresh join / remote project open: auto-view layer 1
     UI.rebuildSideSelect();
     UI.refreshLayerList(); UI.refreshNets(); UI.refreshInspector();
   }
