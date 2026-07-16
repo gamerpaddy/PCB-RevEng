@@ -375,8 +375,11 @@ function mpOnMsg(peer, raw){
       mpApplyDrag(m);
       break;
     case "img":
-      // the host explicitly accepts or declines incoming photos, once per peer/session
       if (MP.isHost){
+        // guests may only send images at all when layer tools are granted — anything
+        // else is silently dropped (no prompt spam, nothing applied or relayed)
+        if (!MP.rights.layerTools) break;
+        // allowed senders still need a one-time accept, once per peer for the session
         if (peer._imgOk === undefined)
           peer._imgOk = confirm((peer.name || "A peer") + " wants to send image layers to you.\n\n" +
                                 "Accept images from them for this session?");
@@ -386,9 +389,14 @@ function mpOnMsg(peer, raw){
       mpApplyImage(m.layerId, m.data, m.w, m.h);
       break;
     case "imgreq":
-      // a peer wants image layers — re-offer everything if we're sharing
+      // a peer wants image layers. The HOST re-offers everything; a guest only
+      // re-offers layers it added/replaced itself (so late joiners still get those).
       if (MP.isHost) mpBroadcast(m, peer);
-      if (MP.opts.sendImages){ MP._imgSig.clear(); mpSyncImages(); }
+      if (MP.opts.sendImages){
+        if (MP.isHost) MP._imgSig.clear();
+        else for (const l of State.layers) if (l._mpOwn) MP._imgSig.delete(l.id);
+        mpSyncImages();
+      }
       break;
     case "bye":
       mpDropPeer(peer);
@@ -600,7 +608,13 @@ function mpImgSig(dataURL){
 }
 
 function mpSyncImages(){
+  // GUESTS only ever send images for layers they themselves added/replaced during the
+  // session (marked _mpOwn) — and only when the host granted layer tools. The host owns
+  // the board's photos; guests never re-offer them back (no connect-time burst either).
+  const guest = mpConnected() && !MP.isHost;
+  if (guest && !MP.rights.layerTools) return;
   for (const l of State.layers){
+    if (guest && !l._mpOwn) continue;
     if (l.url || !l.dataURL) continue;   // hosted layers travel as links in the core
     const sig = mpImgSig(l.dataURL);
     if (MP._imgSig.get(l.id) === sig) continue;
@@ -1341,6 +1355,22 @@ function mpInstallGuards(){
       return orig.apply(this, a);
     };
   };
+  // mark layers this side added/replaced itself — the ONLY images a guest may offer.
+  // Installed FIRST so the deny wraps below sit outside (a blocked call never marks).
+  const markOwn = (name, pick) => {
+    const orig = window[name];
+    if (typeof orig !== "function") return;
+    window[name] = function(...a){
+      const r = orig.apply(this, a);
+      const l = pick(a, r);
+      if (l && typeof l === "object") l._mpOwn = true;
+      return r;
+    };
+  };
+  markOwn("addLayerFromImage", (a, r) => r);
+  markOwn("replaceLayerImage", (a) => a[0]);
+  markOwn("replaceLayerImageFromURL", (a) => a[0]);
+
   wrap("resetProject",    "openProjects", "start a new project", true);
   wrap("openProjectFile", "openProjects", "open projects", true);
   wrap("importBoardFile", "openProjects", "import boards", true);

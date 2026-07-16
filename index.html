@@ -837,8 +837,10 @@
       Parts, nets, traces, vias, notes, schematic and layer transforms sync both ways
       (simultaneous edits: last save wins). Image layers added from a <b>URL</b> are always
       shared as links; embedded photo files travel only from peers who tick the box above
-      (each side shares its <b>own</b> photos) — downscaled to the px/mm cap to keep
-      transfers small. Leave the cap blank for <b>auto</b> = half the image's own
+      — downscaled to the px/mm cap to keep transfers small. The <b>host</b> shares the
+      board's photos; a <b>guest</b> only ever sends layers it added or replaced itself,
+      and only when the host granted layer tools (the host confirms the first image
+      from each peer). Leave the cap blank for <b>auto</b> = half the image's own
       resolution, never below 20&nbsp;px/mm (an image already under 20&nbsp;px/mm is sent
       at its own resolution). Ticking it also asks the others to resend theirs.
       Received copies never replace an original you loaded yourself, and while joined
@@ -904,7 +906,7 @@
 <script src="js/projects.js?v=8"></script>
 <script src="js/ai.js?v=4"></script>
 <script src="js/autosave.js?v=58"></script>
-<script src="js/multiplayer.js?v=11"></script>
+<script src="js/multiplayer.js?v=12"></script>
 <script src="js/main.js?v=135"></script>
 
 </body>
