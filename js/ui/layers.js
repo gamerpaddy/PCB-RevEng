@@ -5,6 +5,8 @@
 UI.refreshLayerList = () => {
   const list = $("#layer-list");
   list.innerHTML = "";
+  // image replace / delete are host-only during a multiplayer session
+  const mpLock = (typeof mpGuestLocked === "function" && mpGuestLocked()) ? "disabled" : "";
   const dh = $("#drop-hint");
   dh.style.display = State.layers.length ? "none" : "flex";
   if (!State.layers.length) dh.classList.remove("faded");   // show fresh; activity re-fades it
@@ -15,14 +17,14 @@ UI.refreshLayerList = () => {
       <div class="layer-head">
         <button class="vis" title="Show / hide">${l.visible ? "👁" : "—"}</button>
         <div class="name" title="${l.url ? "Hosted image — loaded live from "+escAttr(l.url)+" and NOT saved in the project" : escAttr(l.name)}">${l.url ? "🔗 " : ""}${escAttr(l.name)}</div>
-        <button class="del" title="Remove layer">✕</button>
+        <button class="del" title="Remove layer" ${mpLock}>✕</button>
       </div>
       <div class="layer-row">
-        <select class="side-sel" title="Which physical side this photo shows">${sideOptionsHtml(l.side)}</select>
+        <select class="side-sel" title="Which physical side this photo shows" ${mpLock}>${sideOptionsHtml(l.side)}</select>
         <label title="Mirror image horizontally (back-side photos usually need this so they align with the front)">
-          <input type="checkbox" class="mir" ${l.mirror?"checked":""}>⇋</label>
-        <label title="Lock layer against accidental dragging"><input type="checkbox" class="lock" ${l.locked?"checked":""}>🔒</label>
-        <button class="repl" title="Replace this layer's image with another file — position, scale, rotation, mirror and alignment are kept">🖼⇆</button>
+          <input type="checkbox" class="mir" ${l.mirror?"checked":""} ${mpLock}>⇋</label>
+        <label title="Lock layer against accidental dragging"><input type="checkbox" class="lock" ${l.locked?"checked":""} ${mpLock}>🔒</label>
+        <button class="repl" title="Replace this layer's image with another file — position, scale, rotation, mirror and alignment are kept" ${mpLock}>🖼⇆</button>
       </div>
       <input type="range" class="op" min="0" max="100" value="${Math.round(l.opacity*100)}" title="Opacity">`;
     card.querySelector(".side-sel").value = l.side;
@@ -35,6 +37,7 @@ UI.refreshLayerList = () => {
     });
     card.querySelector(".vis").addEventListener("click", ()=>{ l.visible = !l.visible; UI.refreshLayerList(); requestRender(); });
     card.querySelector(".del").addEventListener("click", ()=>{
+      if (typeof mpBlockImageOp === "function" && mpBlockImageOp()) return;   // host-only in multiplayer
       if (!confirm("Remove layer “" + l.name + "”?")) return;
       State.layers = State.layers.filter(x => x !== l);
       if (UI.activeLayerId === l.id) UI.activeLayerId = State.layers[0]?.id ?? null;
@@ -42,6 +45,7 @@ UI.refreshLayerList = () => {
       UI.refreshLayerList(); requestRender();
     });
     card.querySelector(".side-sel").addEventListener("change", (e)=>{
+      if (typeof mpBlockImageOp === "function" && mpBlockImageOp()){ e.target.value = l.side; return; }
       const was = l.side;
       l.side = e.target.value;
       // back photos are mirrored by default (only while not yet warped/aligned)
@@ -56,14 +60,19 @@ UI.refreshLayerList = () => {
       UI.refreshLayerList(); requestRender();
     });
     card.querySelector(".mir").addEventListener("change", (e)=>{
+      if (typeof mpBlockImageOp === "function" && mpBlockImageOp()){ e.target.checked = l.mirror; return; }
       l.mirror = e.target.checked;
       if (l.warp){ // warped layers mirror in image space: W · diag(-1,1)
         l.warp = { a:-l.warp.a, b:-l.warp.b, c:l.warp.c, d:l.warp.d };
       }
       requestRender();
     });
-    card.querySelector(".lock").addEventListener("change", (e)=>{ l.locked = e.target.checked; });
+    card.querySelector(".lock").addEventListener("change", (e)=>{
+      if (typeof mpBlockImageOp === "function" && mpBlockImageOp()){ e.target.checked = l.locked; return; }
+      l.locked = e.target.checked;
+    });
     card.querySelector(".repl").addEventListener("click", (e)=>{
+      if (typeof mpBlockImageOp === "function" && mpBlockImageOp()) return;   // host-only in multiplayer
       UI.showContextMenu(e.clientX, e.clientY, [
         { label:"Replace from file…", action:()=>{
             UI._replaceLayerId = l.id;

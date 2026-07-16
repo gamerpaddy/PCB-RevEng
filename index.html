@@ -135,6 +135,14 @@
     <aside id="right-panel">
       <div class="panel-title">Inspector</div>
       <div id="inspector"><div class="panel-hint">Nothing selected.</div></div>
+      <div id="mp-chat" style="display:none">
+        <div class="panel-title">Session chat</div>
+        <div id="mp-chat-log"></div>
+        <div id="mp-chat-row">
+          <input id="mp-chat-in" maxlength="255" placeholder="Message… (Enter to send)" autocomplete="off">
+          <button id="mp-chat-send" title="Send">➤</button>
+        </div>
+      </div>
     </aside>
   </div>
 
@@ -768,7 +776,7 @@
   <dialog id="mp-dialog" style="max-width:520px">
     <div class="dlg-title">Multiplayer — live collaboration</div>
     <div class="dlg-row" style="display:flex;gap:8px;align-items:center">
-      <label>Your name <input id="mp-name" style="width:140px" autocomplete="off"></label>
+      <label>Your name <input id="mp-name" style="width:140px" autocomplete="off" maxlength="32"></label>
       <label>Cursor <input id="mp-color" type="color" style="width:40px;padding:0"></label>
       <button id="mp-leave" style="margin-left:auto;display:none">Leave session</button>
     </div>
@@ -809,14 +817,33 @@
       <input type="checkbox" id="mp-imgshare">
       Also send embedded image layers (compressed), max
       <input id="mp-imgres" type="number" min="5" step="1" placeholder="auto" style="width:55px"> px/mm
+      <button id="mp-resend" style="display:none" title="Clear the sent-image cache and re-send every shared image layer at the current px/mm cap (host only)">Re-send images</button>
     </label>
+
+    <fieldset id="mp-rights" style="display:none">
+      <legend>Guest permissions (set by the host, applies to every guest)</legend>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:2px 10px;font-size:12px">
+        <label><input type="checkbox" id="mpr-openProjects"> Open / import / new project</label>
+        <label><input type="checkbox" id="mpr-layerTools"> Layer &amp; image tools (add, remove, replace, align, calibrate, flip, lock…)</label>
+        <label><input type="checkbox" id="mpr-editObjects"> Place / edit / move / delete objects</label>
+        <label><input type="checkbox" id="mpr-editNets"> Edit or remove nets</label>
+        <label><input type="checkbox" id="mpr-editSchBom"> Edit schematic &amp; BOM</label>
+        <label><input type="checkbox" id="mpr-saveExport"> Save / download / export (off also stops their autosave)</label>
+        <label><input type="checkbox" id="mpr-ai"> Use AI features</label>
+        <label><input type="checkbox" id="mpr-clearAll"> “Clear all” (Experimental)</label>
+      </div>
+    </fieldset>
     <div class="panel-hint" style="margin:2px 0 0;line-height:1.45">
       Parts, nets, traces, vias, notes, schematic and layer transforms sync both ways
       (simultaneous edits: last save wins). Image layers added from a <b>URL</b> are always
       shared as links; embedded photo files travel only from peers who tick the box above
       (each side shares its <b>own</b> photos) — downscaled to the px/mm cap to keep
       transfers small. Leave the cap blank for <b>auto</b> = half the image's own
-      resolution; the minimum is 5&nbsp;px/mm. Ticking it also asks the others to resend theirs.
+      resolution, never below 20&nbsp;px/mm (an image already under 20&nbsp;px/mm is sent
+      at its own resolution). Ticking it also asks the others to resend theirs.
+      Received copies never replace an original you loaded yourself, and while joined
+      as a <b>guest</b> the image tools (replace / align / calibrate / crop / rotate /
+      resize / delete layer) are disabled — the host owns the photos.
     </div>
     <div id="mp-status" class="panel-hint" style="margin-top:6px"></div>
     <div class="dlg-buttons">
@@ -848,13 +875,13 @@
 <script src="js/view/draw.js?v=99"></script>
 <script src="js/view/overlays.js?v=92"></script>
 <script src="js/layerstack.js?v=55"></script>
-<script src="js/tools/core.js?v=126"></script>
+<script src="js/tools/core.js?v=127"></script>
 <script src="js/tools/select.js?v=126"></script>
 <script src="js/tools/trace.js?v=117"></script>
 <script src="js/tools/via.js?v=116"></script>
 <script src="js/tools/checker.js?v=111"></script>
 <script src="js/tools/ops.js?v=123"></script>
-<script src="js/align.js?v=60"></script>
+<script src="js/align.js?v=61"></script>
 <script src="js/keymap.js?v=69"></script>
 <script src="js/resolver.js?v=49"></script>
 <script src="js/netlist.js?v=78"></script>
@@ -863,7 +890,7 @@
 <script src="js/gencad.js?v=5"></script>
 <script src="js/gerber.js?v=1"></script>
 <script src="js/ui/core.js?v=107"></script>
-<script src="js/ui/layers.js?v=107"></script>
+<script src="js/ui/layers.js?v=109"></script>
 <script src="js/ui/nets.js?v=106"></script>
 <script src="js/ui/parts.js?v=107"></script>
 <script src="js/ui/inspector.js?v=116"></script>
@@ -876,9 +903,9 @@
 <script src="js/netstab.js?v=3"></script>
 <script src="js/projects.js?v=8"></script>
 <script src="js/ai.js?v=4"></script>
-<script src="js/autosave.js?v=57"></script>
-<script src="js/multiplayer.js?v=9"></script>
-<script src="js/main.js?v=134"></script>
+<script src="js/autosave.js?v=58"></script>
+<script src="js/multiplayer.js?v=11"></script>
+<script src="js/main.js?v=135"></script>
 
 </body>
 </html>

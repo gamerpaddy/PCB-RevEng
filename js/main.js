@@ -916,6 +916,7 @@ function wireLab(){
 
   // clear/remove-all: bulk-delete every object of the ticked kinds (undoable)
   $("#lab-clear-go").addEventListener("click", () => {
+    if (typeof mpDenied === "function" && mpDenied("clearAll", "use Clear-all")) return;
     const comp = $("#lab-clear-comp").checked, via = $("#lab-clear-via").checked, trace = $("#lab-clear-trace").checked;
     if (!comp && !via && !trace){ UI.toast("Tick at least one kind to remove"); return; }
     const counts = [];

@@ -17,6 +17,12 @@ const MP = {
   peers: [],           // [{pc, dc, open, name, color, remoteId, q}]
   cursors: new Map(),  // from-id -> {x,y,name,color,ts,el,leave}
   tabs: new Map(),     // from-id -> {tab,name,color} — which editor tab each peer is on
+  edits: new Map(),    // "c12"/"v5"/"t7"/"n3" -> {color,name,ts,el} — recent remote edits (dots)
+  remoteSel: new Map(),// from-id -> {keys,color,name,els} — what each peer has selected (rings)
+  hiddenCursors: new Set(),   // from-ids whose live cursor the local user chose to hide
+  // what guests may do — configured by the HOST (dialog), broadcast to every guest
+  rights: { openProjects:false, layerTools:false, editObjects:true, editNets:true,
+            editSchBom:true, saveExport:true, ai:true, clearAll:false },
   isHost: false,
   applying: false,     // true while a remote state is being written into State
   pendingCore: null,   // newest remote core deferred during a local drag
@@ -29,7 +35,35 @@ const MP = {
   _lastRemoteUndo: 0,
   _tick: null,
   _seq: 0,
+  _dragT: 0,           // last live-drag broadcast (throttle)
+  _remoteDragHold: 0,  // while a peer is live-dragging, don't broadcast our (stale) core
+  _bigChange: false,   // set when a project open/import/new replaced the board — the next
+                       // state broadcast flags it so the host can accept or decline
+  _sentSel: "",        // last selection-presence payload sent (dedup)
 };
+
+const MP_RIGHTS = ["openProjects", "layerTools", "editObjects", "editNets", "editSchBom", "saveExport", "ai", "clearAll"];
+const MP_NAME_MAX = 32, MP_CHAT_MAX = 255;
+
+/* every string a peer sends is untrusted: clamp lengths, whitelist colours. Rendering
+   uses textContent / .title (never innerHTML), so no markup can execute either way. */
+function mpCleanName(s){ return String(s == null ? "" : s).replace(/[\u0000-\u001f\u007f]/g, "").slice(0, MP_NAME_MAX); }
+function mpCleanColor(c){ return /^#[0-9a-fA-F]{3,8}$/.test(String(c || "")) ? String(c) : "#4dd2ff"; }
+function mpCleanText(s){ return String(s == null ? "" : s).replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, "").slice(0, MP_CHAT_MAX); }
+
+/* a guest lacking the given right is blocked (the host is never blocked) */
+function mpRightBlocked(right){ return mpConnected() && !MP.isHost && !MP.rights[right]; }
+/* toast + true when the guest may not do this */
+function mpDenied(right, label){
+  if (MP.applying || !mpRightBlocked(right)) return false;
+  if (typeof UI !== "undefined") UI.toast("Multiplayer: the host hasn't allowed you to " + label);
+  return true;
+}
+/* image/layer tools — kept as own names because tools.js / ui/layers.js call them */
+function mpGuestLocked(){ return mpRightBlocked("layerTools"); }
+function mpBlockImageOp(){ return mpDenied("layerTools", "use the layer/image tools"); }
+/* autosave.js asks this before writing: a guest without save rights doesn't autosave */
+function mpAutosaveBlocked(){ return mpRightBlocked("saveExport"); }
 
 /* ---------------- small helpers ---------------- */
 
@@ -45,7 +79,10 @@ function mpLoadPrefs(){
       const v = +o.maxPxPerMm || 0;
       MP.opts.maxPxPerMm = (!v || v === 10) ? 0 : Math.max(5, v);
     }
+    const r = JSON.parse(localStorage.getItem("pcbreveng.mpRights") || "null");
+    if (r) for (const k of MP_RIGHTS) if (k in r) MP.rights[k] = !!r[k];
   } catch(e){}
+  MP.name = mpCleanName(MP.name);
   if (!MP.name)  MP.name  = "Player-" + MP.id.slice(0, 4);
   if (!MP.color) MP.color = ["#ff5d5d","#ffb84d","#ffe14d","#6fe06f","#4dd2ff","#b48cff","#ff7ad9"][Math.floor(Math.random()*7)];
 }
@@ -54,6 +91,7 @@ function mpSavePrefs(){
     localStorage.setItem("pcbreveng.mpName", MP.name);
     localStorage.setItem("pcbreveng.mpColor", MP.color);
     localStorage.setItem("pcbreveng.mpOpts", JSON.stringify(MP.opts));
+    localStorage.setItem("pcbreveng.mpRights", JSON.stringify(MP.rights));
   } catch(e){}
 }
 function mpConnected(){ return MP.peers.some(p => p.open); }
@@ -116,12 +154,13 @@ function mpBindDC(peer, dc){
   dc.onopen = () => {
     peer.open = true;
     mpClearCodeFields();   // handshake done — the big signaling codes are spent
-    mpSendObj(peer, { t: "hi", from: MP.id, name: MP.name, color: MP.color });
+    mpSendObj(peer, { t: "hi", from: MP.id, name: MP.name, color: MP.color, host: MP.isHost });
     if (MP.isHost){
-      // host is authoritative: push the full board to the newcomer
+      // host is authoritative: push the full board + the guest permissions to the newcomer
       const core = mpCoreString();
       MP._lastCore = core;
       mpSendObj(peer, { t: "state", from: MP.id, core });
+      mpSendObj(peer, { t: "rights", from: MP.id, rights: MP.rights });
     } else if (MP._lastCore == null){
       // guest: adopt the host's board — don't blast our own on join
       MP._lastCore = mpCoreString();
@@ -150,6 +189,8 @@ function mpDropPeer(peer){
     if (c && c.el) c.el.remove();
     MP.cursors.delete(peer.remoteId);
     MP.tabs.delete(peer.remoteId);
+    MP.hiddenCursors.delete(peer.remoteId);
+    mpClearRemoteSel(peer.remoteId);
     mpRenderTabDots();
   }
   if (!MP.peers.length) mpStopLoop();
@@ -176,6 +217,13 @@ function mpLeave(){
   mpClearCodeFields();
   for (const c of MP.cursors.values()) if (c.el) c.el.remove();
   MP.cursors.clear();
+  for (const e of MP.edits.values()) if (e.el) e.el.remove();
+  MP.edits.clear();
+  for (const from of [...MP.remoteSel.keys()]) mpClearRemoteSel(from);
+  MP.hiddenCursors.clear();
+  MP._remoteDragHold = 0;
+  MP._bigChange = false;
+  MP._sentSel = "";
   MP.tabs.clear();
   MP._sentTab = null;   // a future session re-announces the tab
   mpRenderTabDots();
@@ -255,9 +303,14 @@ function mpOnMsg(peer, raw){
   }
   if (m.from && !peer.remoteId && m.t === "hi") peer.remoteId = m.from;
 
+  // every peer-supplied display string is clamped/sanitised before it goes anywhere
+  if ("name" in m) m.name = mpCleanName(m.name);
+  if ("color" in m) m.color = mpCleanColor(m.color);
+
   switch (m.t){
     case "hi":
       peer.name = m.name || peer.name; peer.color = m.color || peer.color;
+      peer.isHost = !!m.host;
       mpRefreshUI();
       break;
     case "cur":
@@ -268,13 +321,68 @@ function mpOnMsg(peer, raw){
       mpTabMsg(m);
       if (MP.isHost) mpBroadcast(m, peer);
       break;
-    case "state":
+    case "sel":
+      mpSelMsg(m);
       if (MP.isHost) mpBroadcast(m, peer);
-      MP.pendingCore = m.core;
+      break;
+    case "chat":
+      m.text = mpCleanText(m.text);
+      if (!m.text) break;
+      if (MP.isHost) mpBroadcast(m, peer);
+      mpChatLine(m.name || peer.name, m.color || peer.color, m.text);
+      break;
+    case "rights":
+      // only the host distributes permissions — a guest can't grant itself anything
+      if (MP.isHost || !peer.isHost) break;
+      for (const k of MP_RIGHTS) MP.rights[k] = !!(m.rights && m.rights[k]);
+      mpApplyGuestLock(true);
+      if (typeof UI !== "undefined") UI.toast("Multiplayer: the host updated your permissions");
+      break;
+    case "deny":
+      if (typeof UI !== "undefined") UI.toast("Multiplayer: the host blocked that — you're not allowed to " + mpCleanText(m.what || "do that"));
+      break;
+    case "state":
+      // the HOST gatekeeps what guests may change before it becomes session state
+      if (MP.isHost){
+        const who = m.name || peer.name || "A peer";
+        if (m.big && !MP.rights.openProjects){
+          mpSendObj(peer, { t: "deny", from: MP.id, what: "open or import projects" });
+          MP._lastCore = null;   // force our authoritative core back out on the next tick
+          break;
+        }
+        if (m.big && !confirm(who + " loaded a DIFFERENT project/board into the session.\n\n" +
+                              "OK = accept it (replaces the current board for everyone)\n" +
+                              "Cancel = keep the current board and push it back")){
+          MP._lastCore = null;
+          break;
+        }
+        const bad = mpHostViolation(MP._lastCore, m.core);
+        if (bad){
+          mpSendObj(peer, { t: "deny", from: MP.id, what: bad });
+          MP._lastCore = null;
+          if (typeof UI !== "undefined") UI.toast("Multiplayer: blocked " + who + "'s edit (" + bad + " is not allowed)");
+          break;
+        }
+        mpBroadcast(m, peer);
+      }
+      MP.pendingCore = { core: m.core, from: m.from };
       mpTryApply();
       break;
-    case "img":
+    case "drag":
+      // live drags are object edits — a guest without that right doesn't get to move things
+      if (MP.isHost && !MP.rights.editObjects && !peer.isHost) break;
       if (MP.isHost) mpBroadcast(m, peer);
+      mpApplyDrag(m);
+      break;
+    case "img":
+      // the host explicitly accepts or declines incoming photos, once per peer/session
+      if (MP.isHost){
+        if (peer._imgOk === undefined)
+          peer._imgOk = confirm((peer.name || "A peer") + " wants to send image layers to you.\n\n" +
+                                "Accept images from them for this session?");
+        if (!peer._imgOk) break;   // declined: neither applied nor relayed
+        mpBroadcast(m, peer);
+      }
       mpApplyImage(m.layerId, m.data, m.w, m.h);
       break;
     case "imgreq":
@@ -288,6 +396,29 @@ function mpOnMsg(peer, raw){
   }
 }
 
+/* host-side rights check: diff the guest's incoming core against our current one and
+   return the first category the guest isn't allowed to touch (or null when clean).
+   Guest-side toasts are the polite fence; this is the actual wall. */
+function mpHostViolation(prevStr, nextStr){
+  const R = MP.rights;
+  if (!prevStr) return null;   // no baseline yet (fresh session) — nothing to compare
+  if (R.editObjects && R.editNets && R.editSchBom && R.layerTools) return null;
+  try {
+    const a = JSON.parse(prevStr), b = JSON.parse(nextStr);
+    const diff = (x, y) => JSON.stringify(x ?? null) !== JSON.stringify(y ?? null);
+    if (!R.editObjects && (diff(a.components, b.components) || diff(a.vias, b.vias) ||
+                           diff(a.traces, b.traces) || diff(a.notes, b.notes)))
+      return "edit objects";
+    if (!R.editNets && diff(a.nets, b.nets)) return "edit nets";
+    if (!R.editSchBom && (diff(a.schWires, b.schWires) || diff(a.schLabels, b.schLabels) ||
+                          diff(a.bomColumns, b.bomColumns)))
+      return "edit the schematic/BOM";
+    if (!R.layerTools && (diff(a.layers, b.layers) || a.pxPerMm !== b.pxPerMm))
+      return "use the layer tools";
+  } catch(e){}
+  return null;
+}
+
 /* ---------------- outgoing state sync ---------------- */
 
 /* the shareable project core: everything serializeProject saves, minus the
@@ -297,7 +428,10 @@ function mpCoreString(){
   const s = JSON.parse(serializeProject());
   // dataURL: image bytes travel separately (opt-in). visible/opacity: per-user VIEW
   // state — syncing them made one user's 1/2/3 layer switching flip everyone's view.
-  s.layers = (s.layers || []).map(l => { const { dataURL, visible, opacity, ...rest } = l; return rest; });
+  // imgW/imgH describe the LOCAL bitmap (downscaled stand-in marker) — syncing them let a
+  // guest's stand-in flag land on the host's ORIGINAL layer, which then accepted the
+  // guest's recompressed copy and autosave baked the quality loss into the project.
+  s.layers = (s.layers || []).map(l => { const { dataURL, visible, opacity, imgW, imgH, ...rest } = l; return rest; });
   return JSON.stringify(s);
 }
 
@@ -311,11 +445,16 @@ function mpStopLoop(){
 function mpTickFn(){
   mpTryApply();   // a deferred remote apply waiting for a drag to end
   if (!mpConnected() || MP.applying) return;
-  if (typeof Tools !== "undefined" && Tools.drag) return;   // don't stream mid-drag
+  mpSendSel();    // selection presence (cheap, dedup'd)
+  if (typeof Tools !== "undefined" && Tools.drag) return;   // the full core goes when the drag ends
+  // a peer is live-dragging INTO our state right now — broadcasting our core would echo
+  // their mid-drag positions back as authoritative state and fight the drag
+  if (Date.now() < MP._remoteDragHold) return;
   const s = mpCoreString();
   if (s !== MP._lastCore){
     MP._lastCore = s;
-    mpBroadcast({ t: "state", from: MP.id, core: s });
+    mpBroadcast({ t: "state", from: MP.id, core: s, big: MP._bigChange || undefined, name: MP.name });
+    MP._bigChange = false;
   }
   if (MP.opts.sendImages) mpSyncImages();
 }
@@ -330,7 +469,7 @@ function mpNudge(){
 function mpTryApply(){
   if (MP.pendingCore == null) return;
   if (typeof Tools !== "undefined" && Tools.drag) return;   // retried from the tick loop
-  const core = MP.pendingCore;
+  const { core, from } = MP.pendingCore;
   MP.pendingCore = null;
   MP.applying = true;
   try {
@@ -339,6 +478,7 @@ function mpTryApply(){
       pushUndo("multiplayer sync");
       MP._lastRemoteUndo = Date.now();
     }
+    mpDiffEdits(MP._lastCore, core, from);   // dot the objects this peer just changed
     mpApplyCore(core);
     MP._lastCore = core;
   } catch(e){
@@ -432,6 +572,11 @@ function mpRemapSelection(){
     } else if (sel.type === "trace"){
       const t = getTrace(sel.trace && sel.trace.id);
       if (t) sel.trace = t; else UI.sel = null;
+    } else if (sel.type === "note"){
+      // notes are replaced wholesale by the core apply — without re-finding by id the
+      // inspector kept editing the ORPHANED old object and the text silently vanished
+      const n = State.notes.find(n => n.id === (sel.note && sel.note.id));
+      if (n) sel.note = n; else UI.sel = null;
     }
   }
   UI.pinSel = UI.pinSel
@@ -487,9 +632,10 @@ async function mpShrinkImage(l){
   const lw = l.img.width, lh = l.img.height;
   const worldScale = l.scale || 1;
   // the image's actual resolution in image-px per board-mm; the cap is the user's
-  // explicit value, or (auto) HALF the actual resolution — never below 5 px/mm
+  // explicit value, or (auto) HALF the actual resolution — never below 20 px/mm.
+  // Images already under 20 px/mm ship at their own resolution (f caps at 1).
   const actual = (State.pxPerMm || 10) / worldScale;
-  const cap = MP.opts.maxPxPerMm > 0 ? MP.opts.maxPxPerMm : Math.max(5, actual / 2);
+  const cap = MP.opts.maxPxPerMm > 0 ? MP.opts.maxPxPerMm : Math.max(20, actual / 2);
   const f = Math.min(1, cap / actual);
   if (f >= 1 && l.dataURL.length < 600000 && /^data:image\/jpe?g/i.test(l.dataURL))
     return { data: l.dataURL, w: lw, h: lh };   // small JPEG already under the cap — send as-is
@@ -511,7 +657,10 @@ function mpApplyImage(layerId, data, w, h){
   // both sides re-offer, so the host got its own image bounced back at share quality —
   // and autosave then baked the loss into the savegame. Originals stay authoritative;
   // only layers we never had bytes for (or already hold as a stand-in) accept updates.
-  if (l.img && l.dataURL && !l.imgW) return;
+  // NOTE: deliberately not requiring l.img — right after a project load the original's
+  // bitmap is still decoding (l.img null), and requiring it opened a race window where
+  // a peer's copy could overwrite the original dataURL before the decode finished.
+  if (l.dataURL && !l.imgW) return;
   l.dataURL = data;
   // remember what we now hold, so our own image-sync doesn't bounce it back
   MP._imgSig.set(layerId, mpImgSig(data));
@@ -537,12 +686,268 @@ function mpApplyImage(layerId, data, w, h){
   img.src = data;
 }
 
+/* ---------------- live drag streaming ---------------- */
+
+/* the objects the current local drag is moving, as compact {k,id,…} records.
+   Trace references for carried anchors are resolved once per drag and cached. */
+function mpDragPayload(){
+  const d = Tools.drag;
+  if (!d || !d.moved) return null;
+  const objs = [];
+  const anchorTraces = () => {
+    if (!d._mpTraces){
+      const set = new Set();
+      for (const a of (d.anchors || [])){
+        const t = State.traces.find(t => t.points === a.pts);
+        if (t) set.add(t);
+      }
+      if (d.linked) for (const L of d.linked){
+        const t = State.traces.find(t => t.points === L.pts);
+        if (t) set.add(t);
+      }
+      d._mpTraces = [...set];
+    }
+    return d._mpTraces;
+  };
+  const pushTrace = (t) => objs.push({ k: "t", id: t.id, pts: t.points.map(p => ({ x: p.x, y: p.y })) });
+  switch (d.kind){
+    case "move-comp":
+      objs.push({ k: "c", id: d.comp.id, x: d.comp.x, y: d.comp.y });
+      for (const t of anchorTraces()) pushTrace(t);
+      break;
+    case "move-via":
+      objs.push({ k: "v", id: d.via.id, x: d.via.x, y: d.via.y });
+      for (const t of anchorTraces()) pushTrace(t);
+      break;
+    case "move-vert":
+    case "move-seg":
+      pushTrace(d.trace);
+      for (const t of anchorTraces()) pushTrace(t);
+      break;
+    case "move-note":
+      objs.push({ k: "n", id: d.note.id, x: d.note.x, y: d.note.y });
+      break;
+    case "move-layer":
+      objs.push({ k: "l", id: d.layer.id, tx: d.layer.tx, ty: d.layer.ty });
+      break;
+  }
+  return objs.length ? objs : null;
+}
+
+/* stream the drag ~20×/s from the canvas pointermove hook */
+function mpMaybeSendDrag(){
+  if (!mpConnected() || MP.applying || typeof Tools === "undefined" || !Tools.drag) return;
+  const now = performance.now();
+  if (now - MP._dragT < 50) return;
+  const objs = mpDragPayload();
+  if (!objs) return;
+  MP._dragT = now;
+  mpBroadcast({ t: "drag", from: MP.id, objs, name: MP.name, color: MP.color });
+}
+
+/* apply a peer's live drag straight into State — no undo point, no full core rebuild;
+   the authoritative core lands via the normal state sync once their drag ends */
+function mpApplyDrag(m){
+  if (MP.applying) return;
+  if (typeof Tools !== "undefined" && Tools.drag) return;   // don't fight our own drag
+  MP._remoteDragHold = Date.now() + 1200;
+  const who = { color: m.color, name: m.name };
+  for (const o of (m.objs || [])){
+    if (o.k === "c"){
+      const c = getComp(o.id);
+      if (c){ c.x = o.x; c.y = o.y; mpMarkEdit("c" + o.id, who); }
+    } else if (o.k === "v"){
+      const v = getVia(o.id);
+      if (v){ v.x = o.x; v.y = o.y; mpMarkEdit("v" + o.id, who); }
+    } else if (o.k === "t"){
+      const t = getTrace(o.id);
+      if (t && o.pts && t.points.length === o.pts.length){
+        for (let i = 0; i < o.pts.length; i++){ t.points[i].x = o.pts[i].x; t.points[i].y = o.pts[i].y; }
+        mpMarkEdit("t" + o.id, who);
+      }
+    } else if (o.k === "n"){
+      const n = State.notes.find(n => n.id === o.id);
+      if (n){ n.x = o.x; n.y = o.y; mpMarkEdit("n" + o.id, who); }
+    } else if (o.k === "l"){
+      const l = getLayer(o.id);
+      if (l){ l.tx = o.tx; l.ty = o.ty; }
+    }
+  }
+  requestRender();
+}
+
+/* ---------------- "who edited what" markers ---------------- */
+
+const MP_EDIT_TTL = 4000;   // ms an edit dot lingers
+
+function mpMarkEdit(key, who){
+  let e = MP.edits.get(key);
+  if (!e){ e = { el: null }; MP.edits.set(key, e); }
+  e.color = (who && who.color) || "#4dd2ff";
+  e.name = (who && who.name) || "peer";
+  e.ts = Date.now();
+  mpLayoutCursors();
+  // the layout loop only runs on renders — make sure expired dots get swept
+  clearTimeout(MP._editSweep);
+  MP._editSweep = setTimeout(mpLayoutCursors, MP_EDIT_TTL + 200);
+}
+
+/* colour/name for a peer id (used when only the from-id is known) */
+function mpPeerInfo(from){
+  const p = MP.peers.find(p => p.remoteId === from);
+  if (p) return { color: p.color, name: p.name };
+  const c = MP.cursors.get(from);
+  return c ? { color: c.color, name: c.name } : null;
+}
+
+/* compare the previous synced core with the incoming one and dot everything the
+   sender changed. Both strings come from the same serializer, so per-object JSON
+   comparison is exact. A huge diff (project load / import) marks nothing. */
+function mpDiffEdits(prevStr, nextStr, from){
+  if (!prevStr || !from || from === MP.id) return;
+  const who = mpPeerInfo(from);
+  if (!who) return;
+  try {
+    const a = JSON.parse(prevStr), b = JSON.parse(nextStr);
+    const changed = [];
+    const scan = (tag, oldArr, newArr) => {
+      const old = new Map((oldArr || []).map(o => [o.id, JSON.stringify(o)]));
+      for (const o of (newArr || [])){
+        const prev = old.get(o.id);
+        if (prev === undefined || prev !== JSON.stringify(o)) changed.push(tag + o.id);
+      }
+    };
+    scan("c", a.components, b.components);
+    scan("v", a.vias, b.vias);
+    scan("t", a.traces, b.traces);
+    scan("n", a.notes, b.notes);
+    if (changed.length && changed.length <= 30)   // more = bulk load, not an edit
+      for (const key of changed) mpMarkEdit(key, who);
+  } catch(e){}
+}
+
+/* world position of a marked object, or null when it's gone */
+function mpEditPos(key){
+  const id = +key.slice(1);
+  switch (key[0]){
+    case "c": { const c = getComp(id); return c ? { x: c.x, y: c.y } : null; }
+    case "v": { const v = getVia(id); return v ? { x: v.x, y: v.y } : null; }
+    case "t": { const t = getTrace(id);
+                if (!t || !t.points.length) return null;
+                const p = t.points[Math.floor(t.points.length / 2)];
+                return { x: p.x, y: p.y }; }
+    case "n": { const n = State.notes.find(n => n.id === id); return n ? { x: n.x, y: n.y } : null; }
+  }
+  return null;
+}
+
+/* ---------------- selection presence (steady rings while a peer edits) ----------------
+   The edit dots above fade out — these don't: while a peer HAS an object selected
+   (typing in the inspector, renaming, mid-edit), everyone sees a steady ring in the
+   peer's colour on that object. Sent from the tick loop whenever the selection changes. */
+
+function mpSelKeys(){
+  const ks = [];
+  if (typeof UI === "undefined") return ks;
+  const sel = UI.sel;
+  if (sel){
+    if (sel.comp && sel.comp.id != null) ks.push("c" + sel.comp.id);
+    else if (sel.via && sel.via.id != null) ks.push("v" + sel.via.id);
+    else if (sel.trace && sel.trace.id != null) ks.push("t" + sel.trace.id);
+    else if (sel.note && sel.note.id != null) ks.push("n" + sel.note.id);
+  }
+  for (const p of (UI.pinSel || [])) if (p.comp) ks.push("c" + p.comp.id);
+  for (const t of (UI.traceSel || [])) ks.push("t" + t.id);
+  return [...new Set(ks)].slice(0, 20);   // enough to show intent, bounded on the wire
+}
+
+function mpSendSel(){
+  const keys = mpSelKeys();
+  const sig = keys.join(",");
+  if (sig === MP._sentSel) return;
+  MP._sentSel = sig;
+  mpBroadcast({ t: "sel", from: MP.id, keys, name: MP.name, color: MP.color });
+}
+
+function mpSelMsg(m){
+  if (!m.from || m.from === MP.id) return;
+  let s = MP.remoteSel.get(m.from);
+  const keys = Array.isArray(m.keys) ? m.keys.slice(0, 20).map(String) : [];
+  if (!keys.length){
+    if (s){ if (s.els) for (const el of s.els.values()) el.remove(); MP.remoteSel.delete(m.from); }
+    mpLayoutCursors();
+    return;
+  }
+  if (!s){ s = { els: new Map() }; MP.remoteSel.set(m.from, s); }
+  s.keys = keys; s.color = m.color; s.name = m.name;
+  mpLayoutCursors();
+}
+
+function mpClearRemoteSel(from){
+  const s = MP.remoteSel.get(from);
+  if (!s) return;
+  if (s.els) for (const el of s.els.values()) el.remove();
+  MP.remoteSel.delete(from);
+}
+
+/* draw / expire the edit dots (called from the cursor layout pass) */
+function mpLayoutEdits(){
+  if (!MP.edits.size && !MP.remoteSel.size) return;
+  const now = Date.now();
+  const tab = (typeof EditorTabs !== "undefined") ? EditorTabs.current : "visual";
+  const cont = mpCursorContainer(false);
+  for (const [key, e] of MP.edits){
+    const pos = now - e.ts > MP_EDIT_TTL ? null : mpEditPos(key);
+    if (!pos || tab !== "visual"){
+      if (e.el) e.el.remove();
+      if (!pos || now - e.ts > MP_EDIT_TTL) MP.edits.delete(key);
+      continue;
+    }
+    if (!cont) continue;
+    if (!e.el){
+      e.el = document.createElement("div");
+      e.el.className = "mp-edit-dot";
+      e.el.title = "edited by " + (e.name || "peer");
+    }
+    if (e.el.parentNode !== cont) cont.appendChild(e.el);
+    const p = worldToScreen(pos.x, pos.y);
+    e.el.style.transform = `translate(${Math.round(p.x)}px,${Math.round(p.y)}px)`;
+    e.el.style.background = e.color;
+    e.el.style.color = e.color;   // glow (currentColor in the box-shadow)
+    e.el.style.opacity = Math.max(0.15, 1 - (now - e.ts) / MP_EDIT_TTL);
+  }
+  // steady selection rings, one per (peer, object)
+  for (const s of MP.remoteSel.values()){
+    if (!s.els) s.els = new Map();
+    const want = tab === "visual" ? new Set(s.keys || []) : new Set();
+    for (const [k, el] of s.els) if (!want.has(k)){ el.remove(); s.els.delete(k); }
+    if (!cont) continue;
+    for (const k of want){
+      const pos = mpEditPos(k);
+      let el = s.els.get(k);
+      if (!pos){ if (el){ el.remove(); s.els.delete(k); } continue; }
+      if (!el){
+        el = document.createElement("div");
+        el.className = "mp-sel-ring";
+        el.title = (s.name || "peer") + " is editing this";
+        s.els.set(k, el);
+      }
+      if (el.parentNode !== cont) cont.appendChild(el);
+      const p = worldToScreen(pos.x, pos.y);
+      el.style.transform = `translate(${Math.round(p.x)}px,${Math.round(p.y)}px)`;
+      el.style.borderColor = s.color || "#4dd2ff";
+      el.style.color = s.color || "#4dd2ff";
+    }
+  }
+}
+
 /* ---------------- live cursors ---------------- */
 
 function mpCursorMsg(m){
   let c = MP.cursors.get(m.from);
   if (!c){ c = { el: null }; MP.cursors.set(m.from, c); }
   c.x = m.x; c.y = m.y; c.name = m.name; c.color = m.color;
+  c.host = !!m.host;   // the session initiator gets a crown on the name tag
   c.sch = !!m.sch;   // coords are schematic mm (sender was in the schematic editor)
   c.leave = !!m.leave; c.ts = Date.now();
   mpLayoutCursors();
@@ -580,9 +985,9 @@ function mpLayoutCursorsNow(){
     const tab = (typeof EditorTabs !== "undefined") ? EditorTabs.current : "visual";
     const now = Date.now();
     for (const [id, c] of MP.cursors){
-      // hidden when gone-stale AND when we're not looking at the sheet the peer is on
+      // hidden when gone-stale, hidden-by-choice, or we're not on the peer's sheet
       const wrongTab = c.sch ? tab !== "schematic" : tab !== "visual";
-      const stale = c.leave || (now - c.ts > 8000) || wrongTab;
+      const stale = c.leave || (now - c.ts > 8000) || wrongTab || MP.hiddenCursors.has(id);
       if (!c.el){
         if (stale) continue;
         c.el = document.createElement("div");
@@ -598,9 +1003,11 @@ function mpLayoutCursorsNow(){
       c.el.style.transform = `translate(${Math.round(p.x)}px,${Math.round(p.y)}px)`;
       c.el.style.color = c.color || "#4dd2ff";
       const nameEl = c.el.querySelector(".mp-name");
-      if (nameEl.textContent !== (c.name || "")) nameEl.textContent = c.name || "";
+      const label = (c.host ? "\u{1F451} " : "") + (c.name || "");   // 👑 marks the host
+      if (nameEl.textContent !== label) nameEl.textContent = label;
       nameEl.style.background = c.color || "#4dd2ff";
     }
+    mpLayoutEdits();
 }
 
 function mpWireCursorSend(){
@@ -618,10 +1025,11 @@ function mpWireCursorSend(){
   };
   if (canvas){
     canvas.addEventListener("pointermove", () => {
+      mpMaybeSendDrag();   // live drag positions ride their own (finer) throttle
       if (!throttled()) return;
       const w = (typeof Tools !== "undefined" && Tools.cursor) ? Tools.cursor : null;
       if (!w) return;
-      mpBroadcast({ t: "cur", from: MP.id, x: w.x, y: w.y, name: MP.name, color: MP.color });
+      mpBroadcast({ t: "cur", from: MP.id, x: w.x, y: w.y, name: MP.name, color: MP.color, host: MP.isHost });
     });
     canvas.addEventListener("pointerleave", sendLeave);
   }
@@ -633,7 +1041,7 @@ function mpWireCursorSend(){
       const r = schCv.getBoundingClientRect();
       mpBroadcast({ t: "cur", from: MP.id, sch: true,
         x: schS2X(e.clientX - r.left), y: schS2Y(e.clientY - r.top),
-        name: MP.name, color: MP.color });
+        name: MP.name, color: MP.color, host: MP.isHost });
     });
     schCv.addEventListener("pointerleave", sendLeave);
   }
@@ -644,7 +1052,7 @@ function mpWireCursorSend(){
 /* my own tab announcement — sent to newcomers on dc open and broadcast on tab switch */
 function mpTabMsgOut(){
   const tab = (typeof EditorTabs !== "undefined") ? EditorTabs.current : "visual";
-  return { t: "tab", from: MP.id, tab, name: MP.name, color: MP.color };
+  return { t: "tab", from: MP.id, tab, name: MP.name, color: MP.color, host: MP.isHost };
 }
 function mpSendTab(){
   if (!mpConnected()) return;
@@ -655,7 +1063,7 @@ function mpSendTab(){
 }
 function mpTabMsg(m){
   if (!m.from || m.from === MP.id) return;
-  MP.tabs.set(m.from, { tab: m.tab, name: m.name, color: m.color });
+  MP.tabs.set(m.from, { tab: m.tab, name: m.name, color: m.color, host: !!m.host });
   mpRenderTabDots();
 }
 
@@ -675,9 +1083,9 @@ function mpRenderTabDots(){
     box.innerHTML = "";
     for (const p of here){
       const d = document.createElement("span");
-      d.className = "mp-tab-dot";
+      d.className = "mp-tab-dot" + (p.host ? " mp-tab-dot-host" : "");
       d.style.background = p.color || "#4dd2ff";
-      d.title = (p.name || "peer") + " is on this tab";
+      d.title = (p.name || "peer") + (p.host ? " (host)" : "") + " is on this tab";
       box.appendChild(d);
     }
   }
@@ -696,12 +1104,35 @@ function mpRefreshUI(){
   if (list){
     list.innerHTML = "";
     if (!MP.peers.length) list.innerHTML = '<div class="panel-hint">No peers connected.</div>';
+    if (MP.peers.length && MP.isHost){
+      const me = document.createElement("div");
+      me.className = "panel-hint";
+      me.style.margin = "0 0 3px";
+      me.textContent = "\u{1F451} You are hosting this session — you own the board, images and guest permissions.";
+      list.appendChild(me);
+    }
+    // a hide-cursor toggle for every from-id we know a cursor for
+    const eyeBtn = (fromId) => {
+      const eye = document.createElement("button");
+      const hidden = MP.hiddenCursors.has(fromId);
+      eye.textContent = hidden ? "🚫" : "👁";
+      eye.title = hidden ? "Cursor hidden — click to show it again" : "Hide this peer's cursor";
+      eye.onclick = () => {
+        if (!MP.hiddenCursors.delete(fromId)) MP.hiddenCursors.add(fromId);
+        mpLayoutCursors(); mpRefreshUI();
+      };
+      return eye;
+    };
+    const seen = new Set();
     for (const p of MP.peers){
+      if (p.remoteId) seen.add(p.remoteId);
       const row = document.createElement("div");
       row.className = "mp-peer";
-      row.innerHTML = `<span class="mp-dot" style="background:${p.open ? p.color : "#555"}"></span>
-        <span>${p.open ? mpEsc(p.name) : "connecting…"}</span>
+      const crown = p.isHost ? "\u{1F451} " : "";
+      row.innerHTML = `<span class="mp-dot${p.isHost ? " mp-dot-host" : ""}" style="background:${p.open ? mpCleanColor(p.color) : "#555"}"></span>
+        <span>${p.open ? crown + mpEsc(p.name) + (p.isHost ? ' <span class="mp-host-tag">host</span>' : "") : "connecting…"}</span>
         <span class="mp-peer-state">${p.pc.connectionState}</span>`;
+      if (p.remoteId && p.open) row.appendChild(eyeBtn(p.remoteId));
       const kick = document.createElement("button");
       kick.textContent = "✕";
       kick.title = "Disconnect this peer";
@@ -709,9 +1140,56 @@ function mpRefreshUI(){
       row.appendChild(kick);
       list.appendChild(row);
     }
+    // peers we only know through the host's relay (other guests) — no connection to
+    // manage, but their cursor can still be hidden
+    for (const [id, c] of MP.cursors){
+      if (seen.has(id) || id === MP.id) continue;
+      const row = document.createElement("div");
+      row.className = "mp-peer";
+      row.innerHTML = `<span class="mp-dot" style="background:${mpCleanColor(c.color)}"></span>
+        <span>${(c.host ? "\u{1F451} " : "") + mpEsc(c.name || "peer")}</span>
+        <span class="mp-peer-state">via host</span>`;
+      row.appendChild(eyeBtn(id));
+      list.appendChild(row);
+    }
   }
   const leave = document.getElementById("mp-leave");
   if (leave) leave.style.display = MP.peers.length ? "" : "none";
+  // host-only controls: image re-send + guest permissions
+  const resend = document.getElementById("mp-resend");
+  if (resend) resend.style.display = MP.isHost ? "" : "none";
+  const rightsBox = document.getElementById("mp-rights");
+  if (rightsBox) rightsBox.style.display = MP.isHost ? "" : "none";
+  // session chat lives under the inspector while connected
+  const chat = document.getElementById("mp-chat");
+  if (chat) chat.style.display = mpConnected() ? "" : "none";
+  mpApplyGuestLock();
+}
+
+/* grey out whatever the guest permissions forbid (the actual call paths are also
+   guarded / host-verified, so this is the visible half of the fence) */
+function mpApplyGuestLock(force){
+  const lockImg  = mpRightBlocked("layerTools");
+  const lockSave = mpRightBlocked("saveExport");
+  const lockOpen = mpRightBlocked("openProjects");
+  const lockObj  = mpRightBlocked("editObjects");
+  const sig = [lockImg, lockSave, lockOpen, lockObj].join();
+  if (!force && sig === MP._uiLocked) return;
+  MP._uiLocked = sig;
+  const setLock = (id, locked) => {
+    const b = document.getElementById(id);
+    if (b){ b.disabled = locked; b.classList.toggle("mp-locked", locked); }
+  };
+  for (const id of ["btn-align", "btn-calibrate", "btn-rotate", "btn-crop", "btn-deskew", "btn-resizexy",
+                    "btn-add-layer", "btn-add-url"]) setLock(id, lockImg);
+  setLock("btn-save", lockSave);
+  setLock("btn-export", lockSave);
+  setLock("btn-new", lockOpen);
+  setLock("btn-open", lockOpen);
+  document.querySelectorAll('#toolbar .tool[data-tool="align"]').forEach(b => b.classList.toggle("mp-locked", lockImg));
+  document.querySelectorAll('#toolbar .tool[data-tool="component"],#toolbar .tool[data-tool="trace"],#toolbar .tool[data-tool="via"],#toolbar .tool[data-tool="cut"],#toolbar .tool[data-tool="note"]')
+    .forEach(b => b.classList.toggle("mp-locked", lockObj));
+  if (typeof UI !== "undefined" && UI.refreshLayerList) UI.refreshLayerList();   // per-layer-card buttons
 }
 function mpEsc(s){ return String(s ?? "").replace(/[<>&"]/g, ch => ({ "<":"&lt;", ">":"&gt;", "&":"&amp;", '"':"&quot;" }[ch])); }
 
@@ -736,11 +1214,12 @@ function mpWireDialog(){
     $id("mp-color").value = MP.color;
     $id("mp-imgshare").checked = MP.opts.sendImages;
     $id("mp-imgres").value = MP.opts.maxPxPerMm || "";   // blank = auto (half the image)
+    for (const k of MP_RIGHTS){ const cb = $id("mpr-" + k); if (cb) cb.checked = !!MP.rights[k]; }
     mpRefreshUI(); mpStatus("");
     dlg.showModal();
   });
   $id("mp-close").addEventListener("click", () => dlg.close());
-  $id("mp-name").addEventListener("change", e => { MP.name = e.target.value.trim() || MP.name; mpSavePrefs(); });
+  $id("mp-name").addEventListener("change", e => { MP.name = mpCleanName(e.target.value.trim()) || MP.name; e.target.value = MP.name; mpSavePrefs(); });
   $id("mp-color").addEventListener("change", e => { MP.color = e.target.value; mpSavePrefs(); });
   $id("mp-imgshare").addEventListener("change", e => {
     MP.opts.sendImages = e.target.checked; mpSavePrefs();
@@ -783,6 +1262,123 @@ function mpWireDialog(){
   $id("mp-copy-reply").addEventListener("click", (e) => mpCopy($id("mp-reply-out").value, e.target));
 
   $id("mp-leave").addEventListener("click", () => { mpLeave(); mpStatus("Left the session."); });
+
+  // host-only: force a fresh image share at the current px/mm cap
+  const resend = $id("mp-resend");
+  if (resend) resend.addEventListener("click", () => {
+    if (!MP.isHost) return;
+    MP._imgSig.clear();
+    if (MP.opts.sendImages && mpConnected()){ mpSyncImages(); mpStatus("Re-sending image layers…"); }
+    else mpStatus("Nothing to re-send — enable image sharing and connect first.", true);
+  });
+
+  // host-only: guest permission checkboxes — saved locally, broadcast to every guest
+  for (const k of MP_RIGHTS){
+    const cb = $id("mpr-" + k);
+    if (!cb) continue;
+    cb.addEventListener("change", () => {
+      MP.rights[k] = cb.checked;
+      mpSavePrefs();
+      if (MP.isHost && mpConnected()) mpBroadcast({ t: "rights", from: MP.id, rights: MP.rights });
+    });
+  }
+}
+
+/* ---------------- session chat ---------------- */
+
+const MP_CHAT_CAP = 200;   // rendered lines kept
+
+function mpChatLine(name, color, text){
+  const log = document.getElementById("mp-chat-log");
+  if (!log) return;
+  const row = document.createElement("div");
+  row.className = "mp-chat-line";
+  const who = document.createElement("span");
+  who.className = "who";
+  who.style.color = mpCleanColor(color);
+  who.textContent = mpCleanName(name) || "peer";   // textContent — no markup can run
+  const txt = document.createElement("span");
+  txt.className = "txt";
+  txt.textContent = mpCleanText(text);
+  row.appendChild(who); row.appendChild(txt);
+  log.appendChild(row);
+  while (log.childNodes.length > MP_CHAT_CAP) log.removeChild(log.firstChild);
+  log.scrollTop = log.scrollHeight;
+}
+
+function mpSendChat(){
+  const inp = document.getElementById("mp-chat-in");
+  if (!inp) return;
+  const text = mpCleanText(inp.value.trim());
+  if (!text || !mpConnected()) return;
+  inp.value = "";
+  mpBroadcast({ t: "chat", from: MP.id, name: MP.name, color: MP.color, text });
+  mpChatLine(MP.name, MP.color, text);   // own message shows immediately
+}
+
+function mpWireChat(){
+  const inp = document.getElementById("mp-chat-in");
+  const send = document.getElementById("mp-chat-send");
+  if (send) send.addEventListener("click", mpSendChat);
+  if (inp) inp.addEventListener("keydown", e => {
+    if (e.key === "Enter"){ e.preventDefault(); mpSendChat(); }
+    e.stopPropagation();   // typing in chat must not trigger editor hotkeys
+  });
+}
+
+/* ---------------- guest permission enforcement (function wraps) ----------------
+   The host verifies incoming state against the rights (mpHostViolation) — these
+   wraps are the guest-side fence so blocked actions don't even happen locally. */
+function mpInstallGuards(){
+  const wrap = (name, right, label, bigChange) => {
+    const orig = window[name];
+    if (typeof orig !== "function") return;
+    window[name] = function(...a){
+      if (right && mpDenied(right, label)) return;
+      // a project open/import/new replaces the whole board — flag it so the HOST
+      // gets an accept/decline prompt instead of silently adopting it
+      if (bigChange && mpConnected() && !MP.applying) MP._bigChange = true;
+      return orig.apply(this, a);
+    };
+  };
+  wrap("resetProject",    "openProjects", "start a new project", true);
+  wrap("openProjectFile", "openProjects", "open projects", true);
+  wrap("importBoardFile", "openProjects", "import boards", true);
+  wrap("componentDown",     "editObjects", "place or edit objects");
+  wrap("traceDown",         "editObjects", "place or edit objects");
+  wrap("viaDown",           "editObjects", "place or edit objects");
+  wrap("cutDown",           "editObjects", "place or edit objects");
+  wrap("noteDown",          "editObjects", "place or edit objects");
+  wrap("deleteSelection",   "editObjects", "delete objects");
+  wrap("deleteBoxSelection","editObjects", "delete objects");
+  wrap("rotateSelection",   "editObjects", "edit objects");
+  wrap("flipSelectionSide", "editObjects", "edit objects");
+  wrap("duplicateSelection","editObjects", "copy objects");
+  wrap("addLayerFromImage",     "layerTools", "add image layers");
+  wrap("addImageLayerFromURL",  "layerTools", "add image layers");
+  wrap("replaceLayerImage",     "layerTools", "replace layer images");
+  wrap("replaceLayerImageFromURL", "layerTools", "replace layer images");
+  wrap("saveProject", "saveExport", "save or export the project");
+  if (typeof UI !== "undefined" && typeof UI.openExport === "function"){
+    const origExp = UI.openExport;
+    UI.openExport = function(...a){
+      if (mpDenied("saveExport", "save or export the project")) return;
+      return origExp.apply(this, a);
+    };
+  }
+  if (typeof Projects !== "undefined" && typeof Projects.open === "function"){
+    const origPO = Projects.open;
+    Projects.open = async function(...a){
+      if (mpDenied("openProjects", "open projects")) return;
+      if (mpConnected() && !MP.applying) MP._bigChange = true;
+      return origPO.apply(this, a);
+    };
+  }
+  // one switch turns every AI feature off: everything checks AI.enabled(feature)
+  if (typeof AI !== "undefined" && typeof AI.enabled === "function"){
+    const origEn = AI.enabled.bind(AI);
+    AI.enabled = (f) => mpRightBlocked("ai") ? false : origEn(f);
+  }
 }
 
 /* ---------------- boot ---------------- */
@@ -802,6 +1398,29 @@ function mpInjectStyle(){
 .mp-peer button{padding:0 6px}
 .mp-tab-dots{display:inline-flex;gap:3px;margin-left:6px;vertical-align:middle;pointer-events:none}
 .mp-tab-dot{width:8px;height:8px;border-radius:50%;flex:none;box-shadow:0 0 0 1px rgba(0,0,0,.55)}
+.mp-edit-dot{position:absolute;left:-6px;top:-6px;width:12px;height:12px;border-radius:50%;
+  box-shadow:0 0 0 2px rgba(0,0,0,.6),0 0 8px 2px currentColor;will-change:transform,opacity;
+  transition:opacity .4s linear}
+.mp-sel-ring{position:absolute;left:-11px;top:-11px;width:22px;height:22px;border-radius:50%;
+  border:2.5px solid;box-shadow:0 0 6px 1px currentColor,inset 0 0 4px currentColor;
+  will-change:transform;background:transparent}
+.mp-locked{opacity:.4;pointer-events:auto;cursor:not-allowed !important}
+.mp-tab-dot-host{box-shadow:0 0 0 1px rgba(0,0,0,.55),0 0 0 2.5px #e7b74a}
+.mp-dot-host{box-shadow:0 0 0 2px #e7b74a}
+.mp-host-tag{background:#5a4716;color:#ffd76e;border-radius:4px;padding:0 4px;font-size:10px;margin-left:3px}
+#mp-rights label{display:flex;gap:5px;align-items:flex-start;line-height:1.35}
+#mp-rights input{margin-top:2px;flex:none}
+#mp-chat{border-top:1px solid #2e3742;margin-top:8px;display:flex;flex-direction:column;
+  max-height:260px;min-height:110px;flex:none}
+#mp-chat-log{flex:1;min-height:60px;overflow-y:auto;font-size:12px;padding:3px 6px;
+  display:flex;flex-direction:column;gap:2px}
+.mp-chat-line{display:flex;gap:5px;align-items:baseline}
+.mp-chat-line .who{font-weight:600;flex:none;max-width:110px;overflow:hidden;text-overflow:ellipsis}
+.mp-chat-line .txt{word-break:break-word;white-space:pre-wrap;color:#cfd6de}
+#mp-chat-row{display:flex;gap:4px;padding:4px 6px 6px}
+#mp-chat-in{flex:1;min-width:0;background:#1c222b;border:1px solid #2e3742;border-radius:5px;
+  color:#d7dde5;font-size:12px;padding:3px 6px}
+#mp-chat-row button{flex:none;padding:0 9px}
 #mp-dialog textarea{width:100%;box-sizing:border-box;height:52px;resize:vertical;
   background:#1c222b;border:1px solid #2e3742;border-radius:5px;color:#d7dde5;font-size:10px}
 #mp-dialog fieldset{border:1px solid #2e3742;border-radius:6px;margin:8px 0;min-width:0}
@@ -813,14 +1432,16 @@ window.addEventListener("load", () => {
   mpLoadPrefs();
   mpInjectStyle();
   mpWireDialog();
+  mpWireChat();
   mpWireCursorSend();
+  mpInstallGuards();
   mpRefreshUI();
   // edits announce themselves through markDirty — piggyback a quick sync check
   const origDirty = window.markDirty;
   window.markDirty = function(...a){ origDirty.apply(this, a); mpNudge(); };
   // any re-render (pan/zoom included) repositions the remote cursors
   const origRR = window.requestRender;
-  window.requestRender = function(...a){ origRR.apply(this, a); if (MP.cursors.size) mpLayoutCursors(); };
+  window.requestRender = function(...a){ origRR.apply(this, a); if (MP.cursors.size || MP.edits.size || MP.remoteSel.size) mpLayoutCursors(); };
   // …and the same for the schematic editor (its pan/zoom goes through Sch.render)
   if (typeof Sch !== "undefined" && Sch.render){
     const origSR = Sch.render;
@@ -839,6 +1460,8 @@ window.addEventListener("load", () => {
     window.loadProject = function(...a){
       MP._imgSig.clear();
       MP._pendingImgs.clear();
+      // a whole-board swap mid-session needs the host's accept/decline
+      if (mpConnected() && !MP.applying) MP._bigChange = true;
       return origLoad.apply(this, a);
     };
   }

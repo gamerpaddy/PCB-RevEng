@@ -71,6 +71,9 @@ function toolCursor(name){
 }
 
 function setTool(name){
+  // image-manipulating tools are host-only during a multiplayer session
+  if ((name === "align" || name === "calibrate" || name === "crop" || name === "rotate" || name === "resizexy")
+      && typeof mpBlockImageOp === "function" && mpBlockImageOp()) return;
   // leaving cleanup
   if (Tools.name === "trace") cancelTrace();
   Tools.measureA = Tools.measureB = null;

@@ -31,6 +31,8 @@ function setAutosaveInterval(ms){
 function autosaveTick(){
   scheduleAutosave(); // arm the next tick regardless of what happens below
   if (!Autosave.dirty || Autosave.restoring || !Autosave.ready || Autosave.saving) return;
+  // a multiplayer guest without save/export rights doesn't persist the session board
+  if (typeof mpAutosaveBlocked === "function" && mpAutosaveBlocked()) return;
   if (typeof Tools !== "undefined" && Tools.drag) return; // interaction in progress
   Autosave.dirty = false;
   Autosave.saving = true;

@@ -58,6 +58,7 @@ function confirmRewarpIfPopulated(layer, action){
 }
 
 function startPointAlign(){
+  if (typeof mpBlockImageOp === "function" && mpBlockImageOp()) return;   // host-only in multiplayer
   const layer = UI.activeLayer();
   if (!layer){ UI.toast("Select the layer to align first"); return; }
   if (!confirmRewarpIfPopulated(layer, "Aligning")) return;
@@ -137,6 +138,7 @@ function applyPointAlign(layer){
    a new axis-aligned bitmap positioned exactly where the rectangle was, so annotations
    placed on that side stay lined up. Everything outside the rectangle is discarded. */
 function startCrop(){
+  if (typeof mpBlockImageOp === "function" && mpBlockImageOp()) return;   // host-only in multiplayer
   const layer = UI.activeLayer();
   if (!layer || !layer.img){ UI.toast("Select an image layer in the Layers panel first"); return; }
   if (layer.locked){ UI.toast("Layer is locked"); return; }
@@ -287,6 +289,7 @@ function warpImageMesh(srcImg, H, outW, outH){
        release → the layer rotates so that line becomes horizontal or vertical,
        whichever is nearer. Works on any layer, at any zoom. */
 function startRotate(){
+  if (typeof mpBlockImageOp === "function" && mpBlockImageOp()) return;   // host-only in multiplayer
   const layer = UI.activeLayer();
   if (!layer || !layer.img){ UI.toast("Select an image layer in the Layers panel first"); return; }
   if (layer.locked){ UI.toast("Layer is locked"); return; }
@@ -374,6 +377,7 @@ function applyRotateLine(layer, A, B){
    world X and Y axes so those spans match the entered dimensions (at State.pxPerMm). Scaling
    is anchored on the layer centre, so the picture stays put and only its proportions change. */
 function startResizeXY(){
+  if (typeof mpBlockImageOp === "function" && mpBlockImageOp()) return;   // host-only in multiplayer
   const layer = UI.activeLayer();
   if (!layer || !layer.img){ UI.toast("Select an image layer in the Layers panel first"); return; }
   if (layer.locked){ UI.toast("Layer is locked"); return; }
@@ -456,6 +460,7 @@ function applyResizeXY(layer, fx, fy){
 }
 
 function startLineDeskew(){
+  if (typeof mpBlockImageOp === "function" && mpBlockImageOp()) return;   // host-only in multiplayer
   const layer = UI.activeLayer();
   if (!layer || !layer.img){ UI.toast("Select an image layer first"); return; }
   // Deskew bakes a new perspective into the image. Doing it AFTER a layer has been
