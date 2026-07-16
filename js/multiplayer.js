@@ -20,7 +20,7 @@ const MP = {
   isHost: false,
   applying: false,     // true while a remote state is being written into State
   pendingCore: null,   // newest remote core deferred during a local drag
-  opts: { sendImages: false, maxPxPerMm: 10 },
+  opts: { sendImages: false, maxPxPerMm: 0 },   // 0 = auto: half the image's own px/mm (floor 5)
   _lastCore: null,     // last core string sent OR applied (echo suppression)
   _imgSig: new Map(),  // layerId -> signature of the bitmap we last sent
   _pendingImgs: new Map(), // layerId -> dataURL that arrived before its layer
@@ -38,7 +38,13 @@ function mpLoadPrefs(){
     MP.name  = localStorage.getItem("pcbreveng.mpName")  || "";
     MP.color = localStorage.getItem("pcbreveng.mpColor") || "";
     const o = JSON.parse(localStorage.getItem("pcbreveng.mpOpts") || "null");
-    if (o){ MP.opts.sendImages = !!o.sendImages; MP.opts.maxPxPerMm = +o.maxPxPerMm || 10; }
+    if (o){
+      MP.opts.sendImages = !!o.sendImages;
+      // 10 was the old fixed default (nobody chose it) → migrate to the new auto;
+      // explicit values clamp to the 5 px/mm minimum, anything unset/invalid = auto
+      const v = +o.maxPxPerMm || 0;
+      MP.opts.maxPxPerMm = (!v || v === 10) ? 0 : Math.max(5, v);
+    }
   } catch(e){}
   if (!MP.name)  MP.name  = "Player-" + MP.id.slice(0, 4);
   if (!MP.color) MP.color = ["#ff5d5d","#ffb84d","#ffe14d","#6fe06f","#4dd2ff","#b48cff","#ff7ad9"][Math.floor(Math.random()*7)];
@@ -480,7 +486,11 @@ async function mpShrinkImage(l){
   // back on load/receive), which is what the layer's scale/warp math assumes
   const lw = l.img.width, lh = l.img.height;
   const worldScale = l.scale || 1;
-  const f = Math.min(1, MP.opts.maxPxPerMm * worldScale / (State.pxPerMm || 10));
+  // the image's actual resolution in image-px per board-mm; the cap is the user's
+  // explicit value, or (auto) HALF the actual resolution — never below 5 px/mm
+  const actual = (State.pxPerMm || 10) / worldScale;
+  const cap = MP.opts.maxPxPerMm > 0 ? MP.opts.maxPxPerMm : Math.max(5, actual / 2);
+  const f = Math.min(1, cap / actual);
   if (f >= 1 && l.dataURL.length < 600000 && /^data:image\/jpe?g/i.test(l.dataURL))
     return { data: l.dataURL, w: lw, h: lh };   // small JPEG already under the cap — send as-is
   const w = Math.max(1, Math.round(lw * f));
@@ -725,7 +735,7 @@ function mpWireDialog(){
     $id("mp-name").value = MP.name;
     $id("mp-color").value = MP.color;
     $id("mp-imgshare").checked = MP.opts.sendImages;
-    $id("mp-imgres").value = MP.opts.maxPxPerMm;
+    $id("mp-imgres").value = MP.opts.maxPxPerMm || "";   // blank = auto (half the image)
     mpRefreshUI(); mpStatus("");
     dlg.showModal();
   });
@@ -742,8 +752,9 @@ function mpWireDialog(){
     }
   });
   $id("mp-imgres").addEventListener("change", e => {
-    MP.opts.maxPxPerMm = Math.max(0.5, parseFloat(e.target.value) || 10);
-    e.target.value = MP.opts.maxPxPerMm;
+    const v = parseFloat(e.target.value);
+    MP.opts.maxPxPerMm = (v > 0) ? Math.max(5, v) : 0;   // blank/invalid = auto
+    e.target.value = MP.opts.maxPxPerMm || "";
     mpSavePrefs(); MP._imgSig.clear();
     if (MP.opts.sendImages && mpConnected()) mpSyncImages();
   });

@@ -808,14 +808,15 @@
     <label style="display:flex;gap:6px;align-items:center;font-size:12px;margin:6px 0 2px">
       <input type="checkbox" id="mp-imgshare">
       Also send embedded image layers (compressed), max
-      <input id="mp-imgres" type="number" min="0.5" step="0.5" style="width:55px"> px/mm
+      <input id="mp-imgres" type="number" min="5" step="1" placeholder="auto" style="width:55px"> px/mm
     </label>
     <div class="panel-hint" style="margin:2px 0 0;line-height:1.45">
       Parts, nets, traces, vias, notes, schematic and layer transforms sync both ways
       (simultaneous edits: last save wins). Image layers added from a <b>URL</b> are always
       shared as links; embedded photo files travel only from peers who tick the box above
       (each side shares its <b>own</b> photos) — downscaled to the px/mm cap to keep
-      transfers small. Ticking it also asks the others to resend theirs.
+      transfers small. Leave the cap blank for <b>auto</b> = half the image's own
+      resolution; the minimum is 5&nbsp;px/mm. Ticking it also asks the others to resend theirs.
     </div>
     <div id="mp-status" class="panel-hint" style="margin-top:6px"></div>
     <div class="dlg-buttons">
@@ -876,7 +877,7 @@
 <script src="js/projects.js?v=8"></script>
 <script src="js/ai.js?v=4"></script>
 <script src="js/autosave.js?v=57"></script>
-<script src="js/multiplayer.js?v=8"></script>
+<script src="js/multiplayer.js?v=9"></script>
 <script src="js/main.js?v=134"></script>
 
 </body>
