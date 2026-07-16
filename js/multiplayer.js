@@ -16,6 +16,7 @@ const MP = {
   id: Math.random().toString(36).slice(2, 10),   // my peer id (also keys my cursor)
   peers: [],           // [{pc, dc, open, name, color, remoteId, q}]
   cursors: new Map(),  // from-id -> {x,y,name,color,ts,el,leave}
+  tabs: new Map(),     // from-id -> {tab,name,color} — which editor tab each peer is on
   isHost: false,
   applying: false,     // true while a remote state is being written into State
   pendingCore: null,   // newest remote core deferred during a local drag
@@ -121,6 +122,8 @@ function mpBindDC(peer, dc){
     }
     // ask every sharing peer to (re)offer its image layers to me
     mpSendObj(peer, { t: "imgreq", from: MP.id });
+    // tell the newcomer which editor tab I'm on (dots on the tab bar)
+    mpSendObj(peer, mpTabMsgOut());
     mpStartLoop();
     mpRefreshUI();
     mpStatus("Connected — session live.");
@@ -140,6 +143,8 @@ function mpDropPeer(peer){
     const c = MP.cursors.get(peer.remoteId);
     if (c && c.el) c.el.remove();
     MP.cursors.delete(peer.remoteId);
+    MP.tabs.delete(peer.remoteId);
+    mpRenderTabDots();
   }
   if (!MP.peers.length) mpStopLoop();
   mpRefreshUI();
@@ -165,6 +170,9 @@ function mpLeave(){
   mpClearCodeFields();
   for (const c of MP.cursors.values()) if (c.el) c.el.remove();
   MP.cursors.clear();
+  MP.tabs.clear();
+  MP._sentTab = null;   // a future session re-announces the tab
+  mpRenderTabDots();
   mpRefreshUI();
 }
 
@@ -248,6 +256,10 @@ function mpOnMsg(peer, raw){
       break;
     case "cur":
       mpCursorMsg(m);
+      if (MP.isHost) mpBroadcast(m, peer);
+      break;
+    case "tab":
+      mpTabMsg(m);
       if (MP.isHost) mpBroadcast(m, peer);
       break;
     case "state":
@@ -611,6 +623,50 @@ function mpWireCursorSend(){
   }
 }
 
+/* ---------------- tab presence (coloured dots on the editor tab bar) ---------------- */
+
+/* my own tab announcement — sent to newcomers on dc open and broadcast on tab switch */
+function mpTabMsgOut(){
+  const tab = (typeof EditorTabs !== "undefined") ? EditorTabs.current : "visual";
+  return { t: "tab", from: MP.id, tab, name: MP.name, color: MP.color };
+}
+function mpSendTab(){
+  if (!mpConnected()) return;
+  const m = mpTabMsgOut();
+  if (m.tab === MP._sentTab) return;
+  MP._sentTab = m.tab;
+  mpBroadcast(m);
+}
+function mpTabMsg(m){
+  if (!m.from || m.from === MP.id) return;
+  MP.tabs.set(m.from, { tab: m.tab, name: m.name, color: m.color });
+  mpRenderTabDots();
+}
+
+/* draw one dot per peer inside the tab button the peer is currently on */
+function mpRenderTabDots(){
+  for (const tab of ["visual", "schematic", "bom", "nets", "projects"]){
+    const btn = document.getElementById("tab-" + tab);
+    if (!btn) continue;
+    let box = btn.querySelector(".mp-tab-dots");
+    const here = [...MP.tabs.values()].filter(p => p.tab === tab);
+    if (!here.length){ if (box) box.remove(); continue; }
+    if (!box){
+      box = document.createElement("span");
+      box.className = "mp-tab-dots";
+      btn.appendChild(box);
+    }
+    box.innerHTML = "";
+    for (const p of here){
+      const d = document.createElement("span");
+      d.className = "mp-tab-dot";
+      d.style.background = p.color || "#4dd2ff";
+      d.title = (p.name || "peer") + " is on this tab";
+      box.appendChild(d);
+    }
+  }
+}
+
 /* ---------------- dialog / UI ---------------- */
 
 function mpRefreshUI(){
@@ -727,6 +783,8 @@ function mpInjectStyle(){
 .mp-peer .mp-dot{width:9px;height:9px;border-radius:50%;flex:none}
 .mp-peer .mp-peer-state{color:#78838f;font-size:11px;margin-left:auto}
 .mp-peer button{padding:0 6px}
+.mp-tab-dots{display:inline-flex;gap:3px;margin-left:6px;vertical-align:middle;pointer-events:none}
+.mp-tab-dot{width:8px;height:8px;border-radius:50%;flex:none;box-shadow:0 0 0 1px rgba(0,0,0,.55)}
 #mp-dialog textarea{width:100%;box-sizing:border-box;height:52px;resize:vertical;
   background:#1c222b;border:1px solid #2e3742;border-radius:5px;color:#d7dde5;font-size:10px}
 #mp-dialog fieldset{border:1px solid #2e3742;border-radius:6px;margin:8px 0;min-width:0}
@@ -750,6 +808,11 @@ window.addEventListener("load", () => {
   if (typeof Sch !== "undefined" && Sch.render){
     const origSR = Sch.render;
     Sch.render = function(...a){ const r = origSR.apply(this, a); if (MP.cursors.size) mpLayoutCursors(); return r; };
+  }
+  // switching editor tabs announces where I am (dots on the peers' tab bars)
+  if (typeof EditorTabs !== "undefined" && EditorTabs.show){
+    const origShow = EditorTabs.show;
+    EditorTabs.show = function(...a){ const r = origShow.apply(this, a); mpSendTab(); return r; };
   }
   // opening a project mid-session: a reopened board can reuse the LAYER IDS the
   // signature cache already holds, so image sync silently skipped every layer —
