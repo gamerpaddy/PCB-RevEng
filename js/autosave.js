@@ -65,7 +65,10 @@ function autosaveTick(){
 }
 
 /* ---------- storage backend: OPFS files, IndexedDB fallback ---------- */
-const AS_OPFS = !!(navigator.storage && navigator.storage.getDirectory);
+/* mutable: feature detection alone lies — Chrome on file:// pages EXPOSES
+   navigator.storage.getDirectory but every call throws ("files unsafe for
+   access"). autosaveInit probes it once and flips this off when it's dead. */
+let AS_OPFS = !!(navigator.storage && navigator.storage.getDirectory);
 const AS_KEYS = ["autosave", "autosave_undo", "autosave_imgs", "autosave_meta"];
 
 async function asDir(){
@@ -156,16 +159,19 @@ function markDirty(){ Autosave.dirty = true; }
 function ensureSampleData(){
   return new Promise((resolve) => {
     if (typeof window.SAMPLE_PROJECT_JSON === "string"){ resolve(window.SAMPLE_PROJECT_JSON); return; }
+    const viaScript = () => {
+      const s = document.createElement("script");
+      s.src = "sampleproject.js?v=25";
+      s.onload = () => resolve(typeof window.SAMPLE_PROJECT_JSON === "string" ? window.SAMPLE_PROJECT_JSON : null);
+      s.onerror = () => resolve(null);
+      document.head.appendChild(s);
+    };
+    // on file:// fetch is CORS-blocked and only spams the console — go straight to the script
+    if (location.protocol === "file:"){ viaScript(); return; }
     fetch("sampleproject.pcbrev.json?v=25")
       .then(r => r.ok ? r.text() : Promise.reject(new Error("fetch " + r.status)))
       .then(resolve)
-      .catch(() => {
-        const s = document.createElement("script");
-        s.src = "sampleproject.js?v=25";
-        s.onload = () => resolve(typeof window.SAMPLE_PROJECT_JSON === "string" ? window.SAMPLE_PROJECT_JSON : null);
-        s.onerror = () => resolve(null);
-        document.head.appendChild(s);
-      });
+      .catch(viaScript);
   });
 }
 
@@ -251,6 +257,12 @@ function showWelcome(overlay, ltext){
 async function autosaveInit(){
   const overlay = document.getElementById("loading-overlay");
   const ltext = document.getElementById("loading-text");
+  if (AS_OPFS){
+    // probe OPFS for real: Chrome on file:// advertises it but every call throws
+    try { await asDir(); }
+    catch(e){ AS_OPFS = false; Autosave._dir = null; }
+    if (typeof Projects !== "undefined") Projects.supported = AS_OPFS;
+  }
   if (AS_OPFS){
     await migrateIdbAutosave();   // adopt a pre-OPFS IndexedDB session once
     Autosave.ready = true;

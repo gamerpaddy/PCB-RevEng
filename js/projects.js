@@ -226,6 +226,7 @@ async function projSaveInto(meta, json, thumb){
 }
 
 Projects.saveAsNew = async () => {
+  if (!Projects.supported){ UI.toast("Browser storage isn't available here — see the note on the Projects tab"); return; }
   const name = prompt("New project name:", "Board " + new Date().toLocaleDateString());
   if (name == null) return;
   const meta = {
@@ -233,7 +234,12 @@ Projects.saveAsNew = async () => {
     created: Date.now(), modified: Date.now(),
     size: 0, stats: null, thumb: null, versions: [],
   };
-  await projSaveInto(meta, serializeProject(), projCaptureThumb());
+  try {
+    await projSaveInto(meta, serializeProject(), projCaptureThumb());
+  } catch(e){
+    UI.toast("Could not save the project: " + e.message);
+    return;
+  }
   projSetActive(meta.id);
   await projDropAutosaveSlot();   // the board graduated into a real project
   UI.toast("Saved board as project “" + meta.name + "”");
@@ -735,19 +741,18 @@ Projects.render = async () => {
   const grid = $("#projects-grid");
   if (!grid || $("#projects-pane").style.display === "none") return;
   const empty = $("#projects-empty");
+  const fileHint = location.protocol === "file:"
+    ? " Chrome blocks browser storage (OPFS) for pages opened straight from disk (file://) — serve the app over http(s) with any small local server, or use Firefox. The board itself still autosaves."
+    : "";
+  let metas = [], storageErr = null;
   if (!Projects.supported){
-    grid.innerHTML = "";
-    empty.style.display = "";
-    empty.textContent = "This browser does not support the Origin Private File System (OPFS) — the project browser needs a recent Chrome, Edge, Firefox or Safari.";
-    return;
-  }
-  let metas = [];
-  try { metas = await Projects.list(); }
-  catch(e){
-    grid.innerHTML = "";
-    empty.style.display = "";
-    empty.textContent = "Could not read browser storage: " + e.message;
-    return;
+    storageErr = "Saved projects need the Origin Private File System (OPFS), which isn't available here." + fileHint;
+  } else {
+    try { metas = await Projects.list(); }
+    catch(e){
+      Projects.supported = false;   // runtime failure (e.g. Chrome on file://) — stop retrying
+      storageErr = "Could not read browser storage: " + e.message + "." + fileHint;
+    }
   }
   // the autosave slot and the built-in example are pinned in their own section,
   // clearly apart from real saved projects
@@ -755,9 +760,11 @@ Projects.render = async () => {
   const normal = metas.filter(m => m.kind !== "autosave");
   $("#projects-count").textContent = normal.length ? "(" + normal.length + ")" : "";
   const store = $("#proj-storage");
-  projStorageLabel().then(t => { store.textContent = t; });
-  empty.style.display = normal.length ? "none" : "";
-  empty.textContent = "No saved projects yet — “＋ Save current project as new project” stores the board you are editing here, or drop a .pcbrev.json file anywhere on this tab.";
+  store.textContent = "";
+  if (!storageErr) projStorageLabel().then(t => { store.textContent = t; });
+  empty.style.display = (storageErr || !normal.length) ? "" : "none";
+  empty.textContent = storageErr ||
+    "No saved projects yet — “＋ Save current project as new project” stores the board you are editing here, or drop a .pcbrev.json file anywhere on this tab.";
   grid.innerHTML = "";
   grid.appendChild(projEl("div", "proj-sep", "Autosave & example — not saved projects"));
   for (const m of specials) grid.appendChild(projCard(m));
@@ -775,6 +782,10 @@ Projects.enter = () => {
 Projects.wire = () => {
   const pane = $("#projects-pane");
   if (!pane) return;
+  // Chromium refuses OPFS on file:// pages — flag it loudly so nobody "saves" into the void
+  const warn = $("#proj-file-warning");
+  const chromium = !!window.chrome || /Chrom(e|ium)|Edg\//.test(navigator.userAgent);
+  if (warn && location.protocol === "file:" && chromium) warn.style.display = "";
   $("#proj-saveas").addEventListener("click", () => Projects.saveAsNew());
   $("#proj-upload").addEventListener("click", () => $("#file-proj-upload").click());
   $("#file-proj-upload").addEventListener("change", (e) => {

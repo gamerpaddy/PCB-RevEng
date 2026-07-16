@@ -599,9 +599,24 @@ function serializeProject(){
       dataURL: l.url ? "" : l.dataURL, url: l.url || null,
       visible:l.visible,
       opacity:l.opacity, tx:l.tx, ty:l.ty, scale:l.scale, rot:l.rot,
-      mirror:l.mirror, locked:l.locked, warp:l.warp || null
+      mirror:l.mirror, locked:l.locked, warp:l.warp || null,
+      // logical pixel size when the stored bitmap is a downscaled stand-in (multiplayer
+      // image share) — the bitmap is stretched back to this on load so scale/warp math,
+      // which assumes the ORIGINAL pixel dimensions, keeps working
+      imgW: l.imgW || null, imgH: l.imgH || null,
     })),
   });
+}
+
+/* stretch a decoded bitmap back to its logical pixel size when it's a downscaled
+   stand-in (multiplayer image share stores small bytes + imgW/imgH). All layer
+   transform math (scale, warp, tiles) assumes the ORIGINAL pixel dimensions. */
+function fitBitmapTo(img, w, h){
+  if (!w || !h || (img.width === w && img.height === h)) return img;
+  const cv = document.createElement("canvas");
+  cv.width = w; cv.height = h;
+  cv.getContext("2d").drawImage(img, 0, 0, w, h);
+  return cv;
 }
 
 function loadProject(json, done){
@@ -653,13 +668,20 @@ function loadProject(json, done){
         img.src = m.url;
       };
       attempt(true);
+    } else if (!m.dataURL){
+      // no stored bytes (e.g. the image store failed to save) — keep the layer imgless;
+      // an empty img.src would resolve to the PAGE url ("Unsafe attempt to load URL…")
+      settle();
     } else {
       const img = new Image();
       layer.img = img;
       img.onload = () => {
+        // a downscaled multiplayer stand-in stretches back to its logical size
+        const bmp = fitBitmapTo(img, m.imgW, m.imgH);
+        layer.img = bmp;
         // rebuild the LOD tile pyramid for big uploaded images
-        if (typeof ImageTiles !== "undefined" && ImageTiles.shouldTile(img)){
-          const t = ImageTiles.build(img); if (t) layer.tiles = t;
+        if (typeof ImageTiles !== "undefined" && ImageTiles.shouldTile(bmp)){
+          const t = ImageTiles.build(bmp); if (t) layer.tiles = t;
         }
         settle();
       };

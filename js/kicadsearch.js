@@ -19,17 +19,20 @@ function loadKicadFootprints(){
   if (typeof window.KICAD_FOOTPRINTS_TEXT === "string"){ _kfIngest(window.KICAD_FOOTPRINTS_TEXT); return; }
   _kfLoading = true;
   const done = () => { _kfLoading = false; };
+  const viaScript = () => {
+    // file:// fallback — pull in the JS data file via a script tag
+    const s = document.createElement("script");
+    s.src = "footprints_kicad.js?v=25";
+    s.onload = () => { if (typeof window.KICAD_FOOTPRINTS_TEXT === "string") _kfIngest(window.KICAD_FOOTPRINTS_TEXT); done(); };
+    s.onerror = done;
+    document.head.appendChild(s);
+  };
+  // on file:// fetch is CORS-blocked and only spams the console — go straight to the script
+  if (location.protocol === "file:"){ viaScript(); return; }
   fetch("footprints_kicad.txt?v=25")
     .then(r => r.ok ? r.text() : Promise.reject(new Error("fetch " + r.status)))
     .then(text => { _kfIngest(text); done(); })
-    .catch(() => {
-      // file:// fallback — pull in the JS data file via a script tag
-      const s = document.createElement("script");
-      s.src = "footprints_kicad.js?v=25";
-      s.onload = () => { if (typeof window.KICAD_FOOTPRINTS_TEXT === "string") _kfIngest(window.KICAD_FOOTPRINTS_TEXT); done(); };
-      s.onerror = done;
-      document.head.appendChild(s);
-    });
+    .catch(viaScript);
 }
 
 /* the inputs that get autocomplete: the footprint dialog field, the inspector

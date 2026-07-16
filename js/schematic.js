@@ -941,28 +941,40 @@ function schDrawJunctions(ctx){
   const wires = State.schWires;
   if (!wires || wires.length < 2 || wires.length > 4000) return;
   const key = (x, y) => Math.round(x * 10) + "," + Math.round(y * 10);
-  const inc = new Map();                              // key -> {x,y,n}
-  const bump = (x, y, n) => { const k = key(x, y); let e = inc.get(k); if (!e) inc.set(k, e = { x, y, n: 0 }); e.n += n; };
+  // counts are tracked PER NET (null net = wildcard) so coincident vertices of
+  // DIFFERENT nets never add up to a false junction dot between unconnected wires
+  const netOf = new Map(wires.map(w => [w, schWireNet(w) || null]));
+  const inc = new Map();                              // key -> {x,y,by:Map(net->n)}
+  const bump = (x, y, n, net) => {
+    const k = key(x, y);
+    let e = inc.get(k); if (!e) inc.set(k, e = { x, y, by: new Map() });
+    e.by.set(net, (e.by.get(net) || 0) + n);
+  };
   // (1) segment endpoints (corners score +2, ends +1) and (1b) the pin behind an anchor
   for (const w of wires){
     const p = w.points; if (!p || p.length < 2) continue;
-    for (let i = 0; i + 1 < p.length; i++){ bump(p[i].x, p[i].y, 1); bump(p[i+1].x, p[i+1].y, 1); }
-    if (w.a) bump(p[0].x, p[0].y, 1);
-    if (w.b) bump(p[p.length - 1].x, p[p.length - 1].y, 1);
+    const wn = netOf.get(w);
+    for (let i = 0; i + 1 < p.length; i++){ bump(p[i].x, p[i].y, 1, wn); bump(p[i+1].x, p[i+1].y, 1, wn); }
+    if (w.a) bump(p[0].x, p[0].y, 1, wn);
+    if (w.b) bump(p[p.length - 1].x, p[p.length - 1].y, 1, wn);
   }
-  // (2) a vertex landing mid-segment of ANOTHER wire → that wire passes through (+2)
+  // (2) a vertex landing mid-segment of ANOTHER wire (same/wildcard net only) → that
+  // wire passes through (+2)
   for (const w of wires){
     const p = w.points; if (!p || p.length < 2) continue;
+    const wn = netOf.get(w);
     for (const v of p){
       const vk = key(v.x, v.y);
       for (const o of wires){
         if (o === w) continue;
+        const on = netOf.get(o);
+        if (wn && on && wn !== on) continue;            // foreign net — a touch, not a join
         const op = o.points; if (!op || op.length < 2) continue;
         let atVertex = false;
         for (const q of op){ if (key(q.x, q.y) === vk){ atVertex = true; break; } }
         if (atVertex) continue;                         // shared vertex — already counted in (1)
         for (let i = 0; i + 1 < op.length; i++)
-          if (distToSeg(v.x, v.y, op[i], op[i+1]) <= 0.05){ bump(v.x, v.y, 2); break; }
+          if (distToSeg(v.x, v.y, op[i], op[i+1]) <= 0.05){ bump(v.x, v.y, 2, wn || on); break; }
       }
     }
   }
@@ -970,7 +982,11 @@ function schDrawJunctions(ctx){
   const r = Math.max(1.8, 0.3 * Sch.zoom);
   ctx.fillStyle = SCH_WIRE_OK;
   for (const e of inc.values()){
-    if (e.n < 3) continue;
+    // a junction needs ≥3 conductors of ONE compatible net group (wildcards join any)
+    const wild = e.by.get(null) || 0;
+    let best = wild;
+    for (const [net, n] of e.by) if (net) best = Math.max(best, n + wild);
+    if (best < 3) continue;
     ctx.beginPath();
     ctx.arc(schX2S(e.x), schY2S(e.y), r, 0, Math.PI * 2);
     ctx.fill();
@@ -1705,8 +1721,18 @@ Sch.onMove = (p, e) => {
         if (ow === d.w) continue;
         const on = schWireNet(ow);
         if (!myNet || !on || on === myNet) continue;
-        for (let k = 0; k + 1 < ow.points.length && !overlaps; k++)
-          if (schSegOverlapLen(nA, nB, ow.points[k], ow.points[k+1]) > 0.05) overlaps = true;
+        const op = ow.points;
+        for (let k = 0; k + 1 < op.length && !overlaps; k++){
+          if (schSegOverlapLen(nA, nB, op[k], op[k+1]) > 0.05) overlaps = true;
+          // vertex-on-wire coincidences fake a junction without any parallel overlap:
+          // the moved segment's ENDPOINT/CORNER landing ON the foreign wire, or one of
+          // the foreign wire's own VERTICES landing on the moved segment (its corners
+          // and ends — a plain mid-run crossing stays legal)
+          else if (distToSeg(nA.x, nA.y, op[k], op[k+1]) <= 0.05 ||
+                   distToSeg(nB.x, nB.y, op[k], op[k+1]) <= 0.05 ||
+                   distToSeg(op[k].x, op[k].y, nA, nB) <= 0.05 ||
+                   (k + 2 === op.length && distToSeg(op[k+1].x, op[k+1].y, nA, nB) <= 0.05)) overlaps = true;
+        }
         if (overlaps) break;
       }
       if (overlaps) return;                 // keep the segment where it was

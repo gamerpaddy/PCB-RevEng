@@ -108,19 +108,22 @@ function mpBindDC(peer, dc){
   dc.onbufferedamountlow = () => mpDrainQueue(peer);
   dc.onopen = () => {
     peer.open = true;
+    mpClearCodeFields();   // handshake done — the big signaling codes are spent
     mpSendObj(peer, { t: "hi", from: MP.id, name: MP.name, color: MP.color });
     if (MP.isHost){
       // host is authoritative: push the full board to the newcomer
       const core = mpCoreString();
       MP._lastCore = core;
       mpSendObj(peer, { t: "state", from: MP.id, core });
-      MP._imgSig.clear();   // re-offer images so the newcomer gets them too
     } else if (MP._lastCore == null){
       // guest: adopt the host's board — don't blast our own on join
       MP._lastCore = mpCoreString();
     }
+    // ask every sharing peer to (re)offer its image layers to me
+    mpSendObj(peer, { t: "imgreq", from: MP.id });
     mpStartLoop();
     mpRefreshUI();
+    mpStatus("Connected — session live.");
     if (typeof UI !== "undefined") UI.toast("Multiplayer: peer connected");
   };
   dc.onclose = () => mpDropPeer(peer);
@@ -143,6 +146,15 @@ function mpDropPeer(peer){
   if (typeof UI !== "undefined") UI.toast("Multiplayer: peer left");
 }
 
+/* wipe the invite/reply code boxes — the codes are single-use, so once a session is
+   live (or left) they're just confusing multi-KB leftovers */
+function mpClearCodeFields(){
+  for (const id of ["mp-offer-out", "mp-reply-in", "mp-invite-in", "mp-reply-out"]){
+    const el = document.getElementById(id);
+    if (el) el.value = "";
+  }
+}
+
 function mpLeave(){
   mpBroadcast({ t: "bye", from: MP.id });
   for (const p of [...MP.peers]) mpDropPeer(p);
@@ -150,6 +162,7 @@ function mpLeave(){
   MP._pendingInvite = null;
   MP._lastCore = null;
   MP._imgSig.clear();
+  mpClearCodeFields();
   for (const c of MP.cursors.values()) if (c.el) c.el.remove();
   MP.cursors.clear();
   mpRefreshUI();
@@ -220,6 +233,9 @@ function mpOnMsg(peer, raw){
     let b = MP._rx.get(m.id);
     if (!b){ b = { total: m.total, parts: [], got: 0 }; MP._rx.set(m.id, b); }
     if (b.parts[m.seq] == null){ b.parts[m.seq] = m.data; b.got++; }
+    // long transfers (big image layers) tick a progress line so they don't look stalled
+    if (b.total > 20 && (b.got % 20 === 0 || b.got === b.total))
+      mpStatus(`Receiving data… ${Math.round(100 * b.got / b.total)}%`);
     if (b.got === b.total){ MP._rx.delete(m.id); mpOnMsg(peer, b.parts.join("")); }
     return;
   }
@@ -241,7 +257,12 @@ function mpOnMsg(peer, raw){
       break;
     case "img":
       if (MP.isHost) mpBroadcast(m, peer);
-      mpApplyImage(m.layerId, m.data);
+      mpApplyImage(m.layerId, m.data, m.w, m.h);
+      break;
+    case "imgreq":
+      // a peer wants image layers — re-offer everything if we're sharing
+      if (MP.isHost) mpBroadcast(m, peer);
+      if (MP.opts.sendImages){ MP._imgSig.clear(); mpSyncImages(); }
       break;
     case "bye":
       mpDropPeer(peer);
@@ -256,7 +277,9 @@ function mpOnMsg(peer, raw){
    Built the same way on every peer, so equal boards give equal strings. */
 function mpCoreString(){
   const s = JSON.parse(serializeProject());
-  s.layers = (s.layers || []).map(l => { const { dataURL, ...rest } = l; return rest; });
+  // dataURL: image bytes travel separately (opt-in). visible/opacity: per-user VIEW
+  // state — syncing them made one user's 1/2/3 layer switching flip everyone's view.
+  s.layers = (s.layers || []).map(l => { const { dataURL, visible, opacity, ...rest } = l; return rest; });
   return JSON.stringify(s);
 }
 
@@ -354,9 +377,9 @@ function mpApplyCore(coreStr){
       };
       attempt(true);
     } else if (MP._pendingImgs.has(m.id)){
-      const data = MP._pendingImgs.get(m.id);
+      const p = MP._pendingImgs.get(m.id);
       MP._pendingImgs.delete(m.id);
-      setTimeout(() => mpApplyImage(m.id, data), 0);
+      setTimeout(() => mpApplyImage(m.id, p.data, p.w, p.h), 0);
     }
     return l;
   });
@@ -404,47 +427,81 @@ function mpRemapSelection(){
 
 /* ---------------- image layer sharing (optional) ---------------- */
 
+/* cheap change signature for a layer bitmap — length alone collides when an
+   image is replaced by another of identical size, so sample the tail too */
+function mpImgSig(dataURL){
+  return dataURL.length + ":" + dataURL.slice(-32) + "@" + MP.opts.maxPxPerMm;
+}
+
 function mpSyncImages(){
   for (const l of State.layers){
     if (l.url || !l.dataURL) continue;   // hosted layers travel as links in the core
-    const sig = l.dataURL.length + "@" + MP.opts.maxPxPerMm;
+    const sig = mpImgSig(l.dataURL);
     if (MP._imgSig.get(l.id) === sig) continue;
     MP._imgSig.set(l.id, sig);
-    mpShrinkImage(l).then(data => {
-      if (data) mpBroadcast({ t: "img", from: MP.id, layerId: l.id, data });
+    mpShrinkImage(l).then(r => {
+      if (r){
+        // w/h = the LOGICAL pixel size the bytes stand in for — the receiver stretches
+        // the (possibly downscaled) bitmap back so scale/warp math keeps working
+        mpBroadcast({ t: "img", from: MP.id, layerId: l.id, data: r.data, w: r.w, h: r.h });
+        const mb = (r.data.length / 1048576).toFixed(1);
+        if (typeof UI !== "undefined") UI.toast(`Multiplayer: sending image “${l.name}” (${mb} MB)`);
+      }
+      // bitmap not decoded yet (fresh project load) — roll back so the next tick retries
+      else MP._imgSig.delete(l.id);
     }).catch(() => MP._imgSig.delete(l.id));
   }
 }
 
 /* downscale a layer bitmap so its detail is at most opts.maxPxPerMm.
-   A layer drawn at l.scale has pxPerMm/l.scale image pixels per board mm. */
+   A layer drawn at l.scale has pxPerMm/l.scale image pixels per board mm.
+   Even when the image is already below the cap, big or non-JPEG bytes are
+   re-encoded: on an uncalibrated board (pxPerMm 10, scale 1) f is 1 and the
+   old "send as-is" path shipped the raw multi-MB camera file — minutes of
+   silent transfer that looked like the share simply not working. */
 async function mpShrinkImage(l){
   if (!l.img || !l.img.width) return null;
+  // l.img always holds the LOGICAL pixel size (downscaled stand-ins are stretched
+  // back on load/receive), which is what the layer's scale/warp math assumes
+  const lw = l.img.width, lh = l.img.height;
   const worldScale = l.scale || 1;
-  const f = MP.opts.maxPxPerMm * worldScale / (State.pxPerMm || 10);
-  if (f >= 1) return l.dataURL;   // already at or below the cap — send as-is
-  const w = Math.max(1, Math.round(l.img.width * f));
-  const h = Math.max(1, Math.round(l.img.height * f));
+  const f = Math.min(1, MP.opts.maxPxPerMm * worldScale / (State.pxPerMm || 10));
+  if (f >= 1 && l.dataURL.length < 600000 && /^data:image\/jpe?g/i.test(l.dataURL))
+    return { data: l.dataURL, w: lw, h: lh };   // small JPEG already under the cap — send as-is
+  const w = Math.max(1, Math.round(lw * f));
+  const h = Math.max(1, Math.round(lh * f));
   const cv = document.createElement("canvas");
   cv.width = w; cv.height = h;
   cv.getContext("2d").drawImage(l.img, 0, 0, w, h);
-  return cv.toDataURL("image/jpeg", 0.82);
+  return { data: cv.toDataURL("image/jpeg", 0.82), w: lw, h: lh };
 }
 
-function mpApplyImage(layerId, data){
+function mpApplyImage(layerId, data, w, h){
+  if (!data) return;   // empty payload — an empty img.src would load the page URL
   const l = getLayer(layerId);
-  if (!l){ MP._pendingImgs.set(layerId, data); return; }
+  if (!l){ MP._pendingImgs.set(layerId, { data, w, h }); return; }
   if (l.url) return;   // hosted layer loads from its link — ignore stale bytes
   l.dataURL = data;
   // remember what we now hold, so our own image-sync doesn't bounce it back
-  MP._imgSig.set(layerId, data.length + "@" + MP.opts.maxPxPerMm);
+  MP._imgSig.set(layerId, mpImgSig(data));
   const img = new Image();
   img.onload = () => {
-    l.img = img;
-    l.tiles = (typeof ImageTiles !== "undefined" && ImageTiles.shouldTile(img)) ? ImageTiles.build(img) : null;
+    // stretch the downscaled stand-in back to its logical pixel size — the sender's
+    // scale/tx/ty (synced via the core) assume the ORIGINAL dimensions, so applying
+    // the small bitmap raw drew the image at completely the wrong size
+    const bmp = (typeof fitBitmapTo === "function" && w && h) ? fitBitmapTo(img, w, h) : img;
+    l.img = bmp;
+    // persist the logical size too, so saving this board keeps the stand-in loadable
+    if (w && h){ l.imgW = w; l.imgH = h; }
+    l.tiles = (typeof ImageTiles !== "undefined" && ImageTiles.shouldTile(bmp)) ? ImageTiles.build(bmp) : null;
     if (typeof markImagesDirty === "function") markImagesDirty();
     UI.refreshLayerList();
     requestRender();
+    if (typeof UI !== "undefined") UI.toast(`Multiplayer: received image “${l.name || layerId}”`);
+  };
+  img.onerror = () => {   // corrupt payload — don't keep bytes we can't decode
+    l.dataURL = "";
+    MP._imgSig.delete(layerId);
   };
   img.src = data;
 }
@@ -455,17 +512,22 @@ function mpCursorMsg(m){
   let c = MP.cursors.get(m.from);
   if (!c){ c = { el: null }; MP.cursors.set(m.from, c); }
   c.x = m.x; c.y = m.y; c.name = m.name; c.color = m.color;
+  c.sch = !!m.sch;   // coords are schematic mm (sender was in the schematic editor)
   c.leave = !!m.leave; c.ts = Date.now();
   mpLayoutCursors();
 }
 
-function mpCursorContainer(){
-  let el = document.getElementById("mp-cursors");
+/* one overlay per editor: board cursors live in #canvas-wrap, schematic cursors in
+   #sch-canvas-wrap — a peer's pointer shows on whichever sheet THEY are working on,
+   visible to us only while we look at the same tab (the spaces don't map onto each other) */
+function mpCursorContainer(sch){
+  const id = sch ? "mp-cursors-sch" : "mp-cursors";
+  let el = document.getElementById(id);
   if (!el){
-    el = document.createElement("div");
-    el.id = "mp-cursors";
-    const wrap = document.getElementById("canvas-wrap");
+    const wrap = document.getElementById(sch ? "sch-canvas-wrap" : "canvas-wrap");
     if (!wrap) return null;
+    el = document.createElement("div");
+    el.id = id;
     wrap.appendChild(el);
   }
   return el;
@@ -484,21 +546,24 @@ function mpLayoutCursors(){
   setTimeout(run, 120);
 }
 function mpLayoutCursorsNow(){
-    const cont = mpCursorContainer();
-    if (!cont) return;
+    const tab = (typeof EditorTabs !== "undefined") ? EditorTabs.current : "visual";
     const now = Date.now();
     for (const [id, c] of MP.cursors){
-      const stale = c.leave || (now - c.ts > 8000);
+      // hidden when gone-stale AND when we're not looking at the sheet the peer is on
+      const wrongTab = c.sch ? tab !== "schematic" : tab !== "visual";
+      const stale = c.leave || (now - c.ts > 8000) || wrongTab;
       if (!c.el){
         if (stale) continue;
         c.el = document.createElement("div");
         c.el.className = "mp-cursor";
         c.el.innerHTML = '<svg width="18" height="18" viewBox="0 0 18 18"><path d="M2 1 L16 8.5 L9.2 10.2 L6 17 Z" fill="currentColor" stroke="#000" stroke-width="1"/></svg><span class="mp-name"></span>';
-        cont.appendChild(c.el);
       }
+      const cont = mpCursorContainer(c.sch);
+      if (!cont){ continue; }
+      if (c.el.parentNode !== cont) cont.appendChild(c.el);
       c.el.style.display = stale ? "none" : "";
       if (stale) continue;
-      const p = worldToScreen(c.x, c.y);
+      const p = c.sch ? { x: schX2S(c.x), y: schY2S(c.y) } : worldToScreen(c.x, c.y);
       c.el.style.transform = `translate(${Math.round(p.x)}px,${Math.round(p.y)}px)`;
       c.el.style.color = c.color || "#4dd2ff";
       const nameEl = c.el.querySelector(".mp-name");
@@ -509,20 +574,38 @@ function mpLayoutCursorsNow(){
 
 function mpWireCursorSend(){
   const canvas = document.getElementById("canvas");
-  if (!canvas) return;
   let last = 0;
-  canvas.addEventListener("pointermove", () => {
-    if (!mpConnected()) return;
+  const throttled = () => {
+    if (!mpConnected()) return false;
     const now = performance.now();
-    if (now - last < 45) return;
+    if (now - last < 45) return false;
     last = now;
-    const w = (typeof Tools !== "undefined" && Tools.cursor) ? Tools.cursor : null;
-    if (!w) return;
-    mpBroadcast({ t: "cur", from: MP.id, x: w.x, y: w.y, name: MP.name, color: MP.color });
-  });
-  canvas.addEventListener("pointerleave", () => {
+    return true;
+  };
+  const sendLeave = () => {
     if (mpConnected()) mpBroadcast({ t: "cur", from: MP.id, leave: true, name: MP.name, color: MP.color });
-  });
+  };
+  if (canvas){
+    canvas.addEventListener("pointermove", () => {
+      if (!throttled()) return;
+      const w = (typeof Tools !== "undefined" && Tools.cursor) ? Tools.cursor : null;
+      if (!w) return;
+      mpBroadcast({ t: "cur", from: MP.id, x: w.x, y: w.y, name: MP.name, color: MP.color });
+    });
+    canvas.addEventListener("pointerleave", sendLeave);
+  }
+  // schematic editor cursor — same channel, sch:true marks the coords as schematic mm
+  const schCv = document.getElementById("sch-canvas");
+  if (schCv && typeof schS2X === "function"){
+    schCv.addEventListener("pointermove", (e) => {
+      if (!throttled()) return;
+      const r = schCv.getBoundingClientRect();
+      mpBroadcast({ t: "cur", from: MP.id, sch: true,
+        x: schS2X(e.clientX - r.left), y: schS2Y(e.clientY - r.top),
+        name: MP.name, color: MP.color });
+    });
+    schCv.addEventListener("pointerleave", sendLeave);
+  }
 }
 
 /* ---------------- dialog / UI ---------------- */
@@ -587,7 +670,11 @@ function mpWireDialog(){
   $id("mp-imgshare").addEventListener("change", e => {
     MP.opts.sendImages = e.target.checked; mpSavePrefs();
     MP._imgSig.clear();                      // (re)send everything under the new setting
-    if (MP.opts.sendImages && mpConnected()) mpSyncImages();
+    if (MP.opts.sendImages && mpConnected()){
+      mpSyncImages();
+      // also ask the others to re-offer theirs — "share images" reads as two-way
+      mpBroadcast({ t: "imgreq", from: MP.id });
+    }
   });
   $id("mp-imgres").addEventListener("change", e => {
     MP.opts.maxPxPerMm = Math.max(0.5, parseFloat(e.target.value) || 10);
@@ -627,7 +714,8 @@ function mpWireDialog(){
 function mpInjectStyle(){
   const st = document.createElement("style");
   st.textContent = `
-#mp-cursors{position:absolute;inset:0;overflow:hidden;pointer-events:none;z-index:6}
+#mp-cursors,#mp-cursors-sch{position:absolute;inset:0;overflow:hidden;pointer-events:none;z-index:6}
+#sch-canvas-wrap{position:relative}
 .mp-cursor{position:absolute;left:0;top:0;will-change:transform}
 .mp-cursor .mp-name{position:absolute;left:12px;top:14px;color:#111;font:11px/1.5 sans-serif;
   padding:0 5px;border-radius:4px;white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,.5)}
@@ -655,5 +743,21 @@ window.addEventListener("load", () => {
   // any re-render (pan/zoom included) repositions the remote cursors
   const origRR = window.requestRender;
   window.requestRender = function(...a){ origRR.apply(this, a); if (MP.cursors.size) mpLayoutCursors(); };
+  // …and the same for the schematic editor (its pan/zoom goes through Sch.render)
+  if (typeof Sch !== "undefined" && Sch.render){
+    const origSR = Sch.render;
+    Sch.render = function(...a){ const r = origSR.apply(this, a); if (MP.cursors.size) mpLayoutCursors(); return r; };
+  }
+  // opening a project mid-session: a reopened board can reuse the LAYER IDS the
+  // signature cache already holds, so image sync silently skipped every layer —
+  // forget what was sent and let the next tick re-offer the new project's images
+  if (typeof window.loadProject === "function"){
+    const origLoad = window.loadProject;
+    window.loadProject = function(...a){
+      MP._imgSig.clear();
+      MP._pendingImgs.clear();
+      return origLoad.apply(this, a);
+    };
+  }
   window.addEventListener("beforeunload", () => { if (mpConnected()) mpBroadcast({ t: "bye", from: MP.id }); });
 });
