@@ -18,6 +18,8 @@ No building needed, no CDN, no server-side code. All local in your browser.
 - **Locally:** Extract and just open `index.html` in any modern browser, no server needed.
 - **On a web host:** just upload the folder to any static host (nginx, GitHub Pages, S3, …).
 
+- **Chromium based browsers** cant use the OPFS feature if just the index.html was opened directly, due to a stupid config that doesnt allow OPFS on file:// urls. use a webserver (python etc.) for these kind of features.
+
 Your session **autosaves to the browser** (IndexedDB, images included) - F5 or
 closing the tab loses nothing; "New" clears it. Use Save/Open for files you
 want to keep or move between machines.
