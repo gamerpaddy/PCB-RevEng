@@ -496,6 +496,12 @@ function mpApplyImage(layerId, data, w, h){
   const l = getLayer(layerId);
   if (!l){ MP._pendingImgs.set(layerId, { data, w, h }); return; }
   if (l.url) return;   // hosted layer loads from its link — ignore stale bytes
+  // NEVER downgrade a locally held ORIGINAL with a peer's recompressed copy: shared
+  // images are downscaled stand-ins (marked by imgW), and on session start / imgreq
+  // both sides re-offer, so the host got its own image bounced back at share quality —
+  // and autosave then baked the loss into the savegame. Originals stay authoritative;
+  // only layers we never had bytes for (or already hold as a stand-in) accept updates.
+  if (l.img && l.dataURL && !l.imgW) return;
   l.dataURL = data;
   // remember what we now hold, so our own image-sync doesn't bounce it back
   MP._imgSig.set(layerId, mpImgSig(data));
