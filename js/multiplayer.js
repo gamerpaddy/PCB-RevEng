@@ -330,6 +330,7 @@ function mpOnMsg(peer, raw){
       if (!m.text) break;
       if (MP.isHost) mpBroadcast(m, peer);
       mpChatLine(m.name || peer.name, m.color || peer.color, m.text);
+      mpChatPopup(m.name || peer.name, m.color || peer.color, m.text);
       break;
     case "rights":
       // only the host distributes permissions — a guest can't grant itself anything
@@ -1320,6 +1321,34 @@ function mpChatLine(name, color, text){
   log.scrollTop = log.scrollHeight;
 }
 
+/* floating notification for an incoming message — the chat panel only lives on the
+   visual tab, so on any other tab pop the message up top-right for 3 s */
+function mpChatPopup(name, color, text){
+  if (typeof EditorTabs !== "undefined" && EditorTabs.current === "visual") return;
+  let stack = document.getElementById("mp-chat-popups");
+  if (!stack){
+    stack = document.createElement("div");
+    stack.id = "mp-chat-popups";
+    document.body.appendChild(stack);
+  }
+  const pop = document.createElement("div");
+  pop.className = "mp-chat-pop";
+  const who = document.createElement("span");
+  who.className = "who";
+  who.style.color = mpCleanColor(color);
+  who.textContent = mpCleanName(name) || "peer";   // textContent — no markup can run
+  const txt = document.createElement("span");
+  txt.className = "txt";
+  txt.textContent = mpCleanText(text);
+  pop.appendChild(who); pop.appendChild(txt);
+  stack.appendChild(pop);
+  while (stack.childNodes.length > 4) stack.removeChild(stack.firstChild);
+  setTimeout(() => {
+    pop.classList.add("out");
+    setTimeout(() => pop.remove(), 350);
+  }, 3000);
+}
+
 function mpSendChat(){
   const inp = document.getElementById("mp-chat-in");
   if (!inp) return;
@@ -1451,6 +1480,15 @@ function mpInjectStyle(){
 #mp-chat-in{flex:1;min-width:0;background:#1c222b;border:1px solid #2e3742;border-radius:5px;
   color:#d7dde5;font-size:12px;padding:3px 6px}
 #mp-chat-row button{flex:none;padding:0 9px}
+#mp-chat-popups{position:fixed;top:44px;right:12px;z-index:2000;display:flex;
+  flex-direction:column;gap:6px;align-items:flex-end;pointer-events:none}
+.mp-chat-pop{display:flex;gap:6px;align-items:baseline;max-width:320px;
+  background:#1c222bee;border:1px solid #2e3742;border-radius:7px;padding:6px 10px;
+  font-size:12px;box-shadow:0 3px 12px rgba(0,0,0,.45);opacity:1;
+  transition:opacity .3s,transform .3s}
+.mp-chat-pop .who{font-weight:600;flex:none;max-width:110px;overflow:hidden;text-overflow:ellipsis}
+.mp-chat-pop .txt{word-break:break-word;white-space:pre-wrap;color:#cfd6de}
+.mp-chat-pop.out{opacity:0;transform:translateX(12px)}
 #mp-dialog textarea{width:100%;box-sizing:border-box;height:52px;resize:vertical;
   background:#1c222b;border:1px solid #2e3742;border-radius:5px;color:#d7dde5;font-size:10px}
 #mp-dialog fieldset{border:1px solid #2e3742;border-radius:6px;margin:8px 0;min-width:0}
