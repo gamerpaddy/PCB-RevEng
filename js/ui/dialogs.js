@@ -60,10 +60,12 @@ UI._renderBomTable = () => {
   // flag footprints not present in the KiCad library list (same check as the export warning)
   let badFp = 0;
   groups.forEach(g => { g._badFp = !!g.footprint && !kicadFootprintKnown(g.footprint); if (g._badFp) badFp++; });
-  $("#bom-count").textContent = "(" + groups.length + " lines · " + State.components.length + " parts" +
+  $("#bom-count").textContent = "(" + groups.length + " lines · " + allOf("components").length + " parts" +
     (badFp ? " · ⚠ " + badFp + " footprint" + (badFp>1?"s":"") + " not in KiCad list" : "") + ")";
 
+  const multiPage = State.boards && State.boards.length > 1;
   let h = "<thead><tr><th class='bom-idx' data-colkey='#'>#</th><th class='bom-qty' data-colkey='Qty'>Qty</th><th data-colkey='Value'>Value</th><th data-colkey='Part'>Part</th><th data-colkey='Footprint'>Footprint</th><th data-colkey='References'>References</th>";
+  if (multiPage) h += "<th data-colkey='Pages'>Pages</th>";
   cols.forEach((c, ci) => { h += `<th data-colkey="col:${escAttr(c)}">${escAttr(c)} <button class="bom-delcol" data-ci="${ci}" title="Remove column">×</button></th>`; });
   h += "</tr></thead><tbody>";
   groups.forEach((g, gi) => {
@@ -77,6 +79,7 @@ UI._renderBomTable = () => {
       + `<td><input class="bom-cell" data-f="part" value="${escAttr(g.part)}"></td>`
       + `<td><input class="${fpCls}" data-f="footprint" value="${escAttr(g.footprint)}"${fpTitle}></td>`
       + `<td><input class="bom-cell bom-refs" data-f="refs" value="${escAttr(refs)}" title="Rename the actual designators on the board — comma-separated, one per part (${g.refs.length})"></td>`;
+    if (multiPage) h += `<td class="bom-pages" style="color:#8b96a5;font-size:11px;white-space:nowrap">${escAttr((g.pages || []).join(", "))}</td>`;
     cols.forEach(col => { h += `<td><input class="bom-cell" data-f="col" data-col="${escAttr(col)}" value="${escAttr(bomFieldCommon(g, col))}"></td>`; });
     h += "</tr>";
   });
@@ -172,7 +175,7 @@ UI._applyBomRefs = (g, raw) => {
     return revert("Row can't be emptied here — paste the refs into the row they should move TO");
   const lower = tokens.map(t => t.toLowerCase());
   if (new Set(lower).size !== lower.length) return revert("Duplicate references in the list");
-  const byRef = new Map(State.components.map(c => [(c.ref || "").trim().toLowerCase(), c]));
+  const byRef = new Map(allOf("components").map(c => [(c.ref || "").trim().toLowerCase(), c]));
   const inGroup = new Set(g.comps);
   const kept = new Set(), movers = [], newNames = [];
   for (const t of tokens){

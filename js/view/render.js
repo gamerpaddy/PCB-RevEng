@@ -438,6 +438,7 @@ function drawWorld(ctx){
 
   // sticky-note markers (screen space, constant size, drawn after the world transform)
   drawNotes(ctx);
+  drawXlinkArrows(ctx);   // off-page connector markers (multi-PCB pages)
   drawMeasureLabel(ctx);
   drawResizeLabel(ctx);
   drawPadEditOverlay(ctx);

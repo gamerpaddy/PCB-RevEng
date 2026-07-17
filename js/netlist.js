@@ -65,7 +65,7 @@ function _toCSV(rows){
 
 function exportCSV(){
   const rows = [["ref","value","part","footprint","pin","pin_name","net"]];
-  for (const c of State.components){
+  for (const c of allOf("components")){   // parts list spans every PCB page
     const fp = compFootprint(c);
     for (const p of c.pins){
       const net = p.netId ? (getNet(p.netId)?.name || "") : "";
@@ -91,7 +91,7 @@ function _refCmp(a, b){
 
 function bomGroups(){
   const groups = new Map(); // key -> {value, part, footprint, comps:[], refs:[]}
-  for (const c of State.components){
+  for (const c of allOf("components")){   // the BOM covers every PCB page
     const fp = compFootprint(c);
     const footprint = c.kicad || fp.kicad || fp.label || "";
     const value = (c.value || "").trim();
@@ -101,7 +101,15 @@ function bomGroups(){
     groups.get(key).comps.push(c);
   }
   const out = [...groups.values()];
-  out.forEach(g => { g.comps.sort((a,b) => _refCmp(a.ref, b.ref)); g.refs = g.comps.map(c => c.ref); });
+  // which PCB page each part sits on (multi-page projects)
+  const pageOf = new Map();
+  if (State.boards && State.boards.length > 1)
+    for (const b of State.boards) for (const c of b.components) pageOf.set(c.id, b.name);
+  out.forEach(g => {
+    g.comps.sort((a,b) => _refCmp(a.ref, b.ref));
+    g.refs = g.comps.map(c => c.ref);
+    g.pages = [...new Set(g.comps.map(c => pageOf.get(c.id)).filter(Boolean))];
+  });
   out.sort((a, b) => _refCmp(a.refs[0], b.refs[0]));     // cluster lines by designator
   return out;
 }
@@ -118,9 +126,11 @@ function bomFieldCommon(g, col){
 
 function exportBOM(){
   const cols = State.bomColumns || [];
-  const rows = [["Item","Qty","Value","Part","Footprint","References", ...cols]];
+  const multi = State.boards && State.boards.length > 1;
+  const rows = [["Item","Qty","Value","Part","Footprint","References", ...(multi ? ["Pages"] : []), ...cols]];
   bomGroups().forEach((g, i) => rows.push([
     i+1, g.refs.length, g.value, g.part, g.footprint, g.refs.join(", "),
+    ...(multi ? [(g.pages || []).join(", ")] : []),
     ...cols.map(col => bomFieldCommon(g, col)),
   ]));
   return _toCSV(rows);

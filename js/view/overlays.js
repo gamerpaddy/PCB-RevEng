@@ -231,3 +231,54 @@ function wrapText(ctx, text, maxW){
   }
   return out;
 }
+
+/* ---------- off-page link arrows (multi-PCB pages) ----------
+   Every part with an off-page link gets a small arrow + destination page name
+   floating above it, one row per link. Screen-space, constant size, drawn after
+   the world transform (like the note markers). */
+function drawXlinkArrows(ctx){
+  View._xlinkHits = [];   // clickable marker rects, refreshed every render
+  if (typeof Boards === "undefined" || !State.xlinks || !State.xlinks.length) return;
+  ctx.save();
+  ctx.font = "bold 10px sans-serif";
+  ctx.textAlign = "left";
+  for (const c of State.components){
+    const links = Boards.compLinks(c);
+    if (!links.length) continue;
+    const r = compRadius(c) * View.zoom;
+    if (r < 7) continue;   // zoomed out far enough that the part is a dot — hide the tag
+    const p = worldToScreen(c.x, c.y);
+    if (p.x < -80 || p.y < -40 || p.x > View.width + 80 || p.y > View.height + 40) continue;
+    let i = 0;
+    for (const l of links){
+      const o = Boards.linkOther(l, c);
+      if (!o) continue;
+      const y = p.y - r - 8 - i * 14;
+      const x = p.x - r * 0.4;
+      const label = Boards.boardNameOf(o) + " · " + o.ref;
+      // arrowhead pointing away from the part, then the destination text
+      ctx.fillStyle = "#b78aff";
+      ctx.strokeStyle = "rgba(0,0,0,.75)";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(x + 8, y);
+      ctx.lineTo(x, y - 4);
+      ctx.lineTo(x, y + 4);
+      ctx.closePath();
+      ctx.stroke(); ctx.fill();
+      ctx.strokeText(label, x + 12, y + 3.5);
+      ctx.fillText(label, x + 12, y + 3.5);
+      const w = ctx.measureText(label).width;
+      View._xlinkHits.push({ x: x - 2, y: y - 8, w: w + 18, h: 16, target: o });
+      i++;
+    }
+  }
+  ctx.restore();
+}
+
+/* the marker under a screen point (arrow + label are click-to-jump) */
+function xlinkHitAt(sx, sy){
+  for (const h of (View._xlinkHits || []))
+    if (sx >= h.x && sx <= h.x + h.w && sy >= h.y && sy <= h.y + h.h) return h;
+  return null;
+}

@@ -120,6 +120,12 @@ function onPointerDown(e){
   }
   if (e.button === 2) return; // context menu handled separately
 
+  // off-page link marker (arrow + page tag above a linked connector) — click = jump
+  if (typeof xlinkHitAt === "function"){
+    const xh = xlinkHitAt(pt.x, pt.y);
+    if (xh && typeof Boards !== "undefined"){ Boards.jumpTo(xh.target); return; }
+  }
+
   // freestyle pin placement overrides the active tool
   if (Tools.addPinFor){
     pushUndo();

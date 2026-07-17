@@ -1,29 +1,29 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PCB RevEng - Reverse Engineering Workbench</title>
 
-<link rel="stylesheet" href="css/style.css?v=86">
+<link rel="stylesheet" href="css/style.css?v=87">
 
 </head>
 <body>
 <div id="loading-overlay">
   <div class="ld-box">
     <div class="ld-spin"></div>
-    <div id="loading-text">Wait, loading saved sessionâ€¦</div>
+    <div id="loading-text">Wait, loading saved session…</div>
   </div>
 </div>
 <div id="app">
 
   <!-- ======= EDITOR TABS (Visual / Schematic / BOM) ======= -->
   <div id="editor-tabs">
-    <button type="button" id="tab-visual" class="ed-tab active" title="Board editor â€” layers, traces, components">Visual editor</button>
-    <button type="button" id="tab-schematic" class="ed-tab" title="Schematic editor â€” arrange the exported schematic">Schematic</button>
-    <button type="button" id="tab-bom" class="ed-tab" title="BOM editor â€” edit values, designators, footprints &amp; custom columns">BOM</button>
-    <button type="button" id="tab-nets" class="ed-tab" title="Nets â€” every net's pads, vias &amp; traces; edit net names, colours, protection &amp; pad assignments">Nets</button>
-    <button type="button" id="tab-projects" class="ed-tab" title="Projects â€” save &amp; load boards in browser storage (OPFS) with thumbnails and version history; upload/download .pcbrev.json files">Projects</button>
+    <button type="button" id="tab-visual" class="ed-tab active" title="Board editor — layers, traces, components">Visual editor</button>
+    <button type="button" id="tab-schematic" class="ed-tab" title="Schematic editor — arrange the exported schematic">Schematic</button>
+    <button type="button" id="tab-bom" class="ed-tab" title="BOM editor — edit values, designators, footprints &amp; custom columns">BOM</button>
+    <button type="button" id="tab-nets" class="ed-tab" title="Nets — every net's pads, vias &amp; traces; edit net names, colours, protection &amp; pad assignments">Nets</button>
+    <button type="button" id="tab-projects" class="ed-tab" title="Projects — save &amp; load boards in browser storage (OPFS) with thumbnails and version history; upload/download .pcbrev.json files">Projects</button>
     <span id="active-project" style="display:none"></span>
   </div>
 
@@ -33,7 +33,7 @@
 
     <div class="tb-group">
       <button id="btn-new"        title="New project">New</button>
-      <button id="btn-open"       title="Open project (.pcbrev.json) or import a board â€” EAGLE (.brd) / GENCAD (.cad)  [Ctrl+O]">Open</button>
+      <button id="btn-open"       title="Open project (.pcbrev.json) or import a board — EAGLE (.brd) / GENCAD (.cad)  [Ctrl+O]">Open</button>
       <button id="btn-save"       title="Save project  [Ctrl+S]">Save</button>
       <button id="btn-export"     title="Export netlist / BOM / schematic  [Ctrl+E]">Export</button>
     </div>
@@ -44,7 +44,7 @@
       <button class="tool" data-tool="trace"     title="Draw trace / connect pins  [W]">&#8767;<span>Trace</span></button>
       <button class="tool" data-tool="via"       title="Place via  [V]">&#9673;<span>Via</span></button>
       <button class="tool" data-tool="cut"       title="Cut trace into two nets  [K]">&#9986;<span>Cut</span></button>
-      <button class="tool" data-tool="note"      title="Sticky note â€” click the board to drop an annotation; its text shows on hover so it never obstructs the board">&#128221;<span>Note</span></button>
+      <button class="tool" data-tool="note"      title="Sticky note — click the board to drop an annotation; its text shows on hover so it never obstructs the board">&#128221;<span>Note</span></button>
     </div>
 
     <div class="tb-group" id="tb-view">
@@ -56,20 +56,20 @@
         <option value="inner2">Inner 2</option>
       </select>
       <button id="btn-flip" title="Flip board view (look from the back)  [F]">Flip view</button>
-      <button id="btn-xray" title="X-ray overlay â€” show components &amp; traces from BOTH sides at once. Inactive-side copper is dimmed; if an X-ray image layer exists it is shown too. Drawing stays on the selected side.">X-ray</button>
-      <button id="btn-split" title="Split view  [Y]  â€” Front (left) and Back (right) side by side, sharing one camera. The same board area lines up in both halves so you can correlate features across sides. Draw/select in either half.">Split</button>
-      <button id="btn-ratsnest" title="Ratsnest airwires (click to cycle). Net: minimum-spanning tree over every same-net pad/via across all layers â€” hover/select a net to isolate it. Star: spokes from the selected pad/via to every pad it connects to.">Ratsnest</button>
-      <button id="btn-stack3d" title="3D layer stack â€” exploded pseudo-3D view of all copper layers and their through-hole connections">3D</button>
+      <button id="btn-xray" title="X-ray overlay — show components &amp; traces from BOTH sides at once. Inactive-side copper is dimmed; if an X-ray image layer exists it is shown too. Drawing stays on the selected side.">X-ray</button>
+      <button id="btn-split" title="Split view  [Y]  — Front (left) and Back (right) side by side, sharing one camera. The same board area lines up in both halves so you can correlate features across sides. Draw/select in either half.">Split</button>
+      <button id="btn-ratsnest" title="Ratsnest airwires (click to cycle). Net: minimum-spanning tree over every same-net pad/via across all layers — hover/select a net to isolate it. Star: spokes from the selected pad/via to every pad it connects to.">Ratsnest</button>
+      <button id="btn-stack3d" title="3D layer stack — exploded pseudo-3D view of all copper layers and their through-hole connections">3D</button>
     </div>
 
     <div class="tb-group">
       <button id="btn-undo" title="Undo  [Ctrl+Z]">&#8630;</button>
       <button id="btn-redo" title="Redo  [Ctrl+Y]">&#8631;</button>
-      <button id="btn-history" title="Undo timeline â€” revert single actions selectively">&#128338;</button>
-      <button id="btn-options" title="Options â€” board &amp; display settings">&#9881; Options</button>
+      <button id="btn-history" title="Undo timeline — revert single actions selectively">&#128338;</button>
+      <button id="btn-options" title="Options — board &amp; display settings">&#9881; Options</button>
       <button id="btn-keys" title="Hotkey editor">&#9000;</button>
       <button id="btn-lab" title="Experimental features">&#128300;</button>
-      <button id="btn-mp" title="Multiplayer â€” work on this board together, live over a direct P2P (WebRTC) connection. No account, no server: connect by exchanging two short codes.">&#128101; Live</button>
+      <button id="btn-mp" title="Multiplayer — work on this board together, live over a direct P2P (WebRTC) connection. No account, no server: connect by exchanging two short codes.">&#128101; Live</button>
       <button id="btn-help" title="Help / hotkeys  [?]">?</button>
     </div>
 
@@ -85,22 +85,22 @@
         <span style="display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end">
           <button id="btn-measure" title="Measure a distance on the board  [M]">Measure</button>
           <button id="btn-calibrate" title="Calibrate board scale: drag along a known distance, then enter its real mm length">Calibrate</button>
-          <button id="btn-rotate" title="Rotate the ACTIVE layer: drag the on-screen knob to free-rotate, or drag a line ALONG a feature that should be level (board edge, chip row) to snap the image horizontal/vertical. Non-destructive â€” no pixels are baked. Works on any layer.">Rotate</button>
+          <button id="btn-rotate" title="Rotate the ACTIVE layer: drag the on-screen knob to free-rotate, or drag a line ALONG a feature that should be level (board edge, chip row) to snap the image horizontal/vertical. Non-destructive — no pixels are baked. Works on any layer.">Rotate</button>
           <button id="btn-align" title="4-point align the ACTIVE layer: click 4 reference features, then the same 4 features on this layer (corrects offset, rotation, scale and skew). To just MOVE the image, pick the Align tool [G] and drag.">Align</button>
-          <button id="btn-crop" title="Crop the ACTIVE layer: drag a box around the part to keep â€” trims off the rest (do this after aligning).">Crop</button>
-          <button id="btn-resizexy" title="Resize XY: independently scale the ACTIVE layer's width and height. Drag a horizontal line across a feature of known width and a vertical line across a feature of known height, entering each real dimension. Non-destructive â€” no pixels are baked.">Resize XY</button>
-          <button id="btn-deskew" title="Deskew / straighten the ACTIVE layer: click two lines that should be parallel &amp; axis-aligned (board edges) to remove perspective and rotation. Only the base layer needs this â€” align other layers to it with 4-point Align.">Deskew</button>
+          <button id="btn-crop" title="Crop the ACTIVE layer: drag a box around the part to keep — trims off the rest (do this after aligning).">Crop</button>
+          <button id="btn-resizexy" title="Resize XY: independently scale the ACTIVE layer's width and height. Drag a horizontal line across a feature of known width and a vertical line across a feature of known height, entering each real dimension. Non-destructive — no pixels are baked.">Resize XY</button>
+          <button id="btn-deskew" title="Deskew / straighten the ACTIVE layer: click two lines that should be parallel &amp; axis-aligned (board edges) to remove perspective and rotation. Only the base layer needs this — align other layers to it with 4-point Align.">Deskew</button>
           <button id="btn-add-layer" title="Add image layer (or drag &amp; drop images onto the canvas)">+ Add</button>
-          <button id="btn-add-url" title="Add an image layer from a web URL (loaded live â€” not saved into the project)">+ URL</button>
+          <button id="btn-add-url" title="Add an image layer from a web URL (loaded live — not saved into the project)">+ URL</button>
         </span>
       </div>
       <div id="layer-list"></div>
-      <div class="panel-hint">Drop PCB photos onto the canvas.<br>Keys 1â€¦0 switch the view to that layer. In split view they set the LEFT view, Shift+1â€¦0 the RIGHT.</div>
+      <div class="panel-hint">Drop PCB photos onto the canvas.<br>Keys 1…0 switch the view to that layer. In split view they set the LEFT view, Shift+1…0 the RIGHT.</div>
 
       <div class="panel-title">Nets <span id="net-count"></span>
         <button id="btn-check" title="Check for pads with no net assigned">Check</button>
       </div>
-      <input id="net-search" placeholder="Search netsâ€¦" autocomplete="off"
+      <input id="net-search" placeholder="Search nets…" autocomplete="off"
              style="width:100%;box-sizing:border-box;margin:0 0 6px;padding:4px 7px;background:#1c222b;border:1px solid #2e3742;border-radius:5px;color:#d7dde5;font-size:12px">
       <div id="net-list"></div>
     </aside>
@@ -111,21 +111,21 @@
     <!-- center: canvas -->
     <div id="canvas-wrap">
       <canvas id="canvas"></canvas>
-      <select id="split-layer-left"  class="split-layer-sel" title="Layer shown in the LEFT split view (hotkeys 1â€“9/0)" style="display:none"></select>
-      <select id="split-layer-right" class="split-layer-sel" title="Layer shown in the RIGHT split view (hotkeys Shift+1â€“9/0)" style="display:none"></select>
+      <select id="split-layer-left"  class="split-layer-sel" title="Layer shown in the LEFT split view (hotkeys 1–9/0)" style="display:none"></select>
+      <select id="split-layer-right" class="split-layer-sel" title="Layer shown in the RIGHT split view (hotkeys Shift+1–9/0)" style="display:none"></select>
       <div id="status-bar">
         <span id="status-tool"></span>
         <span id="status-pos"></span>
         <span id="status-zoom"></span>
         <span id="status-pad"></span>
-        <span id="status-hide" title="Hide layers to declutter â€” right-click a box to set a hotkey">
+        <span id="status-hide" title="Hide layers to declutter — right-click a box to set a hotkey">
           <span class="sh-label">Hide:</span>
-          <label id="tgl-hidetraces" title="Hide traces â€” hide every drawn trace (they also become non-selectable)"><input type="checkbox" id="chk-hidetraces">Traces</label>
-          <label id="tgl-hidevias" title="Hide vias â€” hide every via (they also become non-selectable)"><input type="checkbox" id="chk-hidevias">Vias</label>
-          <label id="tgl-hidelabels" title="Hide labels â€” hide component reference designators &amp; values"><input type="checkbox" id="chk-hidelabels">Labels</label>
+          <label id="tgl-hidetraces" title="Hide traces — hide every drawn trace (they also become non-selectable)"><input type="checkbox" id="chk-hidetraces">Traces</label>
+          <label id="tgl-hidevias" title="Hide vias — hide every via (they also become non-selectable)"><input type="checkbox" id="chk-hidevias">Vias</label>
+          <label id="tgl-hidelabels" title="Hide labels — hide component reference designators &amp; values"><input type="checkbox" id="chk-hidelabels">Labels</label>
         </span>
       </div>
-      <div id="drop-hint">Drop front / back / inner layer photos here<br><small>â€¦or use â€œ+ Addâ€ in the Layers panel</small></div>
+      <div id="drop-hint">Drop front / back / inner layer photos here<br><small>…or use “+ Add” in the Layers panel</small></div>
     </div>
 
     <!-- drag handle to resize the inspector -->
@@ -137,8 +137,8 @@
         <div class="panel-title">Session chat</div>
         <div id="mp-chat-log"></div>
         <div id="mp-chat-row">
-          <input id="mp-chat-in" maxlength="255" placeholder="Messageâ€¦ (Enter to send)" autocomplete="off">
-          <button id="mp-chat-send" title="Send">âž¤</button>
+          <input id="mp-chat-in" maxlength="255" placeholder="Message… (Enter to send)" autocomplete="off">
+          <button id="mp-chat-send" title="Send">➤</button>
         </div>
       </div>
       <div class="panel-title">Inspector</div>
@@ -150,20 +150,20 @@
   <div id="schematic-pane" style="display:none">
     <div id="sch-toolbar">
       <label class="tb-label" for="sch-arrange">Arrange</label>
-      <select id="sch-arrange" title="Auto-arrangement to apply â€” your manual positions are kept until you press Apply">
-        <option value="type" selected>Sorted â€” group part types</option>
+      <select id="sch-arrange" title="Auto-arrangement to apply — your manual positions are kept until you press Apply">
+        <option value="type" selected>Sorted — group part types</option>
         <option value="name">Sorted by name</option>
-        <option value="pcb">Same as PCB â€” keep board positions</option>
-        <option value="closest">Closest â€” group by net distance</option>
-        <option value="opt">Optimized â€” nets closest, no overlap</option>
-        <option value="ai">ðŸ¤– AI (experimental â€” enable in ðŸ”¬)</option>
+        <option value="pcb">Same as PCB — keep board positions</option>
+        <option value="closest">Closest — group by net distance</option>
+        <option value="opt">Optimized — nets closest, no overlap</option>
+        <option value="ai">🤖 AI (experimental — enable in 🔬)</option>
       </select>
       <button id="sch-arrange-go" title="Re-place every symbol with the chosen auto-arrangement (undoable)">Apply</button>
       <button id="sch-fit" title="Zoom to fit all symbols">Fit</button>
-      <button id="sch-wire" title="Draw schematic wires  [W] â€” start on a pin, click corners (snapped to 90Â°), end on a pin of the same net. Green = net fully wired, red = dangling / incomplete. R flips H/V-first while drawing. Esc exits.">Wire</button>
+      <button id="sch-wire" title="Draw schematic wires  [W] — start on a pin, click corners (snapped to 90°), end on a pin of the same net. Green = net fully wired, red = dangling / incomplete. R flips H/V-first while drawing. Esc exits.">Wire</button>
       <label class="sch-chk" title="Show every connected pin's net name sticking out of the pin (faint). N pins a movable label to the hovered pin instead."><input type="checkbox" id="sch-autolabels" checked> Net labels</label>
-      <button id="sch-export" title="Export the schematic (.kicad_sch) using this arrangement">Exportâ€¦</button>
-      <span class="panel-hint" style="margin-left:12px">Drag symbols (drag empty = box select) Â· R rotate Â· X/Y flip Â· W wires Â· N net label Â· Shift-click = show on board Â· F1â€“F3 switch tabs. Saved with the project (â€œManualâ€ in the export dialog).</span>
+      <button id="sch-export" title="Export the schematic (.kicad_sch) using this arrangement">Export…</button>
+      <span class="panel-hint" style="margin-left:12px">Drag symbols (drag empty = box select) · R rotate · X/Y flip · W wires · N net label · Shift-click = show on board · F1–F3 switch tabs. Saved with the project (“Manual” in the export dialog).</span>
     </div>
     <div id="sch-canvas-wrap"><canvas id="sch-canvas"></canvas></div>
   </div>
@@ -176,7 +176,7 @@
       <button id="bom-addcol">+ Add column</button>
       <button id="bom-export">Download CSV</button>
     </div>
-    <div class="panel-hint" style="margin:6px 0">Parts are grouped by value Â· part Â· footprint. Editing Value/Part/Footprint updates every part on that row. References cell: rename designators, or paste a ref from another row to MOVE that part into this one (it adopts the row's value/part/footprint). Drag a header's right edge to resize a column.</div>
+    <div class="panel-hint" style="margin:6px 0">Parts are grouped by value · part · footprint. Editing Value/Part/Footprint updates every part on that row. References cell: rename designators, or paste a ref from another row to MOVE that part into this one (it adopts the row's value/part/footprint). Drag a header's right edge to resize a column.</div>
     <div id="bom-table-wrap"><table id="bom-table" class="bom-table"></table></div>
   </div>
 
@@ -184,12 +184,12 @@
   <div id="nets-pane" style="display:none">
     <div id="nets-toolbar">
       <span class="dlg-title" style="margin:0">Nets <span id="nets-count" class="dlg-sub"></span></span>
-      <input id="nets-search" placeholder="Filter netsâ€¦">
+      <input id="nets-search" placeholder="Filter nets…">
       <span style="flex:1"></span>
       <button id="nets-expand">Expand all</button>
       <button id="nets-collapse">Collapse all</button>
     </div>
-    <div class="panel-hint" style="margin:6px 0">Every net with the pads, vias and traces on it. Edit the name, colour and ðŸ›¡ protection inline; â–¸ opens a net to see its connections. A pad's Net field moves just that pad â€” its schematic wire and the traces touching it wired it to the old net, so they're removed with the change (you'll be asked first). Focus jumps to it on the board.</div>
+    <div class="panel-hint" style="margin:6px 0">Every net with the pads, vias and traces on it. Edit the name, colour and 🛡 protection inline; ▸ opens a net to see its connections. A pad's Net field moves just that pad — its schematic wire and the traces touching it wired it to the old net, so they're removed with the change (you'll be asked first). Focus jumps to it on the board.</div>
     <div id="nets-empty" class="panel-hint" style="display:none"></div>
     <div id="nets-table-wrap"><table id="nets-table" class="nets-table"></table></div>
   </div>
@@ -198,20 +198,20 @@
   <div id="projects-pane" style="display:none">
     <div id="projects-toolbar">
       <span class="dlg-title" style="margin:0">Projects <span id="projects-count" class="dlg-sub"></span></span>
-      <button id="proj-saveas" title="Store the board you are editing as a new project in browser storage">ï¼‹ Save current project as new project</button>
-      <button id="proj-upload" title="Add .pcbrev.json project files to browser storage (the current board is untouched)">â¬† Upload fileâ€¦</button>
-      <button id="proj-paste-import" title="Import a shared board from a link (dpaste.com share links or any URL serving the project JSON) â€” pastebin.com works via copy &amp; paste">ðŸŒ Import from URLâ€¦</button>
+      <button id="proj-saveas" title="Store the board you are editing as a new project in browser storage">＋ Save current project as new project</button>
+      <button id="proj-upload" title="Add .pcbrev.json project files to browser storage (the current board is untouched)">⬆ Upload file…</button>
+      <button id="proj-paste-import" title="Import a shared board from a link (dpaste.com share links or any URL serving the project JSON) — pastebin.com works via copy &amp; paste">🌐 Import from URL…</button>
       <input type="file" id="file-proj-upload" accept=".json,application/json" multiple hidden>
       <span style="flex:1"></span>
       <span id="proj-storage" class="dlg-sub"></span>
     </div>
     <div id="proj-file-warning" style="display:none;margin:8px 0;padding:12px 16px;border:2px solid #ff4d4d;border-radius:8px;background:#3a1216;color:#ff9090;font-size:15px;font-weight:600;line-height:1.5">
-      âš ï¸ Projects can NOT be saved here! Chromium-based browsers (Chrome, Edge, Brave, Opera, â€¦) block
+      ⚠️ Projects can NOT be saved here! Chromium-based browsers (Chrome, Edge, Brave, Opera, …) block
       browser storage (OPFS) when this app is opened straight from disk (<code>file://</code>).
-      Host the folder over http(s) instead â€” e.g. <code>python -m http.server</code> or any small local
-      web server â€” or open it in Firefox. Downloading/uploading .pcbrev.json files still works.
+      Host the folder over http(s) instead — e.g. <code>python -m http.server</code> or any small local
+      web server — or open it in Firefox. Downloading/uploading .pcbrev.json files still works.
     </div>
-    <div class="panel-hint" style="margin:6px 0">Projects live in this browser's private site storage (OPFS) â€” they survive reloads but stay on this machine, so use â¬‡ File to download a .pcbrev.json backup you can share or re-upload (drag &amp; drop files anywhere on this tab). The board you are editing autosaves into its <b>current</b> project (or into the special Autosave slot while it isn't saved as one); ðŸ’¾ Save stores it into a project by hand, ï¼‹ Version freezes it under a label in the project's history so you can go back to it later.</div>
+    <div class="panel-hint" style="margin:6px 0">Projects live in this browser's private site storage (OPFS) — they survive reloads but stay on this machine, so use ⬇ File to download a .pcbrev.json backup you can share or re-upload (drag &amp; drop files anywhere on this tab). The board you are editing autosaves into its <b>current</b> project (or into the special Autosave slot while it isn't saved as one); 💾 Save stores it into a project by hand, ＋ Version freezes it under a label in the project's history so you can go back to it later.</div>
     <div id="projects-empty" class="panel-hint" style="display:none"></div>
     <div id="projects-grid"></div>
   </div>
@@ -232,10 +232,10 @@
   <dialog id="paste-import-dialog">
     <div class="dlg-title">Import a board from a URL</div>
     <label>URL
-      <input id="paste-import-url" placeholder="https://dpaste.com/â€¦ or any URL serving the project JSON" style="min-width:340px">
+      <input id="paste-import-url" placeholder="https://dpaste.com/… or any URL serving the project JSON" style="min-width:340px">
     </label>
-    <div class="panel-hint" style="max-width:420px;margin:6px 0">ðŸŒ Share links (dpaste.com) and other direct-download URLs are fetched directly. pastebin.com blocks browser reads â€” open the paste, copy its <b>RAW</b> text and paste it here instead:</div>
-    <textarea id="paste-import-text" rows="6" placeholder='â€¦or paste the project JSON here ({"app":"pcb-reveng",â€¦})' style="width:100%;min-width:340px;resize:vertical"></textarea>
+    <div class="panel-hint" style="max-width:420px;margin:6px 0">🌐 Share links (dpaste.com) and other direct-download URLs are fetched directly. pastebin.com blocks browser reads — open the paste, copy its <b>RAW</b> text and paste it here instead:</div>
+    <textarea id="paste-import-text" rows="6" placeholder='…or paste the project JSON here ({"app":"pcb-reveng",…})' style="width:100%;min-width:340px;resize:vertical"></textarea>
     <div id="paste-import-status" class="panel-hint" style="max-width:420px;min-height:16px;margin:6px 0"></div>
     <div class="dlg-buttons">
       <button id="paste-import-cancel">Cancel</button>
@@ -259,7 +259,7 @@
         <label>Value
           <span style="display:flex;gap:4px">
             <input id="fp-value" placeholder="e.g. 10k / ATmega328" style="flex:1;min-width:0">
-            <button id="fp-resolve" title="Value resolver â€” SMD codes &amp; color bands" type="button">&#937;</button>
+            <button id="fp-resolve" title="Value resolver — SMD codes &amp; color bands" type="button">&#937;</button>
           </span></label>
         <label>Part name <input id="fp-part" placeholder="e.g. LM358"></label>
         <label>KiCad footprint <input id="fp-kicad" placeholder="lib:name"></label>
@@ -276,24 +276,24 @@
   <dialog id="qa-dialog">
     <div class="dlg-title">Quick add component</div>
     <div class="qa-wrap">
-      <div id="qa-hist" class="qa-side" title="Your last quick-adds â€” click to reuse">
+      <div id="qa-hist" class="qa-side" title="Your last quick-adds — click to reuse">
         <div class="qa-side-h">History <button id="qa-hist-clear" type="button" class="qa-side-clear" title="Clear the quick-add history">clear</button></div>
         <div id="qa-hist-list" class="qa-side-list"></div>
       </div>
       <div class="qa-body">
         <canvas id="qa-preview" width="240" height="180"></canvas>
-        <input id="qa-input" placeholder="describe the part â€” see the Examples list â†’" autocomplete="off">
+        <input id="qa-input" placeholder="describe the part — see the Examples list →" autocomplete="off">
         <div id="qa-info" class="qa-info"></div>
         <div id="qa-facts" class="qa-facts" style="display:none"></div>
-        <div id="qa-keys" class="qa-keys">Arrows or drag the preview nudge Â· Shift rotate CW Â· Ctrl rotate CCW Â· right-click preview rotates Â· Enter place Â· Esc cancel Â· wheel over preview zooms  <span style="opacity:.7">(keys editable in the hotkey editor)</span></div>
+        <div id="qa-keys" class="qa-keys">Arrows or drag the preview nudge · Shift rotate CW · Ctrl rotate CCW · right-click preview rotates · Enter place · Esc cancel · wheel over preview zooms  <span style="opacity:.7">(keys editable in the hotkey editor)</span></div>
         <div class="dlg-buttons">
-          <button id="qa-full" type="button" title="Open the full footprint selector">Full selectorâ€¦</button>
+          <button id="qa-full" type="button" title="Open the full footprint selector">Full selector…</button>
           <span style="flex:1"></span>
           <button id="qa-cancel" type="button">Cancel</button>
           <button id="qa-place" class="primary" type="button">Place</button>
         </div>
       </div>
-      <div id="qa-examples" class="qa-side" title="Example queries â€” click to try">
+      <div id="qa-examples" class="qa-side" title="Example queries — click to try">
         <div class="qa-side-h">Examples</div>
         <div id="qa-ex-list" class="qa-side-list"></div>
       </div>
@@ -305,24 +305,24 @@
     <div class="dlg-title">Export</div>
     <label class="dlg-row">Format
       <select id="export-format">
-        <option value="kicad">KiCad netlist (.net) â€” import in Pcbnew</option>
-        <option value="sch">KiCad schematic (.kicad_sch) â€” open in Eeschema</option>
-        <option value="bom">Bill of Materials (BOM) â€” CSV grouped by value</option>
+        <option value="kicad">KiCad netlist (.net) — import in Pcbnew</option>
+        <option value="sch">KiCad schematic (.kicad_sch) — open in Eeschema</option>
+        <option value="bom">Bill of Materials (BOM) — CSV grouped by value</option>
         <option value="csv">CSV (ref, pin, net)</option>
         <option value="json">JSON</option>
-        <option value="eagle">EAGLE board (.brd) â€” Autodesk EAGLE / KiCad import</option>
-        <option value="easyeda">EasyEDA / JLCEDA Std PCB (.json) â€” v6 board file</option>
-        <option value="gerber">Gerber (RS-274X) â€” copper layers, one file each (.zip)</option>
+        <option value="eagle">EAGLE board (.brd) — Autodesk EAGLE / KiCad import</option>
+        <option value="easyeda">EasyEDA / JLCEDA Std PCB (.json) — v6 board file</option>
+        <option value="gerber">Gerber (RS-274X) — copper layers, one file each (.zip)</option>
       </select>
     </label>
     <label class="dlg-row" id="export-arrange-row" style="display:none">Arrangement
       <select id="export-arrange">
-        <option value="closest">Closest â€” group by net distance</option>
-        <option value="opt">Optimized â€” nets closest, no overlap</option>
-        <option value="pcb">Same as PCB â€” keep board positions</option>
-        <option value="type" selected>Sorted â€” group part types</option>
+        <option value="closest">Closest — group by net distance</option>
+        <option value="opt">Optimized — nets closest, no overlap</option>
+        <option value="pcb">Same as PCB — keep board positions</option>
+        <option value="type" selected>Sorted — group part types</option>
         <option value="name">Sorted by name</option>
-        <option value="manual">Manual â€” as arranged in the Schematic tab</option>
+        <option value="manual">Manual — as arranged in the Schematic tab</option>
       </select>
     </label>
     <div id="export-warn" style="display:none"></div>
@@ -348,28 +348,28 @@
 
       <!-- ---- Board: physical board properties (saved in the project) ---- -->
       <div class="set-tab active" data-tab="board">
-        <div class="set-hint">Physical board properties â€” these are saved in the project file.</div>
+        <div class="set-hint">Physical board properties — these are saved in the project file.</div>
         <div class="set-row">
-          <label for="set-layers" title="Copper layer count of the board â€” adds inner layers to the side selectors">Copper layers</label>
+          <label for="set-layers" title="Copper layer count of the board — adds inner layers to the side selectors">Copper layers</label>
           <select id="set-layers"></select>
-          <div class="set-hint">Adds Inner 1â€¦N to the draw-side selectors and via spans.</div>
+          <div class="set-hint">Adds Inner 1…N to the draw-side selectors and via spans.</div>
         </div>
         <div class="set-row">
-          <label for="set-copper" title="Outer-layer (F.Cu/B.Cu) copper foil weight â€” feeds the trace current estimate for traces on the outer layers (IPC-2221)">Copper (outer)</label>
+          <label for="set-copper" title="Outer-layer (F.Cu/B.Cu) copper foil weight — feeds the trace current estimate for traces on the outer layers (IPC-2221)">Copper (outer)</label>
           <select id="set-copper">
-            <option value="0.5">0.5 oz (17 Âµm)</option>
-            <option value="1">1 oz (35 Âµm)</option>
-            <option value="2">2 oz (70 Âµm)</option>
-            <option value="3">3 oz (105 Âµm)</option>
+            <option value="0.5">0.5 oz (17 µm)</option>
+            <option value="1">1 oz (35 µm)</option>
+            <option value="2">2 oz (70 µm)</option>
+            <option value="3">3 oz (105 µm)</option>
           </select>
         </div>
         <div class="set-row">
-          <label for="set-copper-inner" title="Inner-layer copper foil weight â€” inner planes/traces are usually lighter (often 0.5 oz). Used for the current estimate on inner-layer traces.">Copper (inner)</label>
+          <label for="set-copper-inner" title="Inner-layer copper foil weight — inner planes/traces are usually lighter (often 0.5 oz). Used for the current estimate on inner-layer traces.">Copper (inner)</label>
           <select id="set-copper-inner">
-            <option value="0.5">0.5 oz (17 Âµm)</option>
-            <option value="1">1 oz (35 Âµm)</option>
-            <option value="2">2 oz (70 Âµm)</option>
-            <option value="3">3 oz (105 Âµm)</option>
+            <option value="0.5">0.5 oz (17 µm)</option>
+            <option value="1">1 oz (35 µm)</option>
+            <option value="2">2 oz (70 µm)</option>
+            <option value="3">3 oz (105 µm)</option>
           </select>
           <div class="set-hint">Copper weights feed the IPC-2221 trace current estimate in the inspector.</div>
         </div>
@@ -420,10 +420,10 @@
         <div class="set-row">
           <label for="set-snapfactor" title="Multiplier on every snap radius: trace/via/pad snapping while drawing and dragging anchors, endpoint weld reach, junction adherence. 100% = the built-in distances.">Snap distance <span id="set-snapfactor-val"></span></label>
           <input type="range" id="set-snapfactor" min="25" max="400" step="5">
-          <div class="set-hint">Scales every snap radius â€” pads, vias, traces, anchor weld/junction reach. 100% = default, lower = snap only when closer.</div>
+          <div class="set-hint">Scales every snap radius — pads, vias, traces, anchor weld/junction reach. 100% = default, lower = snap only when closer.</div>
         </div>
         <div class="set-row">
-          <label for="set-keymode" title="What the number keys 1â€¦9, 0 do (in split view they set the left half, Shift the right half)">Keys 1â€¦0</label>
+          <label for="set-keymode" title="What the number keys 1…9, 0 do (in split view they set the left half, Shift the right half)">Keys 1…0</label>
           <select id="set-keymode">
             <option value="switch">Switch view to layer</option>
             <option value="toggle">Toggle layer visibility</option>
@@ -473,13 +473,13 @@
             <option value="0">Off</option>
           </select>
         </div>
-        <div class="set-row" title="Options (hotkeys, units, view toggles, panel sizesâ€¦) are stored per-browser, not in the project file. Export them to move your setup to another browser or machine.">
+        <div class="set-row" title="Options (hotkeys, units, view toggles, panel sizes…) are stored per-browser, not in the project file. Export them to move your setup to another browser or machine.">
           <label>Options file</label>
           <span class="opt-io-btns">
-            <button id="opt-export" type="button">Exportâ€¦</button>
-            <button id="opt-import" type="button">Importâ€¦</button>
+            <button id="opt-export" type="button">Export…</button>
+            <button id="opt-import" type="button">Import…</button>
           </span>
-          <div class="set-hint">Hotkeys, units &amp; view preferences live in this browser â€” export/import to move them.</div>
+          <div class="set-hint">Hotkeys, units &amp; view preferences live in this browser — export/import to move them.</div>
         </div>
       </div>
 
@@ -497,7 +497,7 @@
   <!-- ======= HISTORY (SELECTIVE UNDO) ======= -->
   <dialog id="history-dialog">
     <div class="dlg-title">Undo timeline</div>
-    <div class="panel-hint" style="margin-bottom:8px">â€œUndo thisâ€ reverts only what that action touched â€” later changes to other objects are kept.</div>
+    <div class="panel-hint" style="margin-bottom:8px">“Undo this” reverts only what that action touched — later changes to other objects are kept.</div>
     <div id="history-list"></div>
     <div class="dlg-buttons"><button id="history-close" class="primary">Close</button></div>
   </dialog>
@@ -511,7 +511,7 @@
       <label style="display:flex;align-items:center;gap:8px;font-weight:600">
         <input type="checkbox" id="lab-viaconn"> Highlight under-connected vias
       </label>
-      <div class="panel-hint" style="margin:6px 0 8px">Rings vias whose copper connection count falls in the range below â€” dangling or single-layer vias that connect little or nothing.</div>
+      <div class="panel-hint" style="margin:6px 0 8px">Rings vias whose copper connection count falls in the range below — dangling or single-layer vias that connect little or nothing.</div>
       <div class="dlg-row" style="gap:6px">
         <label style="width:auto">Highlight vias with</label>
         <input type="number" id="lab-viaconn-min" min="0" max="9" step="1" value="0" style="width:56px">
@@ -535,7 +535,7 @@
     <div style="border:1px solid #3a2f22;border-radius:6px;padding:10px;margin-bottom:10px;background:rgba(60,40,10,0.12)">
       <label style="display:flex;align-items:center;gap:8px;font-weight:600">&#129302; AI Connect</label>
       <div class="panel-hint" style="margin:6px 0 8px;color:#e0a94a">
-        âš  AI features can produce <b>garbage / wrong results</b> and every request <b>may incur unpredictable cost</b>.
+        ⚠ AI features can produce <b>garbage / wrong results</b> and every request <b>may incur unpredictable cost</b>.
         Set spend limits in your provider dashboard (OpenRouter/OpenAI usage caps etc.) before use. Your API key is stored
         only in this browser (localStorage) and is <b>never written into project save files</b>, so sharing a saved board never leaks it.
       </div>
@@ -551,7 +551,7 @@
       </div>
       <div class="dlg-row" style="gap:6px;margin-top:6px">
         <label style="width:110px">API key</label>
-        <input type="password" id="ai-key" placeholder="sk-â€¦ (stored locally only)" style="flex:1" autocomplete="off">
+        <input type="password" id="ai-key" placeholder="sk-… (stored locally only)" style="flex:1" autocomplete="off">
       </div>
       <div class="dlg-row" style="gap:6px;margin-top:6px" id="ai-baseurl-row">
         <label style="width:110px">Base URL</label>
@@ -559,7 +559,7 @@
       </div>
       <div class="dlg-row" style="gap:6px;margin-top:6px">
         <label style="width:110px">Model</label>
-        <select id="ai-model" style="flex:1"><option value="">â€” pick / refresh â€”</option></select>
+        <select id="ai-model" style="flex:1"><option value="">— pick / refresh —</option></select>
         <button id="ai-refresh" title="Fetch the models available for this provider + key">Refresh</button>
       </div>
       <div class="dlg-row" style="margin-top:6px"><button id="ai-test">Test connection</button><span id="ai-status" class="panel-hint" style="margin-left:8px"></span></div>
@@ -571,8 +571,8 @@
       </div>
 
       <details style="margin-top:10px">
-        <summary style="cursor:pointer;font-weight:600;font-size:13px">ðŸž Debug log (requests / answers)</summary>
-        <div class="panel-hint" style="margin:4px 0 6px">In-memory only â€” the most recent requests with their prompts and replies. Never saved to disk.</div>
+        <summary style="cursor:pointer;font-weight:600;font-size:13px">🐞 Debug log (requests / answers)</summary>
+        <div class="panel-hint" style="margin:4px 0 6px">In-memory only — the most recent requests with their prompts and replies. Never saved to disk.</div>
         <div class="dlg-row" style="gap:8px;margin-bottom:6px">
           <button id="ai-debug-refresh">Refresh</button>
           <button id="ai-debug-clear">Clear log</button>
@@ -592,7 +592,7 @@
       <span id="quick-resolve" class="res-out" style="cursor:pointer"></span></div>
     <div class="dlg-row"><label style="width:80px">Part no.</label><input id="quick-part" style="width:120px" placeholder="e.g. BC847 / STM32F103"></div>
     <div class="dlg-row" id="quick-ai-row" style="display:none;flex-direction:column;align-items:stretch;gap:4px;margin-top:4px">
-      <label style="width:auto">AI hint (extra info â€” markings, function, anything that helps)</label>
+      <label style="width:auto">AI hint (extra info — markings, function, anything that helps)</label>
       <textarea id="quick-aihint" rows="2" style="width:100%;box-sizing:border-box" placeholder="e.g. 6-pin SOT-23, dual diode, marking 'A7'"></textarea>
       <div class="dlg-row" style="gap:8px"><button id="quick-aifill" title="Ask the AI model to fill pin names + device type + BOM note">&#129302; AI Autofill</button><span id="quick-aistatus" class="panel-hint"></span></div>
     </div>
@@ -605,7 +605,7 @@
   <!-- ======= PARTS SEARCH POPUP ======= -->
   <dialog id="parts-dialog">
     <div class="dlg-title">Find <span id="part-count"></span></div>
-    <input id="part-search" placeholder="Search parts (ref / value) and netsâ€¦" autocomplete="off"
+    <input id="part-search" placeholder="Search parts (ref / value) and nets…" autocomplete="off"
            style="width:100%;box-sizing:border-box;margin:0 0 8px;padding:5px 8px;background:#1c222b;border:1px solid #2e3742;border-radius:5px;color:#d7dde5;font-size:13px">
     <div style="display:flex;gap:10px;align-items:flex-start">
       <div style="flex:1;min-width:0">
@@ -665,7 +665,7 @@
       <button id="netmerge-tob" class="primary"></button>
       <button id="netmerge-toa"></button>
       <button id="netmerge-ignore"></button>
-      <button id="netmerge-undo">Undo â€” don't draw the trace</button>
+      <button id="netmerge-undo">Undo — don't draw the trace</button>
     </div>
   </dialog>
 
@@ -687,7 +687,7 @@
     <div class="dlg-title">Value resolver</div>
     <div class="dlg-row">
       <label style="width:90px">SMD code</label>
-      <input id="res-code" placeholder="103 Â· 01C Â· 4R7 Â· 4k7" style="width:140px">
+      <input id="res-code" placeholder="103 · 01C · 4R7 · 4k7" style="width:140px">
       <span id="res-code-out" class="res-out"></span>
     </div>
     <hr style="border-color:#2e3742;margin:10px 0">
@@ -707,7 +707,7 @@
   <dialog id="keys-dialog">
     <div class="dlg-title">Hotkey editor</div>
     <div class="panel-hint" style="margin-bottom:8px">Click a binding, then press the new key (bare Shift/Ctrl/Alt taps and combos work too). Esc cancels. Right-click a binding to clear it.
-      Fixed keys that can't be rebound: Ctrl-shortcuts, Esc, Enter, Space, Tab and the digits 1â€“0.
+      Fixed keys that can't be rebound: Ctrl-shortcuts, Esc, Enter, Space, Tab and the digits 1–0.
       Tip: right-click any toolbar button to set or clear its hotkey directly.</div>
     <div id="keys-list"></div>
     <div class="dlg-buttons">
@@ -719,10 +719,10 @@
   <!-- ======= 3D LAYER STACK ======= -->
   <dialog id="stack3d-dialog">
     <div class="dlg-title">3D layer stack</div>
-    <div class="panel-hint" style="margin-bottom:8px">Exploded view of every copper side and the through-hole conductors linking them. Drag to orbit Â· scroll to zoom.</div>
+    <div class="panel-hint" style="margin-bottom:8px">Exploded view of every copper side and the through-hole conductors linking them. Drag to orbit · scroll to zoom.</div>
     <canvas id="stack3d-canvas"></canvas>
     <div id="stack3d-controls">
-      <label class="s3d-chk" title="Slice the board with section planes â€” drag the sliders to cut into it or peel layers off the stack"><input type="checkbox" id="s3d-clip"> Clip</label>
+      <label class="s3d-chk" title="Slice the board with section planes — drag the sliders to cut into it or peel layers off the stack"><input type="checkbox" id="s3d-clip"> Clip</label>
       <div class="s3d-rng"><span>X</span><input type="range" id="s3d-x0"><input type="range" id="s3d-x1"></div>
       <div class="s3d-rng"><span>Y</span><input type="range" id="s3d-y0"><input type="range" id="s3d-y1"></div>
       <div class="s3d-rng"><span>Layers</span><input type="range" id="s3d-z0"><input type="range" id="s3d-z1"></div>
@@ -761,10 +761,10 @@
              style="width:340px" autocomplete="off">
     </div>
     <div class="panel-hint" style="margin:8px 0 3px;line-height:1.45;color:#e0b34a">
-      âš  Hosted images are loaded <b>live</b> from their URL and are <b>not</b> saved into
-      your project â€” only the link is stored. If the link changes or goes offline, this
+      ⚠ Hosted images are loaded <b>live</b> from their URL and are <b>not</b> saved into
+      your project — only the link is stored. If the link changes or goes offline, this
       layer will disappear. For anything important, download the image and use
-      â€œ+ Addâ€ to embed the file instead.
+      “+ Add” to embed the file instead.
     </div>
     <div class="dlg-buttons">
       <button id="url-cancel">Cancel</button>
@@ -774,7 +774,7 @@
 
   <!-- ======= MULTIPLAYER ======= -->
   <dialog id="mp-dialog" style="max-width:520px">
-    <div class="dlg-title">Multiplayer â€” live collaboration</div>
+    <div class="dlg-title">Multiplayer — live collaboration</div>
     <div class="dlg-row" style="display:flex;gap:8px;align-items:center">
       <label>Your name <input id="mp-name" style="width:140px" autocomplete="off" maxlength="32"></label>
       <label>Cursor <input id="mp-color" type="color" style="width:40px;padding:0"></label>
@@ -788,22 +788,22 @@
         <button id="mp-copy-offer">Copy</button>
         <span class="panel-hint" style="margin:0">send it to your guest (chat/email)</span>
       </div>
-      <textarea id="mp-offer-out" readonly placeholder="Invite code appears hereâ€¦" spellcheck="false"></textarea>
+      <textarea id="mp-offer-out" readonly placeholder="Invite code appears here…" spellcheck="false"></textarea>
       <div class="dlg-row" style="display:flex;gap:6px;align-items:center;margin-top:6px">
-        <textarea id="mp-reply-in" placeholder="2&#65039;&#8283; Paste the guest's reply code hereâ€¦" spellcheck="false"></textarea>
+        <textarea id="mp-reply-in" placeholder="2&#65039;&#8283; Paste the guest's reply code here…" spellcheck="false"></textarea>
         <button id="mp-accept-reply" class="primary" style="flex:none">Connect</button>
       </div>
-      <div class="panel-hint" style="margin:4px 0 0">Repeat for each extra guest â€” you relay between them.</div>
+      <div class="panel-hint" style="margin:4px 0 0">Repeat for each extra guest — you relay between them.</div>
     </fieldset>
 
     <fieldset>
       <legend>Join a session</legend>
       <div class="dlg-row" style="display:flex;gap:6px;align-items:center">
-        <textarea id="mp-invite-in" placeholder="1&#65039;&#8283; Paste the host's invite code hereâ€¦" spellcheck="false"></textarea>
+        <textarea id="mp-invite-in" placeholder="1&#65039;&#8283; Paste the host's invite code here…" spellcheck="false"></textarea>
         <button id="mp-make-reply" class="primary" style="flex:none">Create reply</button>
       </div>
       <div class="dlg-row" style="display:flex;gap:6px;align-items:center;margin-top:6px">
-        <textarea id="mp-reply-out" readonly placeholder="2&#65039;&#8283; Reply code appears here â€” send it back to the hostâ€¦" spellcheck="false"></textarea>
+        <textarea id="mp-reply-out" readonly placeholder="2&#65039;&#8283; Reply code appears here — send it back to the host…" spellcheck="false"></textarea>
         <button id="mp-copy-reply" style="flex:none">Copy</button>
       </div>
     </fieldset>
@@ -824,20 +824,20 @@
       <legend>Guest permissions (set by the host, applies to every guest)</legend>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:2px 10px;font-size:12px">
         <label><input type="checkbox" id="mpr-openProjects"> Open / import / new project</label>
-        <label><input type="checkbox" id="mpr-layerTools"> Layer &amp; image tools (add, remove, replace, align, calibrate, flip, lockâ€¦)</label>
+        <label><input type="checkbox" id="mpr-layerTools"> Layer &amp; image tools (add, remove, replace, align, calibrate, flip, lock…)</label>
         <label><input type="checkbox" id="mpr-editObjects"> Place / edit / move / delete objects</label>
         <label><input type="checkbox" id="mpr-editNets"> Edit or remove nets</label>
         <label><input type="checkbox" id="mpr-editSchBom"> Edit schematic &amp; BOM</label>
         <label><input type="checkbox" id="mpr-saveExport"> Save / download / export (off also stops their autosave)</label>
         <label><input type="checkbox" id="mpr-ai"> Use AI features</label>
-        <label><input type="checkbox" id="mpr-clearAll"> â€œClear allâ€ (Experimental)</label>
+        <label><input type="checkbox" id="mpr-clearAll"> “Clear all” (Experimental)</label>
       </div>
     </fieldset>
     <div class="panel-hint" style="margin:2px 0 0;line-height:1.45">
       Parts, nets, traces, vias, notes, schematic and layer transforms sync both ways
       (simultaneous edits: last save wins). Image layers added from a <b>URL</b> are always
       shared as links; embedded photo files travel only from peers who tick the box above
-      â€” downscaled to the px/mm cap to keep transfers small. The <b>host</b> shares the
+      — downscaled to the px/mm cap to keep transfers small. The <b>host</b> shares the
       board's photos; a <b>guest</b> only ever sends layers it added or replaced itself,
       and only when the host granted layer tools (the host confirms the first image
       from each peer). Leave the cap blank for <b>auto</b> = half the image's own
@@ -845,7 +845,7 @@
       at its own resolution). Ticking it also asks the others to resend theirs.
       Received copies never replace an original you loaded yourself, and while joined
       as a <b>guest</b> the image tools (replace / align / calibrate / crop / rotate /
-      resize / delete layer) are disabled â€” the host owns the photos.
+      resize / delete layer) are disabled — the host owns the photos.
     </div>
     <div id="mp-status" class="panel-hint" style="margin-top:6px"></div>
     <div class="dlg-buttons">
@@ -873,11 +873,11 @@
 <script src="js/view/core.js?v=95"></script>
 <script src="js/view/geom.js?v=89"></script>
 <script src="js/view/hittest.js?v=93"></script>
-<script src="js/view/render.js?v=103"></script>
+<script src="js/view/render.js?v=104"></script>
 <script src="js/view/draw.js?v=99"></script>
-<script src="js/view/overlays.js?v=92"></script>
+<script src="js/view/overlays.js?v=94"></script>
 <script src="js/layerstack.js?v=55"></script>
-<script src="js/tools/core.js?v=127"></script>
+<script src="js/tools/core.js?v=128"></script>
 <script src="js/tools/select.js?v=126"></script>
 <script src="js/tools/trace.js?v=117"></script>
 <script src="js/tools/via.js?v=116"></script>
@@ -886,7 +886,7 @@
 <script src="js/align.js?v=61"></script>
 <script src="js/keymap.js?v=69"></script>
 <script src="js/resolver.js?v=49"></script>
-<script src="js/netlist.js?v=78"></script>
+<script src="js/netlist.js?v=80"></script>
 <script src="js/eagle.js?v=4"></script>
 <script src="js/easyeda.js?v=4"></script>
 <script src="js/gencad.js?v=5"></script>
@@ -896,15 +896,15 @@
 <script src="js/ui/nets.js?v=106"></script>
 <script src="js/ui/parts.js?v=107"></script>
 <script src="js/ui/inspector.js?v=117"></script>
-<script src="js/ui/dialogs.js?v=112"></script>
+<script src="js/ui/dialogs.js?v=114"></script>
 <script src="js/ui/misc.js?v=111"></script>
 <script src="js/kicadsearch.js?v=52"></script>
 <script src="js/fpdialog.js?v=60"></script>
 <script src="js/quickadd.js?v=18"></script>
-<script src="js/schematic.js?v=33"></script>
-<script src="js/boards.js?v=3"></script>
-<script src="js/netstab.js?v=3"></script>
-<script src="js/projects.js?v=8"></script>
+<script src="js/schematic.js?v=35"></script>
+<script src="js/boards.js?v=4"></script>
+<script src="js/netstab.js?v=5"></script>
+<script src="js/projects.js?v=9"></script>
 <script src="js/ai.js?v=4"></script>
 <script src="js/autosave.js?v=59"></script>
 <script src="js/multiplayer.js?v=16"></script>

@@ -55,9 +55,27 @@ connection → nets merge pin-by-pin, and the inspector shows "go to page" jump 
   stale records (deleted part/page) pruned lazily via Boards.pruneLinks.
 - Pin-net merges go through mergeNets / releasePinWireNets (invariant preserved).
 
+## Annotations (2026-07-18)
+- Schematic: linked connectors draw a dashed line to the nearest sheet edge ("to
+  infinity") with an edge chevron + "page · ref (pins)" label per link
+  (schDrawOffPage). Clicking the chevron/label jumps to that page.
+- Visual editor: linked parts get a floating "▶ page · ref" tag above them
+  (drawXlinkArrows in view/overlays.js), hidden when zoomed out (part < 7 screen px
+  radius); clicking the tag jumps (intercept in tools/core.js onPointerDown,
+  hit rects in View._xlinkHits / Sch._xlinkHits).
+
+## Cross-page visibility (2026-07-18)
+- BOM (pane + CSV export) and parts CSV cover ALL pages; a "Pages" column appears in
+  multi-page projects (bomGroups g.pages). Nets tab members span all pages, with a
+  "Pages" column (multi-page nets highlighted); its focus buttons switch to the
+  owning page first (ntGotoPage), and pad reassign deletes attachments from the
+  owning board's arrays (ntDropFrom respects the active-page-alias invariant).
+- Projects tab stats/count now read the v2 boards form ("2 PCBs · N parts · …");
+  share/zip-images walk per-board layers.
+
 ## Scope notes / limitations (v1)
-- Exports (netlist/BOM/schematic/EAGLE), Nets-tab member rows, checker, ratsnest run on
-  the ACTIVE page (nets themselves are global). Per-page BOM is intended behaviour.
+- KiCad netlist / schematic / EAGLE exports, checker, ratsnest run on the ACTIVE page
+  (nets themselves are global).
 - EAGLE/GENCAD import resets the project into page 1 (unchanged).
 - Schematic pages mirror board pages 1:1 automatically (Sch reads the aliases).
 
