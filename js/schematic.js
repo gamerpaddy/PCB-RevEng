@@ -2328,6 +2328,12 @@ const _schPrevRequestRender = window.requestRender;
 window.requestRender = function(){
   _schPrevRequestRender();
   if (EditorTabs.current === "schematic"){ Sch.invalidate(); Sch.requestRender(); }
+  else if (EditorTabs.current === "bom"){
+    // keep the BOM table live too — but never rebuild it out from under an input the
+    // user is typing in (their own cell edit re-renders on commit anyway)
+    const ae = document.activeElement;
+    if (!(ae && ae.classList && ae.classList.contains("bom-cell"))) UI._renderBomTable();
+  }
 };
 
 window.addEventListener("DOMContentLoaded", () => {

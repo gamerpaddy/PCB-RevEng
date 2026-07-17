@@ -1174,7 +1174,7 @@ function mpRefreshUI(){
   if (resend) resend.style.display = MP.isHost ? "" : "none";
   const rightsBox = document.getElementById("mp-rights");
   if (rightsBox) rightsBox.style.display = MP.isHost ? "" : "none";
-  // session chat lives under the inspector while connected
+  // session chat sits above the inspector while connected (always visible)
   const chat = document.getElementById("mp-chat");
   if (chat) chat.style.display = mpConnected() ? "" : "none";
   mpApplyGuestLock();
@@ -1440,7 +1440,7 @@ function mpInjectStyle(){
 .mp-host-tag{background:#5a4716;color:#ffd76e;border-radius:4px;padding:0 4px;font-size:10px;margin-left:3px}
 #mp-rights label{display:flex;gap:5px;align-items:flex-start;line-height:1.35}
 #mp-rights input{margin-top:2px;flex:none}
-#mp-chat{border-top:1px solid #2e3742;margin-top:8px;display:flex;flex-direction:column;
+#mp-chat{border-bottom:1px solid #2e3742;margin-bottom:8px;display:flex;flex-direction:column;
   max-height:260px;min-height:110px;flex:none}
 #mp-chat-log{flex:1;min-height:60px;overflow-y:auto;font-size:12px;padding:3px 6px;
   display:flex;flex-direction:column;gap:2px}
