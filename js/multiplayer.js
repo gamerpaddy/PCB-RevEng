@@ -395,7 +395,7 @@ function mpOnMsg(peer, raw){
       if (MP.isHost) mpBroadcast(m, peer);
       if (MP.opts.sendImages){
         if (MP.isHost) MP._imgSig.clear();
-        else for (const l of State.layers) if (l._mpOwn) MP._imgSig.delete(l.id);
+        else for (const l of allOf("layers")) if (l._mpOwn) MP._imgSig.delete(l.id);
         mpSyncImages();
       }
       break;
@@ -415,14 +415,16 @@ function mpHostViolation(prevStr, nextStr){
   try {
     const a = JSON.parse(prevStr), b = JSON.parse(nextStr);
     const diff = (x, y) => JSON.stringify(x ?? null) !== JSON.stringify(y ?? null);
-    if (!R.editObjects && (diff(a.components, b.components) || diff(a.vias, b.vias) ||
-                           diff(a.traces, b.traces) || diff(a.notes, b.notes)))
+    // multi-page cores keep collections per board — flatten for the category diff
+    const F = (s, col) => s.boards ? s.boards.flatMap(x => x[col] || []) : s[col];
+    if (!R.editObjects && (diff(F(a,"components"), F(b,"components")) || diff(F(a,"vias"), F(b,"vias")) ||
+                           diff(F(a,"traces"), F(b,"traces")) || diff(F(a,"notes"), F(b,"notes"))))
       return "edit objects";
     if (!R.editNets && diff(a.nets, b.nets)) return "edit nets";
-    if (!R.editSchBom && (diff(a.schWires, b.schWires) || diff(a.schLabels, b.schLabels) ||
+    if (!R.editSchBom && (diff(F(a,"schWires"), F(b,"schWires")) || diff(F(a,"schLabels"), F(b,"schLabels")) ||
                           diff(a.bomColumns, b.bomColumns)))
       return "edit the schematic/BOM";
-    if (!R.layerTools && (diff(a.layers, b.layers) || a.pxPerMm !== b.pxPerMm))
+    if (!R.layerTools && (diff(F(a,"layers"), F(b,"layers")) || a.pxPerMm !== b.pxPerMm))
       return "use the layer tools";
   } catch(e){}
   return null;
@@ -440,7 +442,11 @@ function mpCoreString(){
   // imgW/imgH describe the LOCAL bitmap (downscaled stand-in marker) — syncing them let a
   // guest's stand-in flag land on the host's ORIGINAL layer, which then accepted the
   // guest's recompressed copy and autosave baked the quality loss into the project.
-  s.layers = (s.layers || []).map(l => { const { dataURL, visible, opacity, imgW, imgH, ...rest } = l; return rest; });
+  const stripL = ls => (ls || []).map(l => { const { dataURL, visible, opacity, imgW, imgH, ...rest } = l; return rest; });
+  s.layers = stripL(s.layers);
+  for (const b of (s.boards || [])) b.layers = stripL(b.layers);
+  // the ACTIVE page is per-user view state — each peer stays on their own page
+  delete s.boardIdx;
   return JSON.stringify(s);
 }
 
@@ -498,9 +504,8 @@ function mpTryApply(){
 }
 
 function mpApplyCore(coreStr){
-  const s = JSON.parse(coreStr);
+  const s = _wrapLegacyBoards(JSON.parse(coreStr));
   State.pxPerMm = s.pxPerMm || 10;
-  State.layerCount = s.layerCount || 2;
   State.viaR = s.viaR || 8;
   State.viaHole = s.viaHole || 3.6;
   State.traceW = s.traceW || 5;
@@ -515,17 +520,12 @@ function mpApplyCore(coreStr){
   State.refCounters = s.refCounters || {};
   State.nets = s.nets || [];
   State.bomColumns = s.bomColumns || [];
-  State.components = s.components || [];
-  State.components.forEach(c => { c._fp = null; });
-  State.vias = s.vias || [];
-  State.traces = s.traces || [];
-  State.notes = s.notes || [];
-  State.schWires = s.schWires || [];
-  State.schLabels = s.schLabels || [];
 
-  // layers: match by id — adopt remote meta/transform, keep our local bitmap
-  const old = new Map(State.layers.map(l => [l.id, l]));
-  State.layers = (s.layers || []).map(m => {
+  // rebuild every PAGE from the core. Layers match by id — adopt remote meta/transform,
+  // keep our local bitmap. We stay on OUR page (matched by board id after the swap).
+  const old = new Map(allOf("layers").map(l => [l.id, l]));
+  const curBoardId = activeBoard().id;
+  const adoptLayer = (m) => {
     const ex = old.get(m.id);
     if (ex){
       const img = ex.img, dataURL = ex.dataURL, tiles = ex.tiles;
@@ -551,7 +551,25 @@ function mpApplyCore(coreStr){
       setTimeout(() => mpApplyImage(m.id, p.data, p.w, p.h), 0);
     }
     return l;
+  };
+  State.boards = (s.boards || []).map((sb, bi) => {
+    const comps = sb.components || [];
+    comps.forEach(c => { c._fp = null; });
+    return { id: sb.id != null ? sb.id : bi, name: sb.name || ("PCB " + (bi + 1)),
+             layerCount: sb.layerCount || 2,
+             layers: (sb.layers || []).map(adoptLayer),
+             components: comps, vias: sb.vias || [], traces: sb.traces || [],
+             notes: sb.notes || [], schWires: sb.schWires || [], schLabels: sb.schLabels || [] };
   });
+  if (!State.boards.length) State.boards = [{ id: 0, name: "PCB 1", layerCount: 2,
+    layers: [], components: [], vias: [], traces: [], notes: [], schWires: [], schLabels: [] }];
+  let bIdx = State.boards.findIndex(b => b.id === curBoardId);
+  if (bIdx < 0) bIdx = Math.min(State.boardIdx, State.boards.length - 1);
+  State.boardIdx = Math.max(0, bIdx);
+  const ab = State.boards[State.boardIdx];
+  for (const col of BOARD_COLS) State[col] = ab[col];
+  State.layerCount = ab.layerCount || 2;
+  if (typeof Boards !== "undefined") Boards.refreshTabs();
 
   mpRemapSelection();
   if (typeof Tools !== "undefined"){ Tools.padEdit = null; }
@@ -614,7 +632,7 @@ function mpSyncImages(){
   // the board's photos; guests never re-offer them back (no connect-time burst either).
   const guest = mpConnected() && !MP.isHost;
   if (guest && !MP.rights.layerTools) return;
-  for (const l of State.layers){
+  for (const l of allOf("layers")){
     if (guest && !l._mpOwn) continue;
     if (l.url || !l.dataURL) continue;   // hosted layers travel as links in the core
     const sig = mpImgSig(l.dataURL);
@@ -781,7 +799,7 @@ function mpApplyDrag(m){
         mpMarkEdit("t" + o.id, who);
       }
     } else if (o.k === "n"){
-      const n = State.notes.find(n => n.id === o.id);
+      const n = allOf("notes").find(n => n.id === o.id);
       if (n){ n.x = o.x; n.y = o.y; mpMarkEdit("n" + o.id, who); }
     } else if (o.k === "l"){
       const l = getLayer(o.id);
@@ -832,22 +850,25 @@ function mpDiffEdits(prevStr, nextStr, from){
         if (prev === undefined || prev !== JSON.stringify(o)) changed.push(tag + o.id);
       }
     };
-    scan("c", a.components, b.components);
-    scan("v", a.vias, b.vias);
-    scan("t", a.traces, b.traces);
-    scan("n", a.notes, b.notes);
+    const F = (s, col) => s.boards ? s.boards.flatMap(x => x[col] || []) : s[col];
+    scan("c", F(a, "components"), F(b, "components"));
+    scan("v", F(a, "vias"), F(b, "vias"));
+    scan("t", F(a, "traces"), F(b, "traces"));
+    scan("n", F(a, "notes"), F(b, "notes"));
     if (changed.length && changed.length <= 30)   // more = bulk load, not an edit
       for (const key of changed) mpMarkEdit(key, who);
   } catch(e){}
 }
 
-/* world position of a marked object, or null when it's gone */
+/* world position of a marked object, or null when it's gone — or lives on ANOTHER
+   PCB page (its coordinates would be nonsense on the page we're looking at) */
 function mpEditPos(key){
   const id = +key.slice(1);
+  const onPage = (o, col) => activeBoard()[col].includes(o) ? o : null;
   switch (key[0]){
-    case "c": { const c = getComp(id); return c ? { x: c.x, y: c.y } : null; }
-    case "v": { const v = getVia(id); return v ? { x: v.x, y: v.y } : null; }
-    case "t": { const t = getTrace(id);
+    case "c": { const c = onPage(getComp(id), "components"); return c ? { x: c.x, y: c.y } : null; }
+    case "v": { const v = onPage(getVia(id), "vias"); return v ? { x: v.x, y: v.y } : null; }
+    case "t": { const t = onPage(getTrace(id), "traces");
                 if (!t || !t.points.length) return null;
                 const p = t.points[Math.floor(t.points.length / 2)];
                 return { x: p.x, y: p.y }; }
@@ -964,6 +985,7 @@ function mpCursorMsg(m){
   c.x = m.x; c.y = m.y; c.name = m.name; c.color = m.color;
   c.host = !!m.host;   // the session initiator gets a crown on the name tag
   c.sch = !!m.sch;   // coords are schematic mm (sender was in the schematic editor)
+  c.bid = m.bid;     // the PCB page the sender is on (cursor hidden on other pages)
   c.leave = !!m.leave; c.ts = Date.now();
   mpLayoutCursors();
 }
@@ -1002,7 +1024,8 @@ function mpLayoutCursorsNow(){
     for (const [id, c] of MP.cursors){
       // hidden when gone-stale, hidden-by-choice, or we're not on the peer's sheet
       const wrongTab = c.sch ? tab !== "schematic" : tab !== "visual";
-      const stale = c.leave || (now - c.ts > 8000) || wrongTab || MP.hiddenCursors.has(id);
+      const wrongPage = c.bid != null && c.bid !== activeBoard().id;   // peer is on another PCB page
+      const stale = c.leave || (now - c.ts > 8000) || wrongTab || wrongPage || MP.hiddenCursors.has(id);
       if (!c.el){
         if (stale) continue;
         c.el = document.createElement("div");
@@ -1044,7 +1067,7 @@ function mpWireCursorSend(){
       if (!throttled()) return;
       const w = (typeof Tools !== "undefined" && Tools.cursor) ? Tools.cursor : null;
       if (!w) return;
-      mpBroadcast({ t: "cur", from: MP.id, x: w.x, y: w.y, name: MP.name, color: MP.color, host: MP.isHost });
+      mpBroadcast({ t: "cur", from: MP.id, x: w.x, y: w.y, bid: activeBoard().id, name: MP.name, color: MP.color, host: MP.isHost });
     });
     canvas.addEventListener("pointerleave", sendLeave);
   }
@@ -1054,7 +1077,7 @@ function mpWireCursorSend(){
     schCv.addEventListener("pointermove", (e) => {
       if (!throttled()) return;
       const r = schCv.getBoundingClientRect();
-      mpBroadcast({ t: "cur", from: MP.id, sch: true,
+      mpBroadcast({ t: "cur", from: MP.id, sch: true, bid: activeBoard().id,
         x: schS2X(e.clientX - r.left), y: schS2Y(e.clientY - r.top),
         name: MP.name, color: MP.color, host: MP.isHost });
     });

@@ -59,6 +59,61 @@ const State = {
 
 function nextId(){ return State._id++; }
 
+/* ---------- multi-PCB pages ("boards") ----------
+   A project can hold several PCBs (pages). Each board owns its geometry collections
+   and image layers; nets/refs/ids/settings stay PROJECT-global so a connector on one
+   page can carry the same net as its counterpart on another. The classic top-level
+   State.components / State.layers / … are ALIASES of the active board's arrays —
+   switching a page just repoints them, so all editor code keeps working untouched. */
+const BOARD_COLS = ["layers","components","vias","traces","notes","schWires","schLabels"];
+
+function makeBoard(name){
+  return { id: nextId(), name: name || ("PCB " + (State.boards.length + 1)),
+           layerCount: 2,
+           layers:[], components:[], vias:[], traces:[], notes:[], schWires:[], schLabels:[] };
+}
+State.boards = [{ id: nextId(), name: "PCB 1", layerCount: State.layerCount,
+                  layers: State.layers, components: State.components, vias: State.vias,
+                  traces: State.traces, notes: State.notes,
+                  schWires: State.schWires, schLabels: State.schLabels }];
+State.boardIdx = 0;
+
+function activeBoard(){ return State.boards[State.boardIdx] || State.boards[0]; }
+/* The top-level State arrays are AUTHORITATIVE for the active page: lots of editor
+   code replaces them wholesale (State.traces = State.traces.filter(…)), which would
+   silently detach them from the board record. So adopt them back into the active
+   board before anything reads the boards list — cheap (8 assignments), called from
+   every boards-reading entry point. */
+function boardsSyncScalars(){
+  const b = activeBoard();
+  if (!b) return;
+  b.layerCount = State.layerCount;
+  for (const col of BOARD_COLS) b[col] = State[col];
+}
+/* repoint the top-level aliases at board i (no UI refresh — Boards.switchTo does that) */
+function setActiveBoard(i){
+  i = Math.max(0, Math.min(State.boards.length - 1, i | 0));
+  boardsSyncScalars();
+  State.boardIdx = i;
+  const b = State.boards[i];
+  for (const col of BOARD_COLS) State[col] = b[col];
+  State.layerCount = b.layerCount || 2;
+}
+/* concatenated view of one collection across every board (project-wide scans) */
+function allOf(col){
+  boardsSyncScalars();
+  return State.boards.length === 1 ? State.boards[0][col]
+       : State.boards.flatMap(b => b[col] || []);
+}
+/* the board an object (or layer) lives on, or null */
+function boardOf(obj){
+  boardsSyncScalars();
+  for (const b of State.boards)
+    for (const col of BOARD_COLS)
+      if (b[col] && b[col].includes(obj)) return b;
+  return null;
+}
+
 /* copper sides available at the current layer count, in stackup order */
 function availableSides(){
   const out = ["front"];
@@ -163,10 +218,10 @@ function setNetProtected(id, prot){
   return net.protected;
 }
 
-/* number of component pads on a net */
+/* number of component pads on a net — project-wide (all pages) */
 function netPinCount(netId){
   let n = 0;
-  for (const c of State.components) for (const p of c.pins) if (p.netId === netId) n++;
+  for (const c of allOf("components")) for (const p of c.pins) if (p.netId === netId) n++;
   return n;
 }
 
@@ -190,11 +245,11 @@ function mergeNets(aId, bId){
   if (b.protected) { keep = b; drop = a; }
   else if (a.protected) { keep = a; drop = b; }
   else if (a.auto && !b.auto){ keep = b; drop = a; }
-  for (const c of State.components)
+  for (const c of allOf("components"))
     for (const p of c.pins) if (p.netId === drop.id) p.netId = keep.id;
-  for (const v of State.vias)   if (v.netId === drop.id) v.netId = keep.id;
-  for (const t of State.traces) if (t.netId === drop.id) t.netId = keep.id;
-  for (const w of State.schWires) if (w.netId === drop.id) w.netId = keep.id;
+  for (const v of allOf("vias"))   if (v.netId === drop.id) v.netId = keep.id;
+  for (const t of allOf("traces")) if (t.netId === drop.id) t.netId = keep.id;
+  for (const w of allOf("schWires")) if (w.netId === drop.id) w.netId = keep.id;
   State.nets = State.nets.filter(n => n.id !== drop.id);
   return keep.id;
 }
@@ -238,26 +293,27 @@ function renameNet(id, newName){
 
 function netMembers(netId){
   const out = [];
-  for (const c of State.components)
+  for (const c of allOf("components"))
     for (const p of c.pins)
       if (p.netId === netId) out.push({type:"pin", comp:c, pin:p});
-  for (const v of State.vias)   if (v.netId === netId) out.push({type:"via", via:v});
-  for (const t of State.traces) if (t.netId === netId) out.push({type:"trace", trace:t});
+  for (const v of allOf("vias"))   if (v.netId === netId) out.push({type:"via", via:v});
+  for (const t of allOf("traces")) if (t.netId === netId) out.push({type:"trace", trace:t});
   return out;
 }
 
-/* delete nets with no members */
+/* delete nets with no members — scans every page, so a net whose only members live on
+   another PCB (an off-page connector net) is never mistaken for empty */
 function pruneNets(){
   const used = new Set();
-  for (const c of State.components) for (const p of c.pins) if (p.netId) used.add(p.netId);
-  for (const v of State.vias)   if (v.netId) used.add(v.netId);
-  for (const t of State.traces) if (t.netId) used.add(t.netId);
-  for (const w of State.schWires) if (w.netId) used.add(w.netId);
+  for (const c of allOf("components")) for (const p of c.pins) if (p.netId) used.add(p.netId);
+  for (const v of allOf("vias"))   if (v.netId) used.add(v.netId);
+  for (const t of allOf("traces")) if (t.netId) used.add(t.netId);
+  for (const w of allOf("schWires")) if (w.netId) used.add(w.netId);
   State.nets = State.nets.filter(n => used.has(n.id) || !n.auto);
 }
 
-/* ---------- refdes ---------- */
-function refExists(ref){ return State.components.some(c => c.ref === ref); }
+/* ---------- refdes (unique project-wide, across all pages) ---------- */
+function refExists(ref){ return allOf("components").some(c => c.ref === ref); }
 
 function nextRef(prefix){
   let n = (State.refCounters[prefix] || 0) + 1;
@@ -272,12 +328,12 @@ function registerRef(ref){
   State.refCounters[p] = Math.max(State.refCounters[p] || 0, parseInt(num, 10));
 }
 
-/* ---------- lookups ---------- */
-function getComp(id){ return State.components.find(c => c.id === id) || null; }
-function getVia(id){ return State.vias.find(v => v.id === id) || null; }
-function getTrace(id){ return State.traces.find(t => t.id === id) || null; }
-function getLayer(id){ return State.layers.find(l => l.id === id) || null; }
-function getNote(id){ return State.notes.find(n => n.id === id) || null; }
+/* ---------- lookups (ids are global — search every page) ---------- */
+function getComp(id){ return allOf("components").find(c => c.id === id) || null; }
+function getVia(id){ return allOf("vias").find(v => v.id === id) || null; }
+function getTrace(id){ return allOf("traces").find(t => t.id === id) || null; }
+function getLayer(id){ return allOf("layers").find(l => l.id === id) || null; }
+function getNote(id){ return allOf("notes").find(n => n.id === id) || null; }
 
 /* ---------- undo / redo ---------- */
 const Undo = { stack: [], redo: [], max: 25 };
@@ -299,10 +355,22 @@ function ensureLayerImgId(l){   // lazily register a layer's current pixels (fir
   return l.imgId;
 }
 
+function _layerMeta(l){
+  return {
+    id:l.id, name:l.name, side:l.side, visible:l.visible, opacity:l.opacity,
+    tx:l.tx, ty:l.ty, scale:l.scale, rot:l.rot, mirror:l.mirror, locked:l.locked,
+    // url rides in the metadata: undoing "replace from URL" must restore the
+    // hosted/uploaded state too, not just the bitmap (else a reload re-fetches
+    // the new URL over the undone image)
+    url:l.url || null,
+    warp:l.warp || null, imgId: ensureLayerImgId(l)
+  };
+}
+
 function snapshot(){
+  boardsSyncScalars();
   return JSON.stringify({
     pxPerMm: State.pxPerMm,
-    layerCount: State.layerCount,
     viaR: State.viaR,
     viaHole: State.viaHole,
     traceW: State.traceW,
@@ -313,29 +381,37 @@ function snapshot(){
     copperOz: State.copperOz,
     copperOzInner: State.copperOzInner,
     focusDim: State.focusDim,
-    // `_fp` is a RUNTIME footprint cache — strip it (like serializeProject) so undo
-    // snapshots don't balloon on big imported boards, and so a mere cache regeneration
-    // isn't reported as an "edit" by diffSnapshots / selectiveUndo.
-    components: State.components.map(c => { const { _fp, ...rest } = c; return rest; }),
-    vias: State.vias,
-    traces: State.traces,
-    notes: State.notes,
-    schWires: State.schWires,
-    schLabels: State.schLabels,
     nets: State.nets,
     bomColumns: State.bomColumns,
     _id: State._id,
     refCounters: State.refCounters,
-    layersMeta: State.layers.map(l => ({
-      id:l.id, name:l.name, side:l.side, visible:l.visible, opacity:l.opacity,
-      tx:l.tx, ty:l.ty, scale:l.scale, rot:l.rot, mirror:l.mirror, locked:l.locked,
-      // url rides in the metadata: undoing "replace from URL" must restore the
-      // hosted/uploaded state too, not just the bitmap (else a reload re-fetches
-      // the new URL over the undone image)
-      url:l.url || null,
-      warp:l.warp || null, imgId: ensureLayerImgId(l)
+    boardIdx: State.boardIdx,
+    boards: State.boards.map(b => ({
+      id: b.id, name: b.name, layerCount: b.layerCount || 2,
+      // `_fp` is a RUNTIME footprint cache — strip it (like serializeProject) so undo
+      // snapshots don't balloon on big imported boards, and so a mere cache regeneration
+      // isn't reported as an "edit" by diffSnapshots / selectiveUndo.
+      components: b.components.map(c => { const { _fp, ...rest } = c; return rest; }),
+      vias: b.vias, traces: b.traces, notes: b.notes,
+      schWires: b.schWires, schLabels: b.schLabels,
+      layersMeta: b.layers.map(_layerMeta),
     })),
   });
+}
+
+/* wrap a legacy (single-board, flat-collections) snapshot/project object into the
+   boards form so old autosaved undo stacks and v1 project files keep working */
+function _wrapLegacyBoards(s){
+  if (s.boards) return s;
+  s.boards = [{
+    id: (State.boards[0] && State.boards[0].id) || 0, name: "PCB 1",
+    layerCount: s.layerCount || 2,
+    components: s.components || [], vias: s.vias || [], traces: s.traces || [],
+    notes: s.notes || [], schWires: s.schWires || [], schLabels: s.schLabels || [],
+    layersMeta: s.layersMeta || null, layers: s.layers || null,
+  }];
+  s.boardIdx = 0;
+  return s;
 }
 
 /* the redo stack most recently cleared by pushUndo — kept so a pushUndo that turns out
@@ -359,9 +435,8 @@ function cancelUndo(){
 }
 
 function applySnapshot(json){
-  const s = JSON.parse(json);
+  const s = _wrapLegacyBoards(JSON.parse(json));
   State.pxPerMm = s.pxPerMm;
-  State.layerCount = s.layerCount || 2;
   State.viaR = s.viaR || 8;
   State.viaHole = s.viaHole || 3.6;
   State.traceW = s.traceW || 5;
@@ -372,27 +447,54 @@ function applySnapshot(json){
   State.copperOz = s.copperOz || 1;
   State.copperOzInner = s.copperOzInner || 0.5;
   State.focusDim = (s.focusDim != null) ? s.focusDim : 0.16;
-  State.components = s.components;
-  State.components.forEach(c => { c._fp = null; });   // snapshots no longer carry _fp — regenerate on demand
-  State.vias = s.vias;
-  State.traces = s.traces;
-  State.notes = s.notes || [];
-  State.schWires = s.schWires || [];
-  State.schLabels = s.schLabels || [];
   State.nets = s.nets;
   State.bomColumns = s.bomColumns || [];
   State._id = s._id;
   State.refCounters = s.refCounters;
-  for (const m of s.layersMeta){
-    const l = getLayer(m.id);
-    if (!l) continue;
-    Object.assign(l, m);
-    // swap the bitmap back to the version this snapshot captured (undo of crop/deskew)
-    if (m.imgId != null && _imgVault.has(m.imgId)){
-      const v = _imgVault.get(m.imgId);
-      l.img = v.img; l.dataURL = v.dataURL; l.tiles = v.tiles;
-    }
+
+  /* rebuild the boards from the snapshot. Live layer OBJECTS are reused (they hold the
+     decoded bitmap); layers the snapshot references but that no longer live anywhere are
+     resurrected from the image vault. Boards/layers created AFTER the snapshot are kept
+     (page & layer membership is not undone — matches the old layer semantics). */
+  const liveLayers = new Map(allOf("layers").map(l => [l.id, l]));
+  const liveBoards = new Map(State.boards.map(b => [b.id, b]));
+  const snapBoardIds = new Set(s.boards.map(b => b.id));
+  State.boards = s.boards.map(sb => {
+    const metas = sb.layersMeta || [];
+    const layers = metas.map(m => {
+      let l = liveLayers.get(m.id);
+      if (!l) l = { img: null, dataURL: "", tiles: null };
+      else liveLayers.delete(m.id);
+      Object.assign(l, m);
+      // swap the bitmap back to the version this snapshot captured (undo of crop/deskew)
+      if (m.imgId != null && _imgVault.has(m.imgId)){
+        const v = _imgVault.get(m.imgId);
+        l.img = v.img; l.dataURL = v.dataURL; l.tiles = v.tiles;
+      }
+      return l;
+    });
+    const comps = sb.components || [];
+    comps.forEach(c => { c._fp = null; });   // snapshots no longer carry _fp — regenerate on demand
+    return { id: sb.id, name: sb.name || "PCB", layerCount: sb.layerCount || 2,
+             layers, components: comps, vias: sb.vias || [], traces: sb.traces || [],
+             notes: sb.notes || [], schWires: sb.schWires || [], schLabels: sb.schLabels || [] };
+  });
+  // layers added after this snapshot → keep them on their (surviving) board
+  for (const [id, l] of liveLayers){
+    let target = null;
+    for (const [bid, ob] of liveBoards)
+      if (ob.layers && ob.layers.some(x => x.id === id)){ target = State.boards.find(b => b.id === bid); break; }
+    (target || State.boards[State.boardIdx] || State.boards[0]).layers.push(l);
   }
+  // boards added after this snapshot → keep them untouched
+  for (const [bid, ob] of liveBoards)
+    if (!snapBoardIds.has(bid)) State.boards.push(ob);
+  const idx = Math.max(0, Math.min(State.boards.length - 1, s.boardIdx || 0));
+  State.boardIdx = idx;
+  const b = State.boards[idx];
+  for (const col of BOARD_COLS) State[col] = b[col];
+  State.layerCount = b.layerCount || 2;
+  if (typeof Boards !== "undefined" && Boards.refreshTabs) Boards.refreshTabs();
 }
 
 function undo(){
@@ -415,37 +517,60 @@ function redo(){
    only the objects that the action touched — later edits to other objects stay. */
 function selectiveUndo(i){
   if (i < 0 || i >= Undo.stack.length) return false;
+  boardsSyncScalars();
   const entry = Undo.stack[i];
-  const before = JSON.parse(entry.json);
-  const after  = JSON.parse(i + 1 < Undo.stack.length ? Undo.stack[i+1].json : snapshot());
+  const before = _wrapLegacyBoards(JSON.parse(entry.json));
+  const after  = _wrapLegacyBoards(JSON.parse(i + 1 < Undo.stack.length ? Undo.stack[i+1].json : snapshot()));
   // Make the selective revert itself undoable (Ctrl+Z restores the reverted action), but tag it
   // so the history dialog does NOT offer to revert the revert — that recursion ("revert: revert:
   // …") just re-applies/re-reverts the same edit endlessly. Strip any existing prefix so the label
   // stays a single clean "revert: <action>".
   pushUndo("revert: " + entry.label.replace(/^revert:\s*/, ""));
   Undo.stack[Undo.stack.length - 1].isRevert = true;
+  // flatten a snapshot collection across its boards: id → {o, bid} (nets are global)
+  const flat = (s, col) => {
+    const m = new Map();
+    if (col === "nets"){ for (const o of (s.nets || [])) m.set(o.id, { o, bid: null }); return m; }
+    for (const b of (s.boards || [])) for (const o of (b[col] || [])) m.set(o.id, { o, bid: b.id });
+    return m;
+  };
+  const liveArr = (col, bid) => {   // the live array to re-add into (board by id, else active)
+    if (col === "nets") return State.nets;
+    const b = State.boards.find(x => x.id === bid) || activeBoard();
+    return b[col];
+  };
   for (const col of ["components","vias","traces","notes","schWires","schLabels","nets"]){
-    const bm = new Map((before[col] || []).map(o => [o.id, o]));
-    const am = new Map((after[col] || []).map(o => [o.id, o]));
-    const cur = State[col];
-    // objects created by that action → remove
+    const bm = flat(before, col);
+    const am = flat(after, col);
+    const curArrs = col === "nets" ? [State.nets] : State.boards.map(b => b[col]);
+    // objects created by that action → remove (wherever they live now)
     for (const id of am.keys()){
       if (bm.has(id)) continue;
-      const idx = cur.findIndex(o => o.id === id);
-      if (idx >= 0) cur.splice(idx, 1);
+      for (const cur of curArrs){
+        const idx = cur.findIndex(o => o.id === id);
+        if (idx >= 0){ cur.splice(idx, 1); break; }
+      }
     }
     // objects modified or deleted by that action → restore the "before" version
-    for (const [id, bo] of bm){
-      const ao = am.get(id);
-      if (ao && JSON.stringify(ao) === JSON.stringify(bo)) continue;
+    for (const [id, { o: bo, bid }] of bm){
+      const ae = am.get(id);
+      if (ae && JSON.stringify(ae.o) === JSON.stringify(bo)) continue;
       const copy = JSON.parse(JSON.stringify(bo));
-      const idx = cur.findIndex(o => o.id === id);
-      if (idx >= 0) cur[idx] = copy; else cur.push(copy);
+      let placed = false;
+      for (const cur of curArrs){
+        const idx = cur.findIndex(o => o.id === id);
+        if (idx >= 0){ cur[idx] = copy; placed = true; break; }
+      }
+      if (!placed) liveArr(col, bid).push(copy);
     }
   }
-  // image layer transforms
-  const bl = new Map((before.layersMeta||[]).map(m => [m.id, m]));
-  const al = new Map((after.layersMeta||[]).map(m => [m.id, m]));
+  // image layer transforms (flatten metas across boards)
+  const flatMeta = (s) => {
+    const m = new Map();
+    for (const b of (s.boards || [])) for (const o of (b.layersMeta || [])) m.set(o.id, o);
+    return m;
+  };
+  const bl = flatMeta(before), al = flatMeta(after);
   for (const [id, bo] of bl){
     const ao = al.get(id);
     if (ao && JSON.stringify(ao) === JSON.stringify(bo)) continue;
@@ -453,15 +578,23 @@ function selectiveUndo(i){
     if (l) Object.assign(l, bo);
   }
   // board-wide scalar settings (mirror the list diffSnapshots reports)
-  for (const k of ["pxPerMm","layerCount","viaR","viaHole","traceW","compView","traceView",
+  for (const k of ["pxPerMm","viaR","viaHole","traceW","compView","traceView",
                    "overlapCheck","refTextSize","copperOz","copperOzInner","focusDim"]){
     if (JSON.stringify(before[k]) !== JSON.stringify(after[k])) State[k] = before[k];
+  }
+  // per-page layer count
+  for (const sb of (before.boards || [])){
+    const ab = (after.boards || []).find(x => x.id === sb.id);
+    if (ab && ab.layerCount !== sb.layerCount){
+      const live = State.boards.find(x => x.id === sb.id);
+      if (live){ live.layerCount = sb.layerCount; if (live === activeBoard()) State.layerCount = sb.layerCount; }
+    }
   }
   if (JSON.stringify(before.bomColumns) !== JSON.stringify(after.bomColumns))
     State.bomColumns = JSON.parse(JSON.stringify(before.bomColumns || []));
   const idx = Undo.stack.indexOf(entry);
   if (idx >= 0) Undo.stack.splice(idx, 1); // the action is gone from the timeline
-  State.components.forEach(c => c._fp = null);
+  allOf("components").forEach(c => c._fp = null);
   pruneNets();
   return true;
 }
@@ -497,8 +630,20 @@ function _compAspects(b, a){
 
 function diffSnapshots(beforeJson, afterJson){
   let b, a;
-  try { b = JSON.parse(beforeJson); a = JSON.parse(afterJson); } catch(e){ return ""; }
+  try { b = _wrapLegacyBoards(JSON.parse(beforeJson)); a = _wrapLegacyBoards(JSON.parse(afterJson)); } catch(e){ return ""; }
+  // flatten per-board collections so the differs below keep their flat view
+  for (const s of [b, a]){
+    for (const col of ["components","vias","traces","notes","schWires","schLabels"])
+      s[col] = (s.boards || []).flatMap(x => x[col] || []);
+    s.layersMeta = (s.boards || []).flatMap(x => x.layersMeta || []);
+  }
   const parts = [];
+  if ((b.boards || []).length !== (a.boards || []).length)
+    parts.push((a.boards.length > b.boards.length ? "added" : "removed") + " a PCB page");
+  for (const sb of (b.boards || [])){
+    const ab = (a.boards || []).find(x => x.id === sb.id);
+    if (ab && ab.layerCount !== sb.layerCount) parts.push("layer count changed (" + (ab.name || "page") + ")");
+  }
   const list = (names, max = 4) => {
     const f = names.filter(Boolean);
     if (!f.length) return "";
@@ -554,7 +699,7 @@ function diffSnapshots(beforeJson, afterJson){
   if (layerNames.length) parts.push("adjusted " + layerNames.length + " layer" + (layerNames.length>1?"s":"") + list(layerNames));
 
   // board-wide scalar settings
-  [ ["pxPerMm","scale"], ["layerCount","layer count"], ["viaR","via size"], ["viaHole","via drill"], ["traceW","trace width"],
+  [ ["pxPerMm","scale"], ["viaR","via size"], ["viaHole","via drill"], ["traceW","trace width"],
     ["refTextSize","label size"], ["compView","component view"], ["traceView","trace view"],
     ["copperOz","copper weight"], ["copperOzInner","inner copper weight"], ["focusDim","focus dim"],
   ].forEach(([k, lbl]) => { if (b[k] !== a[k]) parts.push(lbl + " changed"); });
@@ -563,11 +708,27 @@ function diffSnapshots(beforeJson, afterJson){
 }
 
 /* ---------- project save / load ---------- */
+function _serializeLayer(l){
+  return {
+    // hosted (URL) layers persist only their link, never the bytes; uploaded layers
+    // persist their dataURL as before
+    id:l.id, name:l.name, side:l.side,
+    dataURL: l.url ? "" : l.dataURL, url: l.url || null,
+    visible:l.visible,
+    opacity:l.opacity, tx:l.tx, ty:l.ty, scale:l.scale, rot:l.rot,
+    mirror:l.mirror, locked:l.locked, warp:l.warp || null,
+    // logical pixel size when the stored bitmap is a downscaled stand-in (multiplayer
+    // image share) — the bitmap is stretched back to this on load so scale/warp math,
+    // which assumes the ORIGINAL pixel dimensions, keeps working
+    imgW: l.imgW || null, imgH: l.imgH || null,
+  };
+}
+
 function serializeProject(){
+  boardsSyncScalars();
   return JSON.stringify({
-    app: "pcb-reveng", version: 1,
+    app: "pcb-reveng", version: 2,
     pxPerMm: State.pxPerMm,
-    layerCount: State.layerCount,
     viaR: State.viaR,
     viaHole: State.viaHole,
     traceW: State.traceW,
@@ -582,28 +743,17 @@ function serializeProject(){
     refCounters: State.refCounters,
     nets: State.nets,
     bomColumns: State.bomColumns,
-    // `_fp` is a RUNTIME footprint cache — never persist it. Saving it means a reloaded
-    // project reuses the stale (possibly old-format) cached geometry instead of
-    // regenerating from fpId+fpParams, which quietly breaks body hit-testing (e.g. the
-    // shift-click → schematic jump) on loaded-but-not-freshly-placed parts.
-    components: State.components.map(c => { const { _fp, ...rest } = c; return rest; }),
-    vias: State.vias,
-    traces: State.traces,
-    notes: State.notes,
-    schWires: State.schWires,
-    schLabels: State.schLabels,
-    layers: State.layers.map(l => ({
-      // hosted (URL) layers persist only their link, never the bytes; uploaded layers
-      // persist their dataURL as before
-      id:l.id, name:l.name, side:l.side,
-      dataURL: l.url ? "" : l.dataURL, url: l.url || null,
-      visible:l.visible,
-      opacity:l.opacity, tx:l.tx, ty:l.ty, scale:l.scale, rot:l.rot,
-      mirror:l.mirror, locked:l.locked, warp:l.warp || null,
-      // logical pixel size when the stored bitmap is a downscaled stand-in (multiplayer
-      // image share) — the bitmap is stretched back to this on load so scale/warp math,
-      // which assumes the ORIGINAL pixel dimensions, keeps working
-      imgW: l.imgW || null, imgH: l.imgH || null,
+    boardIdx: State.boardIdx,
+    boards: State.boards.map(b => ({
+      id: b.id, name: b.name, layerCount: b.layerCount || 2,
+      // `_fp` is a RUNTIME footprint cache — never persist it. Saving it means a reloaded
+      // project reuses the stale (possibly old-format) cached geometry instead of
+      // regenerating from fpId+fpParams, which quietly breaks body hit-testing (e.g. the
+      // shift-click → schematic jump) on loaded-but-not-freshly-placed parts.
+      components: b.components.map(c => { const { _fp, ...rest } = c; return rest; }),
+      vias: b.vias, traces: b.traces, notes: b.notes,
+      schWires: b.schWires, schLabels: b.schLabels,
+      layers: b.layers.map(_serializeLayer),
     })),
   });
 }
@@ -620,10 +770,9 @@ function fitBitmapTo(img, w, h){
 }
 
 function loadProject(json, done){
-  const s = JSON.parse(json);
+  const s = _wrapLegacyBoards(JSON.parse(json));
   if (s.app !== "pcb-reveng") throw new Error("Not a PCB RevEng project file");
   State.pxPerMm = s.pxPerMm || 10;
-  State.layerCount = s.layerCount || 2;
   State.viaR = s.viaR || 8;
   State.viaHole = s.viaHole || 3.6;
   State.traceW = s.traceW || 5;
@@ -638,24 +787,37 @@ function loadProject(json, done){
   State.refCounters = s.refCounters || {};
   State.nets = s.nets || [];
   State.bomColumns = s.bomColumns || [];
-  State.components = s.components || [];
-  State.components.forEach(c => { c._fp = null; });  // drop any persisted footprint cache → regenerate from fpId+fpParams
-  State.vias = s.vias || [];
-  State.traces = s.traces || [];
-  State.notes = s.notes || [];
-  State.schWires = s.schWires || [];
-  State.schLabels = s.schLabels || [];
   if (typeof Sch !== "undefined" && Sch.clearSelection){ Sch.clearSelection(); Sch._entered = false; }   // stale refs point at the old project's wires; re-fit the sheet to the new board
-  State.layers = [];
   Undo.stack.length = 0; Undo.redo.length = 0;
   _imgVault.clear(); _imgVaultSeq = 1;   // fresh project → drop any cached bitmaps
-  const metas = s.layers || [];
-  let pending = metas.length;
+
+  // rebuild every page; each board carries its own layer list (bytes load async below)
+  State.boards = (s.boards || []).map((sb, bi) => {
+    const comps = sb.components || [];
+    comps.forEach(c => { c._fp = null; });  // drop any persisted footprint cache → regenerate from fpId+fpParams
+    return { id: sb.id != null ? sb.id : bi, name: sb.name || ("PCB " + (bi + 1)),
+             layerCount: sb.layerCount || 2,
+             layers: [], components: comps, vias: sb.vias || [], traces: sb.traces || [],
+             notes: sb.notes || [], schWires: sb.schWires || [], schLabels: sb.schLabels || [] };
+  });
+  if (!State.boards.length) State.boards = [{ id: 0, name: "PCB 1", layerCount: 2,
+    layers: [], components: [], vias: [], traces: [], notes: [], schWires: [], schLabels: [] }];
+  State.boardIdx = Math.max(0, Math.min(State.boards.length - 1, s.boardIdx || 0));
+  const ab = State.boards[State.boardIdx];
+  for (const col of BOARD_COLS) State[col] = ab[col];
+  State.layerCount = ab.layerCount || 2;
+  if (typeof Boards !== "undefined" && Boards.refreshTabs) Boards.refreshTabs();
+
+  const jobs = [];   // [board, meta] pairs across every page
+  (s.boards || []).forEach((sb, bi) => {
+    for (const m of (sb.layers || [])) jobs.push([State.boards[bi], m]);
+  });
+  let pending = jobs.length;
   if (!pending){ done && done(); return; }
   const settle = () => { if (--pending === 0 && done) done(); };
-  for (const m of metas){
+  for (const [board, m] of jobs){
     const layer = { ...m, img: null };
-    State.layers.push(layer);
+    board.layers.push(layer);
     if (m.url){
       // hosted layer — reload live from its URL. Try CORS first (keeps the canvas
       // readable for align/export), fall back to a plain load so it still shows on
@@ -704,18 +866,17 @@ function resetProject(){
   State.copperOz = 1;
   State.copperOzInner = 0.5;
   State.focusDim = 0.16;
-  State.layers = [];
-  State.components = [];
-  State.vias = [];
-  State.traces = [];
-  State.notes = [];
-  State.schWires = [];
-  State.schLabels = [];
+  State._id = 1;
+  State.boards = [{ id: nextId(), name: "PCB 1", layerCount: 2,
+                    layers: [], components: [], vias: [], traces: [],
+                    notes: [], schWires: [], schLabels: [] }];
+  State.boardIdx = 0;
+  for (const col of BOARD_COLS) State[col] = State.boards[0][col];
   if (typeof Sch !== "undefined" && Sch.clearSelection){ Sch.clearSelection(); Sch._entered = false; }
   State.nets = [];
   State.bomColumns = [];
-  State._id = 1;
   State.refCounters = {};
+  if (typeof Boards !== "undefined" && Boards.refreshTabs) Boards.refreshTabs();
   Undo.stack.length = 0; Undo.redo.length = 0;
   _imgVault.clear(); _imgVaultSeq = 1;   // no undo history → cached bitmaps are unreachable
 }

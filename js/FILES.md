@@ -25,6 +25,7 @@ Cache-buster: bump `?v=` in `index.html` when editing a file so the browser relo
 | `fpdialog.js` | Footprint-picker dialog (search, param editors, kicad-name lookup). |
 | `kicadsearch.js` | KiCad-library fuzzy footprint search backing `fpdialog`. |
 | `footprints.js` | Registry entry point + polar-mark params for generated footprints. |
+| `boards.js` | Multi-PCB pages: bottom tab strip (Visual+Schematic), page add/rename/delete/switch with per-page camera memory, off-page connector links (`comp.xlink`, pin-by-pin net merge, jump buttons). Data model lives in state.js (`State.boards` + active-page aliases). |
 
 ## `footprints/` — generated footprint families
 
