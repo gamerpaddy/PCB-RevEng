@@ -83,6 +83,10 @@ connection → nets merge pin-by-pin, and the inspector shows "go to page" jump 
   image bytes; mpApplyCore keeps the local page by board id and keeps local bitmaps;
   mpHostViolation flags cross-page object edits; cursor msgs carry `bid` — OK
 - resetProject (New) → back to a single "PCB 1" page — OK
+- tab right-click context menu (Boards.tabMenu via UI.showContextMenu): Switch (inactive
+  tabs only) / Rename… / Delete page… (danger, only when >1 page); delete moved out of
+  the raw right-click — menu is the extension point for future per-page actions
+  (duplicate, move left/right, merge, per-page export) — OK
 
 ## Bugs found & fixed during implementation
 - Editor code reassigns `State.traces = State.traces.filter(…)` etc. in ~30 places,

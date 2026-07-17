@@ -120,10 +120,10 @@ const Boards = {
       const t = document.createElement("span");
       t.className = "board-tab" + (i === State.boardIdx ? " active" : "");
       t.textContent = b.name;
-      t.title = b.name + " — click to switch, double-click to rename, right-click to delete";
+      t.title = b.name + " — click to switch, double-click to rename, right-click for menu";
       t.addEventListener("click", () => Boards.switchTo(i));
       t.addEventListener("dblclick", (e) => { e.preventDefault(); Boards.renameBoard(i); });
-      t.addEventListener("contextmenu", (e) => { e.preventDefault(); Boards.removeBoard(i); });
+      t.addEventListener("contextmenu", (e) => { e.preventDefault(); Boards.tabMenu(i, e.clientX, e.clientY); });
       el.appendChild(t);
     });
     const add = document.createElement("span");
@@ -133,6 +133,22 @@ const Boards = {
     add.addEventListener("click", () => Boards.addBoard());
     el.appendChild(add);
     Boards.refreshVisibility();
+  },
+
+  /* right-click menu on a page tab — the home for future per-page actions
+     (duplicate page, move left/right, merge into…, export just this page, …) */
+  tabMenu(i, x, y){
+    const b = State.boards[i]; if (!b) return;
+    const items = [
+      { label: "Rename…", action: () => Boards.renameBoard(i) },
+    ];
+    if (i !== State.boardIdx)
+      items.unshift({ label: "Switch to " + b.name, action: () => Boards.switchTo(i) });
+    if (State.boards.length > 1) items.push(
+      { sep: true },
+      { label: "Delete page…", danger: true, action: () => Boards.removeBoard(i) },
+    );
+    UI.showContextMenu(x, y, items);
   },
 
   refreshVisibility(){
