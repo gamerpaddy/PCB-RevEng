@@ -52,6 +52,7 @@ const State = {
   schWires: [],         // schematic-editor wires: {id,netId,points:[{x,y}mm],a:{comp,pin}|null,b:{comp,pin}|null}
   schLabels: [],        // schematic net labels pinned to pins: {id,comp,pin,dx,dy} (offset mm from the pin)
   nets: [],             // {id,name,color,auto}
+  xlinks: [],           // off-page connector links: {id, a:compId, b:compId, map:[[pinNumA,pinNumB],…]|null} (null = all pins by number); project-global like nets
   bomColumns: [],       // custom BOM column names (MPN, Supplier, …); per-part values live in component.bom
   _id: 1,
   refCounters: {},      // prefix -> last number
@@ -382,6 +383,7 @@ function snapshot(){
     copperOzInner: State.copperOzInner,
     focusDim: State.focusDim,
     nets: State.nets,
+    xlinks: State.xlinks,
     bomColumns: State.bomColumns,
     _id: State._id,
     refCounters: State.refCounters,
@@ -448,6 +450,7 @@ function applySnapshot(json){
   State.copperOzInner = s.copperOzInner || 0.5;
   State.focusDim = (s.focusDim != null) ? s.focusDim : 0.16;
   State.nets = s.nets;
+  State.xlinks = s.xlinks || [];
   State.bomColumns = s.bomColumns || [];
   State._id = s._id;
   State.refCounters = s.refCounters;
@@ -530,19 +533,22 @@ function selectiveUndo(i){
   // flatten a snapshot collection across its boards: id → {o, bid} (nets are global)
   const flat = (s, col) => {
     const m = new Map();
-    if (col === "nets"){ for (const o of (s.nets || [])) m.set(o.id, { o, bid: null }); return m; }
+    if (col === "nets" || col === "xlinks"){ for (const o of (s[col] || [])) m.set(o.id, { o, bid: null }); return m; }
     for (const b of (s.boards || [])) for (const o of (b[col] || [])) m.set(o.id, { o, bid: b.id });
     return m;
   };
   const liveArr = (col, bid) => {   // the live array to re-add into (board by id, else active)
     if (col === "nets") return State.nets;
+    if (col === "xlinks") return State.xlinks;
     const b = State.boards.find(x => x.id === bid) || activeBoard();
     return b[col];
   };
-  for (const col of ["components","vias","traces","notes","schWires","schLabels","nets"]){
+  for (const col of ["components","vias","traces","notes","schWires","schLabels","nets","xlinks"]){
     const bm = flat(before, col);
     const am = flat(after, col);
-    const curArrs = col === "nets" ? [State.nets] : State.boards.map(b => b[col]);
+    const curArrs = col === "nets" ? [State.nets]
+                  : col === "xlinks" ? [State.xlinks]
+                  : State.boards.map(b => b[col]);
     // objects created by that action → remove (wherever they live now)
     for (const id of am.keys()){
       if (bm.has(id)) continue;
@@ -681,7 +687,7 @@ function diffSnapshots(beforeJson, afterJson){
   });
 
   // vias, traces & notes — counts only (no useful per-object name)
-  for (const [col, noun] of [["vias","via"], ["traces","trace"], ["notes","note"], ["schWires","schematic wire"], ["schLabels","net label"]]){
+  for (const [col, noun] of [["vias","via"], ["traces","trace"], ["notes","note"], ["schWires","schematic wire"], ["schLabels","net label"], ["xlinks","off-page link"]]){
     const d = diffColl(col);
     if (d.added.length)   parts.push("added "   + d.added.length   + " " + noun + (d.added.length>1?"s":""));
     if (d.removed.length) parts.push("removed " + d.removed.length + " " + noun + (d.removed.length>1?"s":""));
@@ -742,6 +748,7 @@ function serializeProject(){
     _id: State._id,
     refCounters: State.refCounters,
     nets: State.nets,
+    xlinks: State.xlinks,
     bomColumns: State.bomColumns,
     boardIdx: State.boardIdx,
     boards: State.boards.map(b => ({
@@ -786,6 +793,7 @@ function loadProject(json, done){
   State._id = s._id || 1;
   State.refCounters = s.refCounters || {};
   State.nets = s.nets || [];
+  State.xlinks = s.xlinks || [];
   State.bomColumns = s.bomColumns || [];
   if (typeof Sch !== "undefined" && Sch.clearSelection){ Sch.clearSelection(); Sch._entered = false; }   // stale refs point at the old project's wires; re-fit the sheet to the new board
   Undo.stack.length = 0; Undo.redo.length = 0;
@@ -874,6 +882,7 @@ function resetProject(){
   for (const col of BOARD_COLS) State[col] = State.boards[0][col];
   if (typeof Sch !== "undefined" && Sch.clearSelection){ Sch.clearSelection(); Sch._entered = false; }
   State.nets = [];
+  State.xlinks = [];
   State.bomColumns = [];
   State.refCounters = {};
   if (typeof Boards !== "undefined" && Boards.refreshTabs) Boards.refreshTabs();

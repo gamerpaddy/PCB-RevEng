@@ -113,6 +113,7 @@ const Boards = {
   },
 
   refreshTabs(){
+    Boards.migrateLinks();   // adopt any old comp.xlink groups into State.xlinks records
     const el = Boards.ensureStrip();
     Boards._sig = Boards.signature();
     el.innerHTML = "";
@@ -163,13 +164,73 @@ const Boards = {
   },
 
   /* ---------- off-page connector links ----------
-     comp.xlink = shared group id. Every part with the same xlink is "the same
-     connection" — nets merge pin-by-pin (matched by pin NUMBER), and the inspector
-     shows a jump button per partner. More than two members are fine (e.g. one bus
-     connector fanning out to several PCBs). */
-  linkPartners(c){
-    if (!c || !c.xlink) return [];
-    return allOf("components").filter(o => o.xlink === c.xlink && o.id !== c.id);
+     One link = one State.xlinks record {id, a, b, map} between two parts, with an
+     optional PIN MAP — so a 4-pin connector can go to page 2 with pins 1,2 and to
+     page 3 with pins 3,4 (two records with partial maps). map = [[pinNumA,pinNumB],…];
+     null means "every pin, matched by number". A part can carry any number of links. */
+
+  /* drop records whose parts no longer exist (deleted part / deleted page) */
+  pruneLinks(){
+    if (!State.xlinks.length) return;
+    const ok = State.xlinks.filter(l => getComp(l.a) && getComp(l.b));
+    if (ok.length !== State.xlinks.length) State.xlinks = ok;
+  },
+
+  /* one-time migration of the old comp.xlink group model into pairwise records */
+  migrateLinks(){
+    const grouped = new Map();
+    for (const c of allOf("components")){
+      if (!c.xlink) continue;
+      if (!grouped.has(c.xlink)) grouped.set(c.xlink, []);
+      grouped.get(c.xlink).push(c);
+      delete c.xlink;
+    }
+    for (const members of grouped.values())
+      for (let i = 1; i < members.length; i++)
+        State.xlinks.push({ id: nextId(), a: members[0].id, b: members[i].id, map: null });
+    if (grouped.size && typeof markDirty === "function") markDirty();
+  },
+
+  compLinks(c){
+    Boards.pruneLinks();
+    return c ? State.xlinks.filter(l => l.a === c.id || l.b === c.id) : [];
+  },
+  linkOther(link, c){ return getComp(link.a === c.id ? link.b : link.a); },
+  /* the pin pairs a link joins, oriented from c's side: [[myNum, otherNum], …] */
+  linkPairs(link, c){
+    const other = Boards.linkOther(link, c);
+    if (!other) return [];
+    if (link.map) return link.a === c.id ? link.map : link.map.map(([a, b]) => [b, a]);
+    // no explicit map — every pin number both parts share
+    const mine = new Set(c.pins.map(p => String(p.num)));
+    return other.pins.map(p => String(p.num)).filter(n => mine.has(n)).map(n => [n, n]);
+  },
+  /* short human label for a link's pin subset ("all pins" / "pins 1,2" / "1→3, 2→4") */
+  linkPinsLabel(link, c){
+    if (!link.map) return "all pins";
+    const pairs = Boards.linkPairs(link, c);
+    if (pairs.every(([a, b]) => String(a) === String(b)))
+      return "pins " + pairs.map(([a]) => a).join(",");
+    return pairs.map(([a, b]) => a + "→" + b).join(", ");
+  },
+
+  /* parse the dialog's pin field: "" | "all" → null; "1,2" → same numbers both sides;
+     "1→3, 2→4" (also "1>3" / "1:3") → explicit pairs. Returns {map} or {err}. */
+  parsePinSpec(text, c, target){
+    text = (text || "").trim();
+    if (!text || /^all$/i.test(text)) return { map: null };
+    const has = (comp, n) => comp.pins.some(p => String(p.num) === String(n));
+    const map = [];
+    for (const tok of text.split(",")){
+      const t = tok.trim();
+      if (!t) continue;
+      const m = /^(.+?)\s*(?:→|->|>|:)\s*(.+)$/.exec(t);
+      const a = (m ? m[1] : t).trim(), b = (m ? m[2] : t).trim();
+      if (!has(c, a))      return { err: "pin " + a + " not on " + c.ref };
+      if (!has(target, b)) return { err: "pin " + b + " not on " + target.ref };
+      map.push([a, b]);
+    }
+    return map.length ? { map } : { map: null };
   },
 
   boardNameOf(comp){
@@ -187,24 +248,24 @@ const Boards = {
     else UI.jumpToComp(comp);
   },
 
-  /* pin-by-pin net merge across every member of c's link group (pins matched by num).
-     Where one side has a net and the other doesn't, the empty pin joins it; where both
-     have different nets they merge (protected-vs-protected pairs are left alone). */
+  /* net merge across every link of c, honouring each link's pin map. Where one side
+     has a net and the other doesn't, the empty pin joins it; where both have different
+     nets they merge (protected-vs-protected pairs are left alone). */
   syncLinkNets(c, quiet){
-    const partners = Boards.linkPartners(c);
-    if (!partners.length) return 0;
     let changed = 0;
     const releaseAll = (compId, pinIdx) => {   // page-aware releasePinWireNets
       for (const w of allOf("schWires"))
         if ((w.a && w.a.comp === compId && w.a.pin === pinIdx) ||
             (w.b && w.b.comp === compId && w.b.pin === pinIdx)) w.netId = null;
     };
-    for (const o of partners){
-      for (let pi = 0; pi < c.pins.length; pi++){
-        const p = c.pins[pi];
-        const qi = o.pins.findIndex(q => String(q.num) === String(p.num));
-        if (qi < 0) continue;
-        const q = o.pins[qi];
+    for (const link of Boards.compLinks(c)){
+      const o = Boards.linkOther(link, c);
+      if (!o) continue;
+      for (const [myNum, otherNum] of Boards.linkPairs(link, c)){
+        const pi = c.pins.findIndex(p => String(p.num) === String(myNum));
+        const qi = o.pins.findIndex(p => String(p.num) === String(otherNum));
+        if (pi < 0 || qi < 0) continue;
+        const p = c.pins[pi], q = o.pins[qi];
         if (p.netId && q.netId && p.netId !== q.netId){
           const kept = mergeNets(p.netId, q.netId);
           if (kept != null) changed++;
@@ -224,20 +285,19 @@ const Boards = {
     return changed;
   },
 
-  linkTo(c, target, merge){
+  linkTo(c, target, merge, map){
     pushUndo("off-page link " + c.ref);
-    const group = target.xlink || c.xlink || nextId();
-    c.xlink = group; target.xlink = group;
+    State.xlinks.push({ id: nextId(), a: c.id, b: target.id, map: map || null });
     if (merge) Boards.syncLinkNets(c, true);
     if (typeof markDirty === "function") markDirty();
-    UI.toast("Linked " + c.ref + " ↔ " + target.ref + " (" + Boards.boardNameOf(target) + ")");
+    UI.toast("Linked " + c.ref + " ↔ " + target.ref + " (" + Boards.boardNameOf(target) + ")" +
+             (map ? " — " + map.length + " pin" + (map.length > 1 ? "s" : "") : ""));
     UI.refreshNets(); UI.refreshInspector(); requestRender();
   },
 
-  unlink(c){
-    if (!c.xlink) return;
-    pushUndo("remove off-page link " + c.ref);
-    c.xlink = null;
+  unlink(link, c){
+    pushUndo("remove off-page link " + (c ? c.ref : ""));
+    State.xlinks = State.xlinks.filter(l => l !== link && l.id !== link.id);
     if (typeof markDirty === "function") markDirty();
     UI.refreshInspector(); requestRender();
   },
@@ -250,10 +310,14 @@ const Boards = {
       dlg.id = "xlink-dialog";
       dlg.innerHTML = `
         <h3 style="margin:0 0 8px">Link across pages</h3>
-        <div style="color:#8b96a5;font-size:11px;margin-bottom:8px">Pick the connector this one plugs into on another page.<br>Pins are matched by pin number.</div>
+        <div style="color:#8b96a5;font-size:11px;margin-bottom:8px">Pick the connector this one plugs into on another page.</div>
+        <input id="xlink-search" placeholder="Search ref / value / page…" style="width:320px;box-sizing:border-box;margin-bottom:6px">
         <select id="xlink-target" size="10" style="width:320px"></select>
-        <label style="display:flex;align-items:center;gap:6px;margin:8px 0;font-size:12px">
-          <input type="checkbox" id="xlink-merge" checked> Join nets pin-by-pin now</label>
+        <div style="margin:8px 0 2px;font-size:11px;color:#8b96a5">Pins to join <span style="opacity:.7">— empty = all by number; subsets/crossed pairs allowed</span></div>
+        <input id="xlink-pins" placeholder="all — or 1,2 — or 1→3, 2→4" style="width:320px;box-sizing:border-box">
+        <div id="xlink-err" style="color:#e05555;font-size:11px;min-height:14px;margin-top:2px"></div>
+        <label style="display:flex;align-items:center;gap:6px;margin:6px 0;font-size:12px">
+          <input type="checkbox" id="xlink-merge" checked> Join nets now</label>
         <div style="display:flex;gap:6px;justify-content:flex-end">
           <button id="xlink-cancel">Cancel</button>
           <button id="xlink-ok" class="primary">Link</button>
@@ -262,63 +326,89 @@ const Boards = {
       dlg.querySelector("#xlink-cancel").addEventListener("click", () => dlg.close());
     }
     const sel = dlg.querySelector("#xlink-target");
-    sel.innerHTML = "";
-    const opts = [];
+    const search = dlg.querySelector("#xlink-search");
+    const errEl = dlg.querySelector("#xlink-err");
+    const pinsEl = dlg.querySelector("#xlink-pins");
+    // collect candidates once per open, filter live by the search box
+    const cands = [];
     for (const b of State.boards){
       if (b === boardOf(c)) continue;
       for (const o of b.components){
         if (o.id === c.id) continue;
-        const opt = document.createElement("option");
-        opt.value = String(o.id);
-        opt.textContent = `${b.name} — ${o.ref}  (${o.pins.length} pins${o.value ? ", " + o.value : ""})`;
-        // same pin count first: most likely the mating half
-        opt._rank = o.pins.length === c.pins.length ? 0 : 1;
-        opts.push(opt);
+        cands.push({
+          id: o.id,
+          label: `${b.name} — ${o.ref}  (${o.pins.length} pins${o.value ? ", " + o.value : ""})`,
+          text: (b.name + " " + o.ref + " " + (o.value || "") + " " + (o.part || "")).toLowerCase(),
+          rank: o.pins.length === c.pins.length ? 0 : 1,   // same pin count first: likely the mating half
+        });
       }
     }
-    opts.sort((a, b2) => a._rank - b2._rank || a.textContent.localeCompare(b2.textContent));
-    for (const o of opts) sel.appendChild(o);
-    if (!opts.length){
+    cands.sort((a, b2) => a.rank - b2.rank || a.label.localeCompare(b2.label));
+    if (!cands.length){
       UI.toast("No parts on other pages yet — add a page and place the mating connector first");
       return;
     }
-    sel.selectedIndex = 0;
+    const fill = () => {
+      const q = search.value.trim().toLowerCase();
+      const keep = q ? cands.filter(x => q.split(/\s+/).every(w => x.text.includes(w))) : cands;
+      sel.innerHTML = "";
+      for (const x of keep){
+        const opt = document.createElement("option");
+        opt.value = String(x.id); opt.textContent = x.label;
+        sel.appendChild(opt);
+      }
+      if (keep.length) sel.selectedIndex = 0;
+      errEl.textContent = keep.length ? "" : "no match";
+    };
+    search.value = ""; pinsEl.value = ""; errEl.textContent = "";
+    search.oninput = fill;
+    fill();
     dlg.querySelector("#xlink-ok").onclick = () => {
       const t = getComp(parseInt(sel.value, 10));
+      if (!t){ errEl.textContent = "pick a part from the list"; return; }
+      const spec = Boards.parsePinSpec(pinsEl.value, c, t);
+      if (spec.err){ errEl.textContent = spec.err; return; }
       dlg.close();
-      if (t) Boards.linkTo(c, t, dlg.querySelector("#xlink-merge").checked);
+      Boards.linkTo(c, t, dlg.querySelector("#xlink-merge").checked, spec.map);
     };
     dlg.showModal();
+    search.focus();
   },
 
   /* inspector section — appended by UI.inspectComponent for every part */
   linkSection(box, c){
-    const partners = Boards.linkPartners(c);
-    if (!partners.length && State.boards.length <= 1) return;   // single-page project, nothing linked → stay out of the way
+    const links = Boards.compLinks(c);
+    if (!links.length && State.boards.length <= 1) return;   // single-page project, nothing linked → stay out of the way
     const sec = document.createElement("div");
     sec.className = "insp-section";
-    const rows = partners.map(o =>
-      `<div class="insp-row"><label>↔ ${escAttr(o.ref)}</label>
-         <span style="flex:1;color:#8b96a5;font-size:11px;overflow:hidden;text-overflow:ellipsis">${escAttr(Boards.boardNameOf(o))}</span>
-         <button class="xlink-go" data-id="${o.id}" title="Jump to ${escAttr(o.ref)} on ${escAttr(Boards.boardNameOf(o))}">Go →</button></div>`).join("");
+    const rows = links.map(l => {
+      const o = Boards.linkOther(l, c);
+      if (!o) return "";
+      return `<div class="insp-row"><label title="${escAttr(Boards.linkPinsLabel(l, c))}">↔ ${escAttr(o.ref)}</label>
+         <span style="flex:1;color:#8b96a5;font-size:11px;overflow:hidden;text-overflow:ellipsis" title="${escAttr(Boards.linkPinsLabel(l, c))}">${escAttr(Boards.boardNameOf(o))} · ${escAttr(Boards.linkPinsLabel(l, c))}</span>
+         <button class="xlink-go" data-id="${o.id}" title="Jump to ${escAttr(o.ref)} on ${escAttr(Boards.boardNameOf(o))}">Go →</button>
+         <button class="xlink-del danger" data-link="${l.id}" title="Remove this link (nets stay merged)">✕</button></div>`;
+    }).join("");
     sec.innerHTML = `
-      <div class="insp-title" style="font-size:11px">Off-page link</div>
+      <div class="insp-title" style="font-size:11px">Off-page links</div>
       ${rows}
       <div class="insp-actions">
-        <button id="i-xlink-add">${partners.length ? "Link another…" : "Link to another page…"}</button>
-        ${partners.length ? `<button id="i-xlink-sync" title="Re-join nets pin-by-pin across all linked connectors">Sync nets</button>
-        <button id="i-xlink-del" class="danger" title="Remove THIS part from the link group (nets stay merged)">Unlink</button>` : ""}
+        <button id="i-xlink-add">${links.length ? "Link another…" : "Link to another page…"}</button>
+        ${links.length ? `<button id="i-xlink-sync" title="Re-join nets across all of this part's links (honours each link's pin map)">Sync nets</button>` : ""}
       </div>`;
     box.appendChild(sec);
     sec.querySelector("#i-xlink-add").addEventListener("click", () => Boards.openLinkDialog(c));
     const sync = sec.querySelector("#i-xlink-sync");
     if (sync) sync.addEventListener("click", () => { pushUndo("sync off-page nets " + c.ref); Boards.syncLinkNets(c); });
-    const del = sec.querySelector("#i-xlink-del");
-    if (del) del.addEventListener("click", () => Boards.unlink(c));
     for (const btn of sec.querySelectorAll(".xlink-go"))
       btn.addEventListener("click", () => {
         const t = getComp(parseInt(btn.dataset.id, 10));
         if (t) Boards.jumpTo(t);
+      });
+    for (const btn of sec.querySelectorAll(".xlink-del"))
+      btn.addEventListener("click", () => {
+        const l = State.xlinks.find(x => x.id === parseInt(btn.dataset.link, 10));
+        if (l) Boards.unlink(l, c);
       });
   },
 

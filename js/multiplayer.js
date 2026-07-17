@@ -418,7 +418,8 @@ function mpHostViolation(prevStr, nextStr){
     // multi-page cores keep collections per board — flatten for the category diff
     const F = (s, col) => s.boards ? s.boards.flatMap(x => x[col] || []) : s[col];
     if (!R.editObjects && (diff(F(a,"components"), F(b,"components")) || diff(F(a,"vias"), F(b,"vias")) ||
-                           diff(F(a,"traces"), F(b,"traces")) || diff(F(a,"notes"), F(b,"notes"))))
+                           diff(F(a,"traces"), F(b,"traces")) || diff(F(a,"notes"), F(b,"notes")) ||
+                           diff(a.xlinks, b.xlinks)))
       return "edit objects";
     if (!R.editNets && diff(a.nets, b.nets)) return "edit nets";
     if (!R.editSchBom && (diff(F(a,"schWires"), F(b,"schWires")) || diff(F(a,"schLabels"), F(b,"schLabels")) ||
@@ -519,6 +520,7 @@ function mpApplyCore(coreStr){
   State._id = Math.max(State._id || 1, s._id || 1);
   State.refCounters = s.refCounters || {};
   State.nets = s.nets || [];
+  State.xlinks = s.xlinks || [];
   State.bomColumns = s.bomColumns || [];
 
   // rebuild every PAGE from the core. Layers match by id — adopt remote meta/transform,

@@ -42,10 +42,17 @@ connection → nets merge pin-by-pin, and the inspector shows "go to page" jump 
   pages land correctly even while you're not looking at them.
 
 ## Connector links (off-page)
-- `comp.xlink` = link-group id (serialized with the component; >2 members allowed).
-- Inspector section "Off-page link": Link… dialog (pick parts on other pages,
-  optional pin-number net merge), partner list with per-partner "Go" jump buttons
-  (switch page + select + centre), Sync nets, Unlink.
+- `State.xlinks` = project-global link records `{id, a:compId, b:compId, map}` (v2:
+  replaced the old comp.xlink group id; old saves auto-migrate in Boards.migrateLinks).
+  `map` = `[[pinNumA,pinNumB],…]` or null (= all pins matched by number). A part can
+  carry any number of links — e.g. a 4-pin connector linking pins 1,2 to a connector
+  on page 2 and pins 3,4 (as its pins 1,2) to page 3 = two records with partial maps.
+- Link dialog: live search box (ref/value/part/page, word-AND), pin field
+  ("all" | "1,2" | "1→3, 2→4", validated against both parts' pin numbers).
+- Inspector "Off-page links": one row per link (partner ref · page · pin label),
+  per-link Go jump + per-link ✕ unlink, Sync nets (honours each link's map).
+- Records ride in serialize/snapshot/undo/multiplayer like nets (top-level, global);
+  stale records (deleted part/page) pruned lazily via Boards.pruneLinks.
 - Pin-net merges go through mergeNets / releasePinWireNets (invariant preserved).
 
 ## Scope notes / limitations (v1)
