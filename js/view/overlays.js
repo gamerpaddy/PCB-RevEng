@@ -239,7 +239,11 @@ function wrapText(ctx, text, maxW){
 function drawXlinkArrows(ctx){
   View._xlinkHits = [];   // clickable marker rects, refreshed every render
   if (typeof Boards === "undefined" || !State.xlinks || !State.xlinks.length) return;
+  // fade the tags out as the view zooms out: full below-ish 35%, gone at 25%
+  const fade = Math.min(1, Math.max(0, (View.zoom - 0.25) / 0.10));
+  if (fade <= 0) return;
   ctx.save();
+  ctx.globalAlpha = fade;
   ctx.font = "bold 10px sans-serif";
   ctx.textAlign = "left";
   const idx = Boards.linkIndex();   // one pass — never compLinks() per part per frame
@@ -247,14 +251,13 @@ function drawXlinkArrows(ctx){
     const links = idx.byComp.get(c.id);
     if (!links || !links.length) continue;
     const r = compRadius(c) * View.zoom;
-    if (r < 7) continue;   // zoomed out far enough that the part is a dot — hide the tag
     const p = worldToScreen(c.x, c.y);
     if (p.x < -80 || p.y < -40 || p.x > View.width + 80 || p.y > View.height + 40) continue;
     let i = 0;
     for (const l of links){
       const o = idx.comp.get(l.a === c.id ? l.b : l.a);
       if (!o) continue;
-      const y = p.y - r - 8 - i * 14;
+      const y = p.y - r - 2 - i * 14;   // hug the footprint box
       const x = p.x - r * 0.4;
       const label = (idx.page.get(o.id) || "?") + " · " + o.ref;
       // arrowhead pointing away from the part, then the destination text
