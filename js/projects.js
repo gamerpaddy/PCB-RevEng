@@ -165,17 +165,22 @@ function projFmtDate(ts){
 function projStatsOf(projJson){
   let p = projJson;
   if (typeof p === "string"){ try { p = JSON.parse(p); } catch(e){ p = {}; } }
+  // v2 projects keep the collections per PCB page under `boards`; v1 keeps them flat
+  const F = (col) => p.boards ? p.boards.reduce((n, b) => n + (b[col] || []).length, 0)
+                              : (p[col] || []).length;
   return {
-    components: (p.components || []).length,
+    components: F("components"),
     nets:       (p.nets || []).length,
-    traces:     (p.traces || []).length,
-    vias:       (p.vias || []).length,
-    layers:     (p.layers || []).length,
+    traces:     F("traces"),
+    vias:       F("vias"),
+    layers:     F("layers"),
+    boards:     p.boards ? p.boards.length : 1,
   };
 }
 function projStatsLabel(s){
   if (!s) return "";
-  return s.components + " parts · " + s.nets + " nets · " + s.traces + " traces · " +
+  return (s.boards > 1 ? s.boards + " PCBs · " : "") +
+         s.components + " parts · " + s.nets + " nets · " + s.traces + " traces · " +
          s.vias + " vias · " + s.layers + " images";
 }
 async function projStorageLabel(){
@@ -382,7 +387,8 @@ Projects.downloadImages = async (pid) => {
   const files = [];
   const used = new Set();
   let hosted = 0;
-  (p.layers || []).forEach((l, i) => {
+  const allLayers = (p.layers || []).concat((p.boards || []).flatMap(b => b.layers || []));
+  allLayers.forEach((l, i) => {
     const m = /^data:image\/([a-z0-9.+-]+);base64,(.+)$/i.exec(l.dataURL || "");
     if (!m){ if (l.url) hosted++; return; }
     let ext = m[1].toLowerCase();
@@ -502,9 +508,10 @@ function projStripImages(text){
   try {
     const p = JSON.parse(text);
     let stripped = false;
-    for (const l of (p.layers || [])){
-      if (l.dataURL){ l.dataURL = ""; stripped = true; }
-    }
+    const lists = [p.layers || []].concat((p.boards || []).map(b => b.layers || []));
+    for (const ls of lists)
+      for (const l of ls)
+        if (l.dataURL){ l.dataURL = ""; stripped = true; }
     return { text: JSON.stringify(p), stripped };
   } catch(e){ return { text, stripped: false }; }
 }

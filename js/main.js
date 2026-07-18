@@ -855,6 +855,33 @@ function wireDialogs(){
     const f = netlistFor(fmt, $("#export-arrange").value);
     downloadFile((f.base || "netlist") + "." + f.ext, f.text, f.mime);
   });
+  // KiCad has no multi-page schematic file — one .kicad_sch per PCB page, zipped
+  $("#export-allpages").addEventListener("click", ()=>{
+    const orig = State.boardIdx;
+    const arrange = $("#export-arrange").value;
+    const safe = (s) => (s || "page").replace(/[^\w.-]+/g, "_");
+    const files = [], used = new Set();
+    try {
+      State.boards.forEach((b, i) => {
+        setActiveBoard(i);
+        let name = "schematic-" + safe(b.name), n = 2;
+        while (used.has(name)) name = "schematic-" + safe(b.name) + "_" + n++;
+        used.add(name);
+        files.push({ name: name + ".kicad_sch", text: netlistFor("sch", arrange).text });
+      });
+    } finally {
+      setActiveBoard(orig);   // the export walk must never leave us on another page
+      requestRender();
+    }
+    const blob = makeZipBlob(files);
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "schematics.zip";
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+    UI.toast("Exported " + files.length + " schematic pages");
+  });
   $("#bom-addcol").addEventListener("click", ()=> UI.addBomColumn());
   $("#bom-export").addEventListener("click", ()=>{
     const f = netlistFor("bom");

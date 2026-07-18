@@ -288,6 +288,7 @@ UI.inspectComponent = (c, selPin) => {
       <button id="i-del" class="danger">Delete</button>
     </div>`;
   box.appendChild(sec);
+  if (typeof Boards !== "undefined") Boards.linkSection(box, c);   // off-page connector links (multi-PCB pages)
   sec.querySelector("#i-side").value = c.side;
 
   const commit = (fn) => { pushUndo("edit " + c.ref); fn(); requestRender(); UI.refreshNets(); };

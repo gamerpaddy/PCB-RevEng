@@ -39,18 +39,22 @@ const _ntPinLabel = (p) => p.name && String(p.name).trim() ? p.num + " (" + p.na
    and the pad rows need the index to focus / reassign the pad) */
 function ntMembers(netId){
   const pads = [], vias = [], traces = [];
-  for (const c of State.components)
+  for (const c of allOf("components"))   // the Nets tab spans every PCB page
     for (let i = 0; i < c.pins.length; i++)
       if (c.pins[i].netId === netId) pads.push({ comp: c, pinIdx: i, pin: c.pins[i] });
-  for (const v of State.vias)   if (v.netId === netId) vias.push(v);
-  for (const t of State.traces) if (t.netId === netId) traces.push(t);
+  for (const v of allOf("vias"))   if (v.netId === netId) vias.push(v);
+  for (const t of allOf("traces")) if (t.netId === netId) traces.push(t);
   return { pads, vias, traces };
 }
 
 /* the schematic wires anchored to a pad, and the board traces physically touching it —
    i.e. everything that would be left describing a connection the pad no longer has */
 function ntPadAttachments(comp, pinIdx){
-  const wires = (State.schWires || []).filter(w =>
+  // the pad may live on ANOTHER page than the open one — use its own board's arrays
+  const bd = (typeof boardOf === "function" && boardOf(comp)) || null;
+  const schWires = bd ? bd.schWires : State.schWires;
+  const bTraces  = bd ? bd.traces   : State.traces;
+  const wires = (schWires || []).filter(w =>
     (w.a && w.a.comp === comp.id && w.a.pin === pinIdx) ||
     (w.b && w.b.comp === comp.id && w.b.pin === pinIdx));
   const fp = compFootprint(comp);
@@ -59,8 +63,17 @@ function ntPadAttachments(comp, pinIdx){
   // geometrically doesn't describe the old connection and must not be deleted with it
   const nid = comp.pins[pinIdx].netId;
   const traces = fpin && nid
-    ? State.traces.filter(t => t.netId === nid && padTouchesTrace(comp, fpin, t)) : [];
+    ? bTraces.filter(t => t.netId === nid && padTouchesTrace(comp, fpin, t)) : [];
   return { wires, traces };
+}
+
+/* remove objects from the board that owns them. The TOP-LEVEL State arrays are
+   authoritative for the ACTIVE page (boardsSyncScalars re-adopts them), so edits to
+   the active page must go through State.<col>, other pages through their board. */
+function ntDropFrom(comp, col, dropSet){
+  const bd = (typeof boardOf === "function" && boardOf(comp)) || null;
+  if (!bd || bd === activeBoard()) State[col] = State[col].filter(o => !dropSet.has(o));
+  else bd[col] = bd[col].filter(o => !dropSet.has(o));
 }
 
 /* ---------------- focusing (all jump back to the visual editor) ---------------- */
@@ -69,14 +82,22 @@ function ntCentreOn(x, y){
   View.panY = View.height / 2 - y * View.zoom;
   requestRender();
 }
-NetsTab.focusPad = (comp, pinIdx) => { EditorTabs.show("visual"); UI.focusPin(comp, pinIdx); };
+/* the object may live on another PCB page — switch to it before centring */
+function ntGotoPage(obj){
+  if (typeof Boards === "undefined") return;
+  const b = boardOf(obj);
+  if (b && State.boards.indexOf(b) !== State.boardIdx) Boards.switchTo(State.boards.indexOf(b));
+}
+NetsTab.focusPad = (comp, pinIdx) => { EditorTabs.show("visual"); ntGotoPage(comp); UI.focusPin(comp, pinIdx); };
 NetsTab.focusVia = (via) => {
   EditorTabs.show("visual");
+  ntGotoPage(via);
   UI.select({ type: "via", via });
   ntCentreOn(via.x, via.y);
 };
 NetsTab.focusTrace = (trace) => {
   EditorTabs.show("visual");
+  ntGotoPage(trace);
   UI.select({ type: "trace", trace });
   const pts = trace.points;
   const mid = pts[Math.floor(pts.length / 2)] || pts[0];
@@ -119,13 +140,13 @@ NetsTab.reassignPad = (comp, pinIdx, name) => {
   }
   if (traces.length){
     const drop = new Set(traces);
-    State.traces = State.traces.filter(t => !drop.has(t));
+    ntDropFrom(comp, "traces", drop);
     if (UI.sel && UI.sel.type === "trace" && drop.has(UI.sel.trace)) UI.sel = null;
     UI.traceSel = (UI.traceSel || []).filter(t => !drop.has(t));
   }
   if (wires.length){
     const drop = new Set(wires);
-    State.schWires = State.schWires.filter(w => !drop.has(w));
+    ntDropFrom(comp, "schWires", drop);
     if (typeof Sch !== "undefined"){ Sch.selWire = null; Sch.selWires = null; Sch.selSeg = null; }
   }
   pruneNets();
@@ -264,9 +285,29 @@ NetsTab.render = () => {
   const tbl = $("#nets-table");
   if (!tbl || $("#nets-pane").style.display === "none") return;
   tbl.innerHTML = "";
+  // which PCB pages each net touches (single pass over every board; multi-page only)
+  const multi = typeof boardsSyncScalars === "function" && State.boards.length > 1;
+  let netPages = null;
+  if (multi){
+    boardsSyncScalars();
+    netPages = new Map();
+    const add = (nid, name) => {
+      if (!nid) return;
+      let s = netPages.get(nid); if (!s){ s = new Set(); netPages.set(nid, s); }
+      s.add(name);
+    };
+    for (const b of State.boards){
+      for (const c of b.components) for (const p of c.pins) add(p.netId, b.name);
+      for (const v of b.vias) add(v.netId, b.name);
+      for (const t of b.traces) add(t.netId, b.name);
+    }
+  }
+
   const head = document.createElement("thead");
   const hr = document.createElement("tr");
-  for (const h of ["", "", "", "Net", "Pads", "Vias", "Traces", "Widths / via Ø"]){
+  const headers = ["", "", "", "Net", "Pads", "Vias", "Traces", "Widths / via Ø"];
+  if (multi) headers.push("Pages");
+  for (const h of headers){
     const th = document.createElement("th"); th.textContent = h; hr.appendChild(th);
   }
   head.appendChild(hr); tbl.appendChild(head);
@@ -329,6 +370,13 @@ NetsTab.render = () => {
     cell("nt-num").textContent = m.vias.length;
     cell("nt-num").textContent = m.traces.length;
     cell("nt-gauge").textContent = ntGaugeText(m);
+    if (multi){
+      const pages = [...(netPages.get(net.id) || [])];
+      const td = cell("nt-pages");
+      td.textContent = pages.join(", ");
+      // a net spanning several PCBs is exactly what off-page links create — flag it
+      if (pages.length > 1){ td.style.color = "#b78aff"; td.title = "This net spans " + pages.length + " PCB pages"; }
+    }
 
     tr.addEventListener("mouseenter", () => { View.hoverNetId = net.id; requestRender(); });
     tr.addEventListener("mouseleave", () => { if (View.hoverNetId === net.id){ View.hoverNetId = null; requestRender(); } });
@@ -338,7 +386,7 @@ NetsTab.render = () => {
       const dtr = document.createElement("tr");
       dtr.className = "nt-detailrow";
       const td = document.createElement("td");
-      td.colSpan = 8;
+      td.colSpan = multi ? 9 : 8;
       td.appendChild(ntDetailTable(net, m));
       dtr.appendChild(td);
       body.appendChild(dtr);

@@ -644,6 +644,7 @@ Sch.render = () => {
   for (const c of comps) schDrawSymbol(ctx, c, geo.get(c.id));
   schDrawPowerPins(ctx, comps, geo);
   schDrawNetLabels(ctx, comps, geo);
+  schDrawOffPage(ctx, comps, geo);
   schDrawWireDraft(ctx);
   schDrawHotPin(ctx);
   schDrawMarquee(ctx);
@@ -664,6 +665,54 @@ Sch.render = () => {
     }
   }
 };
+
+/* off-page connectors: a dashed line from the symbol out to the sheet edge ("to
+   infinity"), one per off-page link, labelled with the destination page + part.
+   Exits toward the nearest left/right edge; several links fan out vertically. */
+function schDrawOffPage(ctx, comps, geo){
+  Sch._xlinkHits = [];   // clickable edge-chevron rects, refreshed every render
+  if (typeof Boards === "undefined" || !State.xlinks || !State.xlinks.length) return;
+  ctx.save();
+  ctx.font = "10px sans-serif";
+  const idx = Boards.linkIndex();   // one pass — never compLinks() per part per frame
+  for (const c of comps){
+    const links = idx.byComp.get(c.id);
+    if (!links || !links.length) continue;
+    const g = geo.get(c.id);
+    const X = schX2S(c.schX), Y = schY2S(c.schY);
+    const halfW = ((g && g.w ? g.w : 10) / 2 + 1.5) * Sch.zoom;
+    const right = (Sch.width - X) <= X;          // nearest horizontal edge
+    let i = 0;
+    for (const l of links){
+      const o = idx.comp.get(l.a === c.id ? l.b : l.a);
+      if (!o) continue;
+      const y = Y + (i - (links.length - 1) / 2) * 16;
+      const x0 = right ? X + halfW : X - halfW;
+      const x1 = right ? Sch.width : 0;
+      ctx.strokeStyle = "#b78aff"; ctx.globalAlpha = 0.75; ctx.lineWidth = 1.2;
+      ctx.setLineDash([7, 5]);
+      ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x1, y); ctx.stroke();
+      ctx.setLineDash([]);
+      // chevron at the edge, pointing off the sheet
+      ctx.fillStyle = "#b78aff"; ctx.globalAlpha = 0.95;
+      const cx = right ? Sch.width - 1 : 1, dir = right ? -1 : 1;
+      ctx.beginPath();
+      ctx.moveTo(cx, y);
+      ctx.lineTo(cx + dir * 7, y - 4.5);
+      ctx.lineTo(cx + dir * 7, y + 4.5);
+      ctx.closePath(); ctx.fill();
+      // destination label riding the line near the edge
+      const label = Boards.boardNameOf(o) + " · " + o.ref + (l.map ? " (" + Boards.linkPinsLabel(l, c) + ")" : "");
+      ctx.textAlign = right ? "right" : "left";
+      ctx.fillText(label, right ? Sch.width - 12 : 12, y - 4);
+      const w = ctx.measureText(label).width + 20;
+      Sch._xlinkHits.push({ x: right ? Sch.width - w - 4 : 0, y: y - 16, w: w + 8, h: 26, target: o });
+      i++;
+    }
+  }
+  ctx.textAlign = "left";
+  ctx.restore();
+}
 
 /* thin blue ratlines: for each INCOMPLETE net, draw airwires BETWEEN its connected
    groups (a link lands on the nearest pin pair across the two groups) so the missing
@@ -1931,6 +1980,16 @@ Sch.wire = () => {
       return;
     }
     if (e.button === 2) return;   // context menu handled separately
+
+    // off-page line: clicking the edge chevron / its label jumps to that page
+    // (not while drawing a wire — the jump would silently destroy the draft)
+    if (!Sch.wireDraft)
+    for (const h of (Sch._xlinkHits || [])){
+      if (p.x >= h.x && p.x <= h.x + h.w && p.y >= h.y && p.y <= h.y + h.h && typeof Boards !== "undefined"){
+        Boards.jumpTo(h.target);
+        return;
+      }
+    }
 
     if (Sch.mode === "wire"){
       // no panning / selecting with the wire tool — clicks only place wire points

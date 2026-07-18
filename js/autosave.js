@@ -214,12 +214,14 @@ function markImagesDirty(){ Autosave.imagesDirty = true; Autosave.dirty = true; 
 function serializeLight(fullText){
   const full = JSON.parse(fullText || serializeProject());
   full.activeLayerId = UI.activeLayerId;   // remember the selected layer across page reloads
-  full.layers = (full.layers || []).map(l => { const { dataURL, ...rest } = l; return rest; });
+  const strip = ls => (ls || []).map(l => { const { dataURL, ...rest } = l; return rest; });
+  full.layers = strip(full.layers);                       // legacy flat form
+  for (const b of (full.boards || [])) b.layers = strip(b.layers);   // v2 multi-page form
   return JSON.stringify(full);
 }
 function serializeImages(){
   // hosted (URL) layers keep no bytes — only their link (persisted in the light project)
-  return JSON.stringify(State.layers.map(l => ({ id: l.id, dataURL: l.url ? "" : l.dataURL })));
+  return JSON.stringify(allOf("layers").map(l => ({ id: l.id, dataURL: l.url ? "" : l.dataURL })));
 }
 
 function relTime(ts){
@@ -286,6 +288,8 @@ async function autosaveInit(){
       if (imgs){
         const map = new Map(JSON.parse(imgs).map(i => [i.id, i.dataURL]));
         for (const l of (proj.layers || [])) l.dataURL = map.get(l.id) || l.dataURL || "";
+        for (const b of (proj.boards || []))
+          for (const l of (b.layers || [])) l.dataURL = map.get(l.id) || l.dataURL || "";
       }
       Autosave.restoring = true;
       loadProject(JSON.stringify(proj), () => {
