@@ -126,7 +126,7 @@ const Boards = {
       const t = document.createElement("span");
       t.className = "board-tab" + (i === State.boardIdx ? " active" : "");
       t.textContent = b.name;
-      t.title = b.name + " — click to switch, double-click to rename, right-click for menu";
+      t.title = b.name + (i < 12 ? " (Shift+F" + (i + 1) + ")" : "") + " — click to switch, double-click to rename, right-click for menu";
       t.addEventListener("click", () => Boards.switchTo(i));
       t.addEventListener("dblclick", (e) => { e.preventDefault(); Boards.renameBoard(i); });
       t.addEventListener("contextmenu", (e) => { e.preventDefault(); Boards.tabMenu(i, e.clientX, e.clientY); });
@@ -237,7 +237,8 @@ const Boards = {
   },
 
   /* parse the dialog's pin field: "" | "all" → null; "1,2" → same numbers both sides;
-     "1→3, 2→4" (also "1>3" / "1:3") → explicit pairs. Returns {map} or {err}. */
+     "1>3, 2>4" (also "1-3" / "1:3" / "1 3" / "1→3") → explicit pairs — every
+     separator is typeable on a plain keyboard. Returns {map} or {err}. */
   parsePinSpec(text, c, target){
     text = (text || "").trim();
     if (!text || /^all$/i.test(text)) return { map: null };
@@ -246,7 +247,7 @@ const Boards = {
     for (const tok of text.split(",")){
       const t = tok.trim();
       if (!t) continue;
-      const m = /^(.+?)\s*(?:→|->|>|:)\s*(.+)$/.exec(t);
+      const m = /^(.+?)\s*(?:→|->|>|:|-)\s*(.+)$/.exec(t) || /^(\S+)\s+(\S+)$/.exec(t);
       const a = (m ? m[1] : t).trim(), b = (m ? m[2] : t).trim();
       if (!has(c, a))      return { err: "pin " + a + " not on " + c.ref };
       if (!has(target, b)) return { err: "pin " + b + " not on " + target.ref };
@@ -335,8 +336,9 @@ const Boards = {
         <div style="color:#8b96a5;font-size:11px;margin-bottom:8px">Pick the connector this one plugs into on another page.</div>
         <input id="xlink-search" placeholder="Search ref / value / page…" style="width:320px;box-sizing:border-box;margin-bottom:6px">
         <select id="xlink-target" size="10" style="width:320px"></select>
-        <div style="margin:8px 0 2px;font-size:11px;color:#8b96a5">Pins to join <span style="opacity:.7">— empty = all by number; subsets/crossed pairs allowed</span></div>
-        <input id="xlink-pins" placeholder="all — or 1,2 — or 1→3, 2→4" style="width:320px;box-sizing:border-box">
+        <div style="margin:8px 0 2px;font-size:11px;color:#8b96a5">Pins to join <span style="opacity:.7">— pick per pin below, or type: empty = all by number, "1,2", "1>3, 2>4" (also - : or a space)</span></div>
+        <div id="xlink-grid" style="max-height:180px;overflow-y:auto;width:320px;box-sizing:border-box;border:1px solid #333a44;border-radius:4px;padding:4px;margin-bottom:4px"></div>
+        <input id="xlink-pins" placeholder="all — or 1,2 — or 1>3, 2>4" style="width:320px;box-sizing:border-box">
         <div id="xlink-err" style="color:#e05555;font-size:11px;min-height:14px;margin-top:2px"></div>
         <label style="display:flex;align-items:center;gap:6px;margin:6px 0;font-size:12px">
           <input type="checkbox" id="xlink-merge" checked> Join nets now</label>
@@ -370,6 +372,62 @@ const Boards = {
       UI.toast("No parts on other pages yet — add a page and place the mating connector first");
       return;
     }
+    /* ---- visual pin-pair editor (kept in two-way sync with the text field) ---- */
+    const gridEl = dlg.querySelector("#xlink-grid");
+    const curTarget = () => getComp(parseInt(sel.value, 10));
+    const pinLabel = (p) => String(p.num) + (p.name && String(p.name).trim() ? " (" + p.name + ")" : "");
+    const textFromGrid = () => {
+      const t = curTarget(); if (!t) return;
+      const pairs = [];
+      for (const s of gridEl.querySelectorAll("select"))
+        if (s.value) pairs.push([s.dataset.my, s.value]);
+      const tNums = new Set(t.pins.map(p => String(p.num)));
+      const shared = c.pins.map(p => String(p.num)).filter(n => tNums.has(n));
+      // identity mapping over every shared pin = the default → keep the field empty ("all")
+      const identity = pairs.length === shared.length && pairs.every(([a, b]) => a === b);
+      pinsEl.value = identity ? "" : pairs.map(([a, b]) => a === b ? a : a + ">" + b).join(", ");
+      errEl.textContent = "";
+    };
+    const buildGrid = () => {
+      const t = curTarget();
+      gridEl.innerHTML = "";
+      if (!t){ gridEl.style.display = "none"; return; }
+      if (c.pins.length > 60 || t.pins.length > 200){   // huge parts: dropdown-per-pin is unusable
+        gridEl.style.display = "";
+        gridEl.innerHTML = `<div style="font-size:11px;color:#8b96a5">${c.pins.length} × ${t.pins.length} pins — too many for the picker, use the text field below.</div>`;
+        return;
+      }
+      gridEl.style.display = "";
+      const spec = Boards.parsePinSpec(pinsEl.value, c, t);
+      const chosen = new Map();
+      if (!spec.err && spec.map) for (const [a, b] of spec.map) chosen.set(String(a), String(b));
+      const explicit = !spec.err && !!spec.map;
+      const tNums = new Set(t.pins.map(p => String(p.num)));
+      for (const p of c.pins){
+        const my = String(p.num);
+        const row = document.createElement("div");
+        row.style.cssText = "display:flex;align-items:center;gap:6px;margin:1px 0;font-size:11px";
+        const lbl = document.createElement("span");
+        lbl.style.cssText = "width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
+        lbl.textContent = pinLabel(p);
+        lbl.title = pinLabel(p);
+        const s = document.createElement("select");
+        s.style.cssText = "flex:1;font-size:11px";
+        s.dataset.my = my;
+        const none = document.createElement("option");
+        none.value = ""; none.textContent = "— not joined —";
+        s.appendChild(none);
+        for (const q of t.pins){
+          const o = document.createElement("option");
+          o.value = String(q.num); o.textContent = pinLabel(q);
+          s.appendChild(o);
+        }
+        s.value = explicit ? (chosen.get(my) || "") : (tNums.has(my) ? my : "");
+        s.addEventListener("change", textFromGrid);
+        row.appendChild(lbl); row.appendChild(s);
+        gridEl.appendChild(row);
+      }
+    };
     const fill = () => {
       const q = search.value.trim().toLowerCase();
       const keep = q ? cands.filter(x => q.split(/\s+/).every(w => x.text.includes(w))) : cands;
@@ -381,9 +439,17 @@ const Boards = {
       }
       if (keep.length) sel.selectedIndex = 0;
       errEl.textContent = keep.length ? "" : "no match";
+      buildGrid();
     };
     search.value = ""; pinsEl.value = ""; errEl.textContent = "";
     search.oninput = fill;
+    sel.onchange = buildGrid;
+    pinsEl.oninput = () => {
+      const t = curTarget(); if (!t) return;
+      const spec = Boards.parsePinSpec(pinsEl.value, c, t);
+      errEl.textContent = spec.err || "";
+      if (!spec.err) buildGrid();
+    };
     fill();
     dlg.querySelector("#xlink-ok").onclick = () => {
       const t = getComp(parseInt(sel.value, 10));
@@ -436,6 +502,19 @@ const Boards = {
 
   init(){
     Boards.refreshTabs();
+    // Shift+F1…F12 switch PCB pages (plain F1-F5 switch the editor tabs — see EditorTabs)
+    window.addEventListener("keydown", (e) => {
+      if (!e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;
+      const m = /^F([1-9]|1[0-2])$/.exec(e.key);
+      if (!m) return;
+      if (e.target && e.target.matches && e.target.matches("input,select,textarea")) return;
+      if (document.querySelector("dialog[open]")) return;
+      e.preventDefault();
+      const i = parseInt(m[1], 10) - 1;
+      if (i >= State.boards.length){ UI.toast("No PCB page " + (i + 1)); return; }
+      Boards.switchTo(i);
+      UI.toast("Page → " + State.boards[i].name);
+    }, true);
     // the strip only shows on the Visual/Schematic tabs — follow tab switches
     if (typeof EditorTabs !== "undefined"){
       const orig = EditorTabs.show.bind(EditorTabs);
