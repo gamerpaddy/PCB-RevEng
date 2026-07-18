@@ -592,6 +592,8 @@ function showCanvasContextMenu(cx, cy, w){
     items.push({ label:"Flip to other side", action:()=>flipSelectionSide() });
     items.push({ label: compMoveLocked(c) ? "Unlock" : "Lock (move)", action:()=>toggleLockSelection() });
     if (compPolarParam(c)) items.push({ label: compIsPolarized(c) ? "Make non-polarized" : "Make polarized (+)", action:()=>setCompPolarized(c, !compIsPolarized(c)) });
+    if (typeof Boards !== "undefined" && Boards.canLink(c))
+      items.push({ label:"Page Linker…", action:()=>Boards.openLinkDialog(c) });
     items.push({ sep:true });
     items.push({ label:"Delete component "+c.ref, danger:true, action:()=>deleteSelection() });
   } else if (h && h.type === "via"){

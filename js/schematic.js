@@ -1923,6 +1923,8 @@ function schContextMenu(clientX, clientY, p){
     items.push({ label: "Flip horizontal  [X]", action: () => Sch.flip(c, false) });
     items.push({ label: "Flip vertical  [Y]", action: () => Sch.flip(c, true) });
     items.push({ label: "Edit ref / value…", action: () => UI.openQuickEdit(c) });
+    if (typeof Boards !== "undefined" && Boards.canLink(c))
+      items.push({ label: "Page Linker…", action: () => Boards.openLinkDialog(c) });
     items.push({ sep: true });
     items.push(inBox ? groupLockItem() : singleLockItem(c));
     items.push({ sep: true });

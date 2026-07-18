@@ -525,6 +525,12 @@ const Boards = {
      passives, ICs, crystals, transistors etc. unless the part already carries links */
   _unlinkable: /^(r|c|l|d|u|q|y|x|xt|vr|rv|zd|rn|ra|fb|led|ic|t)\s*\d/i,
 
+  // same visibility rule as linkSection — used by the right-click menus too
+  canLink(c){
+    if (Boards.compLinks(c).length) return true;
+    return State.boards.length > 1 && !Boards._unlinkable.test((c.ref || "").trim());
+  },
+
   linkSection(box, c){
     const links = Boards.compLinks(c);
     if (!links.length && State.boards.length <= 1) return;   // single-page project, nothing linked → stay out of the way
@@ -543,7 +549,7 @@ const Boards = {
       <div class="insp-title" style="font-size:11px">Off-page links</div>
       ${rows}
       <div class="insp-actions">
-        <button id="i-xlink-add">${links.length ? "Link another…" : "Link to another page…"}</button>
+        <button id="i-xlink-add">Page Linker…</button>
         ${links.length ? `<button id="i-xlink-sync" title="Re-join nets across all of this part's links (honours each link's pin map)">Sync nets</button>` : ""}
       </div>`;
     box.appendChild(sec);
