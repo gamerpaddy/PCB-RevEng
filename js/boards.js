@@ -310,7 +310,18 @@ const Boards = {
 
   linkTo(c, target, merge, map){
     pushUndo("off-page link " + c.ref);
+    // RE-linking the same pair replaces any old record whose pins overlap the new one
+    // — otherwise the stale link (often "all pins") lives on and every later net sync
+    // silently re-joins pins the user thought were unlinked. Non-overlapping partial
+    // maps to the same target (pins 1,2 → page 2, pins 3,4 → page 3 style) survive.
+    const newPins = new Set(map ? map.map(([a]) => String(a)) : c.pins.map(p => String(p.num)));
+    const overlapping = State.xlinks.filter(l => {
+      if (!((l.a === c.id && l.b === target.id) || (l.a === target.id && l.b === c.id))) return false;
+      return Boards.linkPairs(l, c).some(([a]) => newPins.has(String(a)));
+    });
+    if (overlapping.length) State.xlinks = State.xlinks.filter(l => !overlapping.includes(l));
     State.xlinks.push({ id: nextId(), a: c.id, b: target.id, map: map || null });
+    if (overlapping.length) UI.toast("Replaced the previous " + c.ref + " ↔ " + target.ref + " link");
     if (merge) Boards.syncLinkNets(c, true);
     if (typeof markDirty === "function") markDirty();
     UI.toast("Linked " + c.ref + " ↔ " + target.ref + " (" + Boards.boardNameOf(target) + ")" +
@@ -325,30 +336,43 @@ const Boards = {
     UI.refreshInspector(); requestRender();
   },
 
-  /* pick a part on another page to link with (dialog is built once, filled per open) */
+  /* the Link menu — list existing links, add several without reopening (rebuilt per open) */
   openLinkDialog(c){
     let dlg = document.getElementById("xlink-dialog");
-    if (!dlg){
-      dlg = document.createElement("dialog");
-      dlg.id = "xlink-dialog";
-      dlg.innerHTML = `
-        <h3 style="margin:0 0 8px">Link across pages</h3>
-        <div style="color:#8b96a5;font-size:11px;margin-bottom:8px">Pick the connector this one plugs into on another page.</div>
-        <input id="xlink-search" placeholder="Search ref / value / page…" style="width:320px;box-sizing:border-box;margin-bottom:6px">
-        <select id="xlink-target" size="10" style="width:320px"></select>
-        <div style="margin:8px 0 2px;font-size:11px;color:#8b96a5">Pins to join <span style="opacity:.7">— pick per pin below, or type: empty = all by number, "1,2", "1>3, 2>4" (also - : or a space)</span></div>
-        <div id="xlink-grid" style="max-height:180px;overflow-y:auto;width:320px;box-sizing:border-box;border:1px solid #333a44;border-radius:4px;padding:4px;margin-bottom:4px"></div>
-        <input id="xlink-pins" placeholder="all — or 1,2 — or 1>3, 2>4" style="width:320px;box-sizing:border-box">
+    if (dlg) dlg.remove();
+    dlg = document.createElement("dialog");
+    dlg.id = "xlink-dialog";
+    dlg.style.cssText = "width:400px;max-width:92vw;box-sizing:border-box";
+    dlg.innerHTML = `
+      <div style="display:flex;align-items:baseline;gap:8px;margin:0 0 2px">
+        <h3 style="margin:0">Link menu</h3>
+        <span style="color:#b78aff;font-weight:bold">${escAttr(c.ref)}</span>
+        <span style="color:#8b96a5;font-size:11px">${escAttr(Boards.boardNameOf(c))}${c.value ? " · " + escAttr(c.value) : ""}</span>
+      </div>
+      <div style="color:#8b96a5;font-size:11px;margin-bottom:10px">Join this connector to its mating halves on other pages — add as many links as you need, then close.</div>
+
+      <div style="font-size:11px;color:#8b96a5;margin-bottom:3px">Linked now</div>
+      <div id="xlink-cur" style="border:1px solid #333a44;border-radius:5px;padding:4px 6px;margin-bottom:10px;max-height:110px;overflow-y:auto"></div>
+
+      <div style="font-size:11px;color:#8b96a5;margin-bottom:3px">Add a link</div>
+      <div style="border:1px solid #333a44;border-radius:5px;padding:8px">
+        <input id="xlink-search" placeholder="Search ref / value / page…" style="width:100%;box-sizing:border-box;margin-bottom:6px">
+        <select id="xlink-target" size="7" style="width:100%;box-sizing:border-box"></select>
+        <div style="margin:8px 0 2px;font-size:11px;color:#8b96a5">Pins to join <span style="opacity:.7">— pick per pin, or type: empty = all by number, "1,2", "1>3, 2>4" (also - : or a space)</span></div>
+        <div id="xlink-grid" style="max-height:170px;overflow-y:auto;box-sizing:border-box;border:1px solid #333a44;border-radius:4px;padding:4px;margin-bottom:4px"></div>
+        <input id="xlink-pins" placeholder="all — or 1,2 — or 1>3, 2>4" style="width:100%;box-sizing:border-box">
         <div id="xlink-err" style="color:#e05555;font-size:11px;min-height:14px;margin-top:2px"></div>
-        <label style="display:flex;align-items:center;gap:6px;margin:6px 0;font-size:12px">
-          <input type="checkbox" id="xlink-merge" checked> Join nets now</label>
-        <div style="display:flex;gap:6px;justify-content:flex-end">
-          <button id="xlink-cancel">Cancel</button>
-          <button id="xlink-ok" class="primary">Link</button>
-        </div>`;
-      document.body.appendChild(dlg);
-      dlg.querySelector("#xlink-cancel").addEventListener("click", () => dlg.close());
-    }
+        <div style="display:flex;align-items:center;gap:6px">
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;flex:1">
+            <input type="checkbox" id="xlink-merge" checked> Join nets now</label>
+          <button id="xlink-ok" class="primary">+ Add link</button>
+        </div>
+      </div>
+      <div style="display:flex;gap:6px;justify-content:flex-end;margin-top:10px">
+        <button id="xlink-close">Done</button>
+      </div>`;
+    document.body.appendChild(dlg);
+    dlg.querySelector("#xlink-close").addEventListener("click", () => dlg.close());
     const sel = dlg.querySelector("#xlink-target");
     const search = dlg.querySelector("#xlink-search");
     const errEl = dlg.querySelector("#xlink-err");
@@ -368,8 +392,9 @@ const Boards = {
       }
     }
     cands.sort((a, b2) => a.rank - b2.rank || a.label.localeCompare(b2.label));
-    if (!cands.length){
+    if (!cands.length && !Boards.compLinks(c).length){
       UI.toast("No parts on other pages yet — add a page and place the mating connector first");
+      dlg.remove();
       return;
     }
     /* ---- visual pin-pair editor (kept in two-way sync with the text field) ---- */
@@ -450,23 +475,55 @@ const Boards = {
       errEl.textContent = spec.err || "";
       if (!spec.err) buildGrid();
     };
+    /* ---- existing links of c, live-refreshed after every add/remove ---- */
+    const curEl = dlg.querySelector("#xlink-cur");
+    const renderCur = () => {
+      const links = Boards.compLinks(c);
+      curEl.innerHTML = "";
+      if (!links.length){
+        curEl.innerHTML = `<div style="font-size:11px;color:#8b96a5;padding:2px 0">No links yet.</div>`;
+        return;
+      }
+      for (const l of links){
+        const o = Boards.linkOther(l, c);
+        if (!o) continue;
+        const row = document.createElement("div");
+        row.style.cssText = "display:flex;align-items:center;gap:6px;font-size:12px;padding:2px 0";
+        row.innerHTML = `<span style="color:#b78aff">↔</span>
+          <b>${escAttr(o.ref)}</b>
+          <span style="flex:1;color:#8b96a5;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+                title="${escAttr(Boards.linkPinsLabel(l, c))}">${escAttr(Boards.boardNameOf(o))} · ${escAttr(Boards.linkPinsLabel(l, c))}</span>
+          <button class="danger" style="font-size:11px;padding:1px 6px" title="Remove this link (nets stay merged)">✕</button>`;
+        row.querySelector("button").addEventListener("click", () => { Boards.unlink(l, c); renderCur(); });
+        curEl.appendChild(row);
+      }
+    };
+    renderCur();
     fill();
     dlg.querySelector("#xlink-ok").onclick = () => {
       const t = getComp(parseInt(sel.value, 10));
       if (!t){ errEl.textContent = "pick a part from the list"; return; }
       const spec = Boards.parsePinSpec(pinsEl.value, c, t);
       if (spec.err){ errEl.textContent = spec.err; return; }
-      dlg.close();
       Boards.linkTo(c, t, dlg.querySelector("#xlink-merge").checked, spec.map);
+      // stay open for the next link: refresh the list, reset the pin spec
+      pinsEl.value = ""; errEl.textContent = "";
+      renderCur(); buildGrid();
+      search.focus();
     };
     dlg.showModal();
     search.focus();
   },
 
   /* inspector section — appended by UI.inspectComponent for every part */
+  /* off-page links only make sense on things that leave the board — hide the section on
+     passives, ICs, crystals, transistors etc. unless the part already carries links */
+  _unlinkable: /^(r|c|l|d|u|q|y|x|xt|vr|rv|zd|rn|ra|fb|led|ic|t)\s*\d/i,
+
   linkSection(box, c){
     const links = Boards.compLinks(c);
     if (!links.length && State.boards.length <= 1) return;   // single-page project, nothing linked → stay out of the way
+    if (!links.length && Boards._unlinkable.test((c.ref || "").trim())) return;
     const sec = document.createElement("div");
     sec.className = "insp-section";
     const rows = links.map(l => {
