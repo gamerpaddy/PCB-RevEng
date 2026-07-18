@@ -26,7 +26,12 @@ const Boards = {
     const b = activeBoard();
 
     // selections/drags point into the old page's arrays — drop them
-    if (typeof Tools !== "undefined"){ Tools.drag = null; Tools.padEdit = null; Tools.pending = null; }
+    if (typeof Tools !== "undefined"){
+      Tools.drag = null; Tools.padEdit = null; Tools.pending = null;
+      // an in-progress trace route holds points in the OLD page's coordinates/arrays
+      Tools.tracePts = null; Tools.traceStartSnap = null; Tools.traceWidth = null;
+      Tools.addPinFor = null;
+    }
     if (typeof UI !== "undefined"){
       UI.sel = null;
       if (UI.pinSel) UI.pinSel.length = 0;
@@ -189,6 +194,23 @@ const Boards = {
       for (let i = 1; i < members.length; i++)
         State.xlinks.push({ id: nextId(), a: members[0].id, b: members[i].id, map: null });
     if (grouped.size && typeof markDirty === "function") markDirty();
+  },
+
+  /* one-pass render-time index over every board: prunes dead links once, then gives
+     O(1) lookups. { byComp: Map<compId,links[]>, comp: Map<compId,comp>,
+     page: Map<compId,boardName> }. The per-frame overlays MUST use this instead of
+     compLinks()/boardNameOf() per part — those rescan every board per call. */
+  linkIndex(){
+    boardsSyncScalars();
+    const comp = new Map(), page = new Map();
+    for (const b of State.boards)
+      for (const c of b.components){ comp.set(c.id, c); page.set(c.id, b.name); }
+    const ok = State.xlinks.filter(l => comp.has(l.a) && comp.has(l.b));
+    if (ok.length !== State.xlinks.length) State.xlinks = ok;
+    const byComp = new Map();
+    const add = (id, l) => { let a = byComp.get(id); if (!a){ a = []; byComp.set(id, a); } a.push(l); };
+    for (const l of ok){ add(l.a, l); add(l.b, l); }
+    return { byComp, comp, page };
   },
 
   compLinks(c){

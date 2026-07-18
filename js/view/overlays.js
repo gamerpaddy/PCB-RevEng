@@ -242,20 +242,21 @@ function drawXlinkArrows(ctx){
   ctx.save();
   ctx.font = "bold 10px sans-serif";
   ctx.textAlign = "left";
+  const idx = Boards.linkIndex();   // one pass — never compLinks() per part per frame
   for (const c of State.components){
-    const links = Boards.compLinks(c);
-    if (!links.length) continue;
+    const links = idx.byComp.get(c.id);
+    if (!links || !links.length) continue;
     const r = compRadius(c) * View.zoom;
     if (r < 7) continue;   // zoomed out far enough that the part is a dot — hide the tag
     const p = worldToScreen(c.x, c.y);
     if (p.x < -80 || p.y < -40 || p.x > View.width + 80 || p.y > View.height + 40) continue;
     let i = 0;
     for (const l of links){
-      const o = Boards.linkOther(l, c);
+      const o = idx.comp.get(l.a === c.id ? l.b : l.a);
       if (!o) continue;
       const y = p.y - r - 8 - i * 14;
       const x = p.x - r * 0.4;
-      const label = Boards.boardNameOf(o) + " · " + o.ref;
+      const label = (idx.page.get(o.id) || "?") + " · " + o.ref;
       // arrowhead pointing away from the part, then the destination text
       ctx.fillStyle = "#b78aff";
       ctx.strokeStyle = "rgba(0,0,0,.75)";

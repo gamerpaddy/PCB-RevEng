@@ -674,16 +674,17 @@ function schDrawOffPage(ctx, comps, geo){
   if (typeof Boards === "undefined" || !State.xlinks || !State.xlinks.length) return;
   ctx.save();
   ctx.font = "10px sans-serif";
+  const idx = Boards.linkIndex();   // one pass — never compLinks() per part per frame
   for (const c of comps){
-    const links = Boards.compLinks(c);
-    if (!links.length) continue;
+    const links = idx.byComp.get(c.id);
+    if (!links || !links.length) continue;
     const g = geo.get(c.id);
     const X = schX2S(c.schX), Y = schY2S(c.schY);
     const halfW = ((g && g.w ? g.w : 10) / 2 + 1.5) * Sch.zoom;
     const right = (Sch.width - X) <= X;          // nearest horizontal edge
     let i = 0;
     for (const l of links){
-      const o = Boards.linkOther(l, c);
+      const o = idx.comp.get(l.a === c.id ? l.b : l.a);
       if (!o) continue;
       const y = Y + (i - (links.length - 1) / 2) * 16;
       const x0 = right ? X + halfW : X - halfW;
@@ -1981,6 +1982,8 @@ Sch.wire = () => {
     if (e.button === 2) return;   // context menu handled separately
 
     // off-page line: clicking the edge chevron / its label jumps to that page
+    // (not while drawing a wire — the jump would silently destroy the draft)
+    if (!Sch.wireDraft)
     for (const h of (Sch._xlinkHits || [])){
       if (p.x >= h.x && p.x <= h.x + h.w && p.y >= h.y && p.y <= h.y + h.h && typeof Boards !== "undefined"){
         Boards.jumpTo(h.target);

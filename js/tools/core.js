@@ -120,8 +120,10 @@ function onPointerDown(e){
   }
   if (e.button === 2) return; // context menu handled separately
 
-  // off-page link marker (arrow + page tag above a linked connector) — click = jump
-  if (typeof xlinkHitAt === "function"){
+  // off-page link marker (arrow + page tag above a linked connector) — click = jump.
+  // NOT while mid-route (Tools.tracePts) or placing a free pin: switching pages then
+  // would commit geometry from the old page into the new page's arrays.
+  if (typeof xlinkHitAt === "function" && !Tools.tracePts && !Tools.addPinFor){
     const xh = xlinkHitAt(pt.x, pt.y);
     if (xh && typeof Boards !== "undefined"){ Boards.jumpTo(xh.target); return; }
   }
