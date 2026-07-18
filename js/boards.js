@@ -383,6 +383,8 @@ const Boards = {
       if (b === boardOf(c)) continue;
       for (const o of b.components){
         if (o.id === c.id) continue;
+        // same rule as the inspector section: passives/ICs/crystals/… can't be a link END either
+        if (Boards._unlinkable.test((o.ref || "").trim())) continue;
         cands.push({
           id: o.id,
           label: `${b.name} — ${o.ref}  (${o.pins.length} pins${o.value ? ", " + o.value : ""})`,
