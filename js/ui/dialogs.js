@@ -15,6 +15,8 @@ UI.openExport = () => {
     const isSch = fmt === "sch";
     const arrange = $("#export-arrange").value;
     arrangeRow.style.display = isSch ? "" : "none";
+    // KiCad's format has no pages — offer a per-page zip when the project has several
+    $("#export-allpages").style.display = (isSch && State.boards.length > 1) ? "" : "none";
     $("#export-preview").value = netlistFor(fmt, arrange).text;
     // the schematic export gets a visual arrangement preview
     if (isSch){ svg.style.display = ""; svg.innerHTML = schPreviewSVG(arrange); }
