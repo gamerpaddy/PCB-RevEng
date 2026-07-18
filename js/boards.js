@@ -300,6 +300,9 @@ const Boards = {
       }
     }
     pruneNets();
+    // net joins must reach autosave even from the bare "Sync nets" button (linkTo
+    // marks dirty itself, but this is also a direct entry point)
+    if (changed && typeof markDirty === "function") markDirty();
     if (!quiet && typeof UI !== "undefined"){
       UI.toast(changed ? ("Off-page link: joined " + changed + " pin net" + (changed > 1 ? "s" : "")) : "Off-page link: nets already in sync");
       UI.refreshNets(); UI.refreshInspector();

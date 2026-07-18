@@ -14,6 +14,11 @@ function pinWorldPos(comp, pin){
 
 function compFootprint(comp){
   if (!comp._fp) comp._fp = generateFootprint(comp.fpId, comp.fpParams);
+  // unknown fpId (hand-edited / corrupted project): a stub keeps the inspector,
+  // renderer and BOM alive instead of null-crashing every consumer of .label/.pins
+  if (!comp._fp) comp._fp = { label: "? " + (comp.fpId || "no footprint"), kicad: "",
+                              pins: (comp.pins || []).map((p, i) => ({ num: p.num != null ? p.num : i + 1, xmm: 0, ymm: 0, w: 1, h: 1 })),
+                              body: { w: 4, h: 4 } };
   return comp._fp;
 }
 
