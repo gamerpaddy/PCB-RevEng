@@ -96,12 +96,15 @@ function qaMatchFootprint(t){
   if ((cm = /^([rcl])(\d{4})$/.exec(s)) && QA_CHIP_SIZES.includes(cm[2]))
     return { fpId:"chip2", params:{size:cm[2]}, prefix:cm[1].toUpperCase() };
 
-  // SOT-23 family (optional pin-count suffix: sot23-5 / sot-23-5 / sot235)
+  // SOT-23 family (optional pin-count suffix: sot23-5 / sot-23-5 / sot235 / sot-323-6).
+  // Keep the SOT-23 pin suffix to 5/6 — SOT-23 defaults to 3, and matching a bare "3"
+  // used to eat the trailing digit of SOT-323 ("sot-323" → SOT-23 pins=3), leaving the
+  // SOT-323 rules below unreachable.
   let m;
-  if ((m = /^sot-?23(?:-?([356]))?$/.exec(s))) return { fpId:"sot23", params:{pkg:"SOT-23", pins:m[1]||"3"} };
-  if (/^sot-?323$/.test(s)) return { fpId:"sot23", params:{pkg:"SOT-323"} };
-  if (/^sot-?523$/.test(s)) return { fpId:"sot23", params:{pkg:"SOT-523"} };
-  if (/^sot-?723$/.test(s)) return { fpId:"sot23", params:{pkg:"SOT-723"} };
+  if ((m = /^sot-?23(?:-?([56]))?$/.exec(s))) return { fpId:"sot23", params:{pkg:"SOT-23", pins:m[1]||"3"} };
+  if ((m = /^sot-?323(?:-?([356]))?$/.exec(s))) return { fpId:"sot23", params:{pkg:"SOT-323", pins:m[1]||"3"} };
+  if ((m = /^sot-?523(?:-?([356]))?$/.exec(s))) return { fpId:"sot23", params:{pkg:"SOT-523", pins:m[1]||"3"} };
+  if ((m = /^sot-?723(?:-?([356]))?$/.exec(s))) return { fpId:"sot23", params:{pkg:"SOT-723", pins:m[1]||"3"} };
   if (/^sot-?223$/.test(s)) return { fpId:"sot223", params:{pkg:"SOT-223"} };
   if (/^sot-?89$/.test(s))  return { fpId:"sot223", params:{pkg:"SOT-89"} };
   if (/^(dpak|to-?252)$/.test(s)) return { fpId:"sot223", params:{pkg:"DPAK (TO-252)"} };
