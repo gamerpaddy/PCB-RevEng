@@ -132,6 +132,24 @@ function compRadius(comp){
   return r;
 }
 
+/* screen-space rotate gizmo for a selected part: a knob offset from the part's centre
+   along its local "up" (0,-1) direction so it visibly turns with the part. Sizes are
+   screen px so it stays grabbable at any zoom. */
+function partRotateGizmo(comp){
+  const c = worldToScreen(comp.x, comp.y);
+  const rScreen = compRadius(comp) * View.zoom;   // part's half-extent, in screen px
+  const ring = Math.max(28, rScreen + 22);
+  const th = comp.rot * Math.PI/180;
+  // local +up = (0,-1). Rotate to world: (sin θ, -cos θ). Screen x mirrors under View.flip.
+  const fx = View.flip ? -1 : 1;
+  const dx = Math.sin(th) * fx, dy = -Math.cos(th);
+  return { cx: c.x, cy: c.y, hx: c.x + dx*ring, hy: c.y + dy*ring, r: ring, handleR: 10 };
+}
+function partGizmoAt(comp, sx, sy){
+  const g = partRotateGizmo(comp);
+  return Math.hypot(sx - g.hx, sy - g.hy) <= g.handleR + 4;
+}
+
 /* point-in-component test using the actual outline (body shape + pads),
    not a bounding circle — so a wide connector is only clickable on its body. */
 function pointInComp(comp, wx, wy){

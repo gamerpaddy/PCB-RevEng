@@ -28,11 +28,16 @@ function componentDown(w, e){
     const m = /^([A-Za-z]+)/.exec(ref);
     if (m) p.refPrefix = m[1];
   } else if (p.fpId === "chip2"){
-    // tantalum size = always a capacitor (C); otherwise R/C/L chip where the click
-    // modifier decides the refdes prefix (click = R, Shift = C, Ctrl = L)
-    const tant = p.fpParams && (p.fpParams.size || "").startsWith("Tant ");
-    const prefix = tant ? "C" : (e.ctrlKey ? "L" : e.shiftKey ? "C" : "R");
-    ref = nextRef(prefix);
+    // A pasted / previously-typed prefix wins — so a copied C stays a C — otherwise
+    // tantalum size is always a capacitor (C), and a plain R/C/L chip takes its prefix
+    // from the click modifier (click = R, Shift = C, Ctrl = L).
+    if (p.refPrefix){
+      ref = nextRef(p.refPrefix);
+    } else {
+      const tant = p.fpParams && (p.fpParams.size || "").startsWith("Tant ");
+      const prefix = tant ? "C" : (e.ctrlKey ? "L" : e.shiftKey ? "C" : "R");
+      ref = nextRef(prefix);
+    }
   } else {
     ref = nextRef(p.refPrefix || refPrefixFor(p.fpId, p.value));
   }

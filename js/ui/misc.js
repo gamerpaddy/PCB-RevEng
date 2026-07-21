@@ -55,6 +55,15 @@ UI.openQuickEdit = (c) => {
   };
   $("#quick-cancel").onclick = ()=> dlg.close();
   [refIn, valIn].forEach(inp => inp.onkeydown = (e)=>{ if (e.key === "Enter"){ e.preventDefault(); $("#quick-ok").click(); } });
+  // Click on the dialog's ::backdrop (outside the frame) applies + closes, same as OK.
+  // Attached once per element; re-opening the dialog reuses the same listener.
+  if (!dlg._backdropWired){
+    dlg._backdropWired = true;
+    dlg.addEventListener("mousedown", (e) => {
+      // e.target is the dialog itself only when the click lands on its backdrop
+      if (e.target === dlg) $("#quick-ok").click();
+    });
+  }
   dlg.showModal();
   refIn.select();
 };

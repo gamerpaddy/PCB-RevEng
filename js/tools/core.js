@@ -257,6 +257,11 @@ function onPointerUp(e){
     if (!d.moved) cancelUndo();   // a plain click on the knob shouldn't churn undo
     UI.refreshLayerList();
   }
+  if (d.kind === "rot-comp-gizmo"){
+    if (!d.moved) cancelUndo();
+    else d.comp.rot = ((d.comp.rot % 360) + 360) % 360;   // keep it in [0,360)
+    UI.refreshInspector();
+  }
   if (d.kind === "rot-line"){
     const rl = Tools.rotLine; Tools.rotLine = null;
     if (d.moved && rl) applyRotateLine(d.layer, rl.a, rl.b);
@@ -433,6 +438,15 @@ function handleDrag(pt, w, e){
       d.moved = true;
       Tools.rotLine = { a: Tools.rotLine.a, b:{ x:w.x, y:w.y } };
       break;
+    case "rot-comp-gizmo": {
+      d.moved = true;
+      const a1 = Math.atan2(w.y - d.comp.y, w.x - d.comp.x);
+      let delta = (a1 - d.a0) * (View.flip ? -1 : 1);
+      if (e && e.shiftKey){ const step = Math.PI/12; delta = Math.round(delta/step)*step; }  // 15° snap
+      d.comp.rot = d.startRot + delta * 180/Math.PI;
+      UI.refreshInspector();
+      break;
+    }
     case "pad-resize": {
       d.moved = true;
       const fp = compFootprint(d.comp), fpin = fp && fp.pins[d.idx];

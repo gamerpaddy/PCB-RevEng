@@ -2,6 +2,22 @@
 "use strict";
 
 function selectDown(w, pt, e){
+  // rotate gizmo on the selected part beats everything: knob lives just outside the body,
+  // so a click there is unambiguously "spin this part" (drag) or a no-op (plain click).
+  {
+    const sel = UI.sel;
+    const gc = (sel && sel.type === "comp") ? sel.comp : null;
+    if (gc && State.components.includes(gc) && !compMoveLocked(gc) && !View.split
+        && typeof partGizmoAt === "function" && partGizmoAt(gc, pt.x, pt.y)){
+      pushUndo("rotate " + gc.ref);
+      Tools.drag = {
+        kind: "rot-comp-gizmo", comp: gc, startRot: gc.rot,
+        a0: Math.atan2(w.y - gc.y, w.x - gc.x), moved: false,
+      };
+      requestRender();
+      return;
+    }
+  }
   // visual pad editor active → grab a resize corner or the move centre first
   if (Tools.padEdit && State.components.includes(Tools.padEdit.comp)){
     const pe = Tools.padEdit, fp = compFootprint(pe.comp), fpin = fp && fp.pins[pe.idx];

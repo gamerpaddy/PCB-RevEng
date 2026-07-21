@@ -443,6 +443,48 @@ function drawWorld(ctx){
   drawResizeLabel(ctx);
   drawPadEditOverlay(ctx);
   drawCropOverlay(ctx);
+  drawPartRotateGizmo(ctx);
+}
+
+/* rotate gizmo for the selected part — screen space, appears only when a single component
+   is selected in the Select tool and isn't move-locked. Drag the knob to rotate freely;
+   Shift snaps to 15°. */
+function drawPartRotateGizmo(ctx){
+  if (View.split) return;                             // split view has two panes — ambiguous
+  if (Tools.name !== "select") return;
+  const sel = UI.sel;
+  if (!sel || sel.type !== "comp" || !sel.comp) return;
+  const c = sel.comp;
+  if (!State.components.includes(c)) return;
+  if (compMoveLocked(c)) return;                      // locked parts don't rotate
+  const drag = Tools.drag;
+  // hide the gizmo during unrelated drags so it doesn't clutter (a rotate drag keeps it)
+  if (drag && drag.kind !== "rot-comp-gizmo") return;
+  const g = partRotateGizmo(c);
+  ctx.save();
+  ctx.setTransform(View.dpr, 0, 0, View.dpr, 0, 0);
+  // ring
+  ctx.strokeStyle = "rgba(255,255,255,0.28)"; ctx.lineWidth = 1.2;
+  ctx.setLineDash([4, 4]);
+  ctx.beginPath(); ctx.arc(g.cx, g.cy, g.r, 0, Math.PI*2); ctx.stroke();
+  ctx.setLineDash([]);
+  // spoke
+  ctx.strokeStyle = "rgba(255,255,255,0.38)";
+  ctx.beginPath(); ctx.moveTo(g.cx, g.cy); ctx.lineTo(g.hx, g.hy); ctx.stroke();
+  // knob
+  const hot = drag && drag.kind === "rot-comp-gizmo";
+  ctx.fillStyle = hot ? "#ffd24d" : "#7db4ff";
+  ctx.strokeStyle = "#10141a"; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.arc(g.hx, g.hy, g.handleR, 0, Math.PI*2); ctx.fill(); ctx.stroke();
+  // curved arrow glyph
+  ctx.strokeStyle = "#10141a"; ctx.lineWidth = 1.4;
+  ctx.beginPath(); ctx.arc(g.hx, g.hy, g.handleR - 4, -Math.PI*0.7, Math.PI*0.55); ctx.stroke();
+  if (hot){
+    ctx.fillStyle = "#ffd24d"; ctx.font = "600 11px Segoe UI, sans-serif";
+    ctx.textAlign = "center"; ctx.textBaseline = "bottom";
+    ctx.fillText(Math.round(((c.rot % 360) + 360) % 360) + "°", g.hx, g.hy - g.handleR - 4);
+  }
+  ctx.restore();
 }
 
 /* box-select: a cyan highlight on every marquee-selected object, plus the live rubber-band

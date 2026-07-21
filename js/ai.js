@@ -212,7 +212,9 @@ const AI = {
       partNumber: comp.part || "", pinCount: pins.length,
       pinNumbers: pins.map(p => p.num), hint: hint || "",
     });
-    const reply = await AI.chat(sys, usr, { maxTokens: 1500 });
+    // Budget: ~60 tok/pin for the JSON + slack for device/notes + generous headroom
+    // for reasoning tokens (Claude/GPT-5/Gemini count hidden reasoning against this).
+    const reply = await AI.chat(sys, usr, { maxTokens: Math.max(2000, pins.length * 60 + 2000) });
     const data = AI.parseJSON(reply);
     if (!data) throw new Error("Model reply wasn't valid JSON:\n" + reply.slice(0, 300));
     return data;
