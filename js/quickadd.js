@@ -412,7 +412,9 @@ QuickAdd.open = (w) => {
   // footprint armed, so Tools.ghostSide is a stale leftover from the last placement and
   // must not override an explicit Draw-on-Back — place where the user is drawing.
   QuickAdd.side = (UI.copperSide() === "back") ? "back" : "front";
-  QuickAdd.rot = Tools.ghostRot || 0;
+  // brand-new placement snaps to a straight 0/90/180/270 — any leftover free angle from
+  // the rotate gizmo or a paste shouldn't stick to the next fresh part
+  QuickAdd.rot = ((Math.round((Tools.ghostRot || 0) / 90) * 90) % 360 + 360) % 360;
   QuickAdd.fp = null; QuickAdd.parsed = null;
   QuickAdd.pvZoom = 1;
   const inp = $("#qa-input");

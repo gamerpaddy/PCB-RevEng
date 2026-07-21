@@ -494,7 +494,10 @@ function pasteClipboard(){
   };
   Tools.ghostFp = generateFootprint(cb.fpId, Tools.pending.fpParams);
   Tools.ghostRot = cb.rot;
-  Tools.ghostSide = cb.side;
+  // Paste lands on the side the user is currently viewing (matches the footprint
+  // dialog / QuickAdd flows). Flipping the view before pasting places on that side;
+  // "Flip to other side" / edit.side toggles the ghost afterwards if wanted.
+  Tools.ghostSide = UI.copperSide() === "back" ? "back" : "front";
   setTool("component");
   UI.setHint("Click to place the copied " + (Tools.ghostFp ? Tools.ghostFp.label : "part") + " — R rotate, B flip side, Esc cancel");
 }

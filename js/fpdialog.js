@@ -416,6 +416,9 @@ UI.confirmFootprint = () => {
     Tools.pending = vals;
     Tools.ghostFp = fp;
     Tools.ghostSide = UI.copperSide() === "back" ? "back" : "front";
+    // fresh placement always starts at a straight 0/90/180/270 — snap any leftover
+    // free angle from the rotate gizmo (or a prior paste) so R keeps everything aligned
+    Tools.ghostRot = ((Math.round((Tools.ghostRot || 0) / 90) * 90) % 360 + 360) % 360;
     setTool("component");
     if (vals.fpId === "chip2")
       UI.setHint("Place " + fp.label + " — click = R · Shift-click = C · Ctrl-click = L · R rotate, B flip side, Esc cancel");
