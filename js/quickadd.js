@@ -133,6 +133,23 @@ function qaMatchFootprint(t){
   if ((m = /^(?:dip|pdip)-?(\d+)$/.exec(s))) return { fpId:"dip", params:{pins:+m[1]} };
   if ((m = /^(?:lqfp|tqfp|qfp)-?(\d+)$/.exec(s))) return { fpId:"qfp", params:{pins:+m[1], style:"QFP"} };
   if ((m = /^qfn-?(\d+)$/.exec(s))) return { fpId:"qfp", params:{pins:+m[1], style:"QFN"} };
+  // DFN / WSON / small MOSFET-style leadless dual-row packages. Accepts a bare pin count
+  // (dfn8), and body-size suffixes (dfn-3x3-8, dfn5x6, wson-8-5x6). Common alias
+  // shortcuts: so8fl / so-8fl / powerpak → 5×6 DFN-8 with thermal pad (SO-8FL layout).
+  if ((m = /^(?:dfn|wson|pdfn|udfn|xdfn)-?(\d+)?(?:-?(\d+(?:\.\d+)?x\d+(?:\.\d+)?))?$/.exec(s))){
+    const params = {};
+    if (m[1]) params.pins = +m[1];
+    if (m[2]) params.body = m[2];
+    return { fpId:"dfn", params };
+  }
+  if ((m = /^(?:dfn|wson)-?(\d+(?:\.\d+)?x\d+(?:\.\d+)?)-?(\d+)?$/.exec(s))){
+    // body-first form: dfn-3x3-8 / wson-5x6-8
+    const params = { body: m[1] };
+    if (m[2]) params.pins = +m[2];
+    return { fpId:"dfn", params };
+  }
+  if (/^(?:so-?8fl|so8fl|powerpak|power-?pak|so-?8pp)$/.test(s))
+    return { fpId:"dfn", params:{pins:8, pitch:"1.27", body:"5x6", epad:"yes"}, prefix:"Q" };
   if ((m = /^bga-?(\d+)x(\d+)$/.exec(s))) return { fpId:"grid", params:{rows:+m[2], cols:+m[1]} };
   if ((m = /^bga-?(\d+)$/.exec(s))){ const n = Math.round(Math.sqrt(+m[1])); return { fpId:"grid", params:{rows:n, cols:n} }; }
   if (/^bga$/.test(s)) return { fpId:"grid", params:{} };

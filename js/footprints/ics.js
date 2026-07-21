@@ -59,6 +59,42 @@ Footprints.register({
 });
 
 Footprints.register({
+  id:"dfn", name:"DFN / WSON (leadless dual-row)", prefix:"U",
+  // Small MOSFET / regulator packages: two rows of leadless pads on opposing edges,
+  // usually a big central exposed pad (drain on a MOSFET, ground/thermal elsewhere).
+  // Covers DFN-6/8/10, WSON, SO-8FL (5×6) and PowerPAK SO-8; pin naming (G/D/S etc.)
+  // is left to the user or the symbol picker.
+  params:[{key:"pins",label:"Pins",type:"int",def:8,min:4,max:16,step:2},
+          {key:"pitch",label:"Pitch mm",type:"select",def:"0.5",options:["0.4","0.5","0.65","0.8","1.27"]},
+          {key:"body",label:"Body mm (W×H)",type:"select",def:"3x3",
+           options:["1x1","2x2","2x3","3x2","3x3","3x4","4x3","4x4","5x5","5x6","6x5"]},
+          {key:"epad",label:"Thermal pad",type:"select",def:"yes",options:["yes","no"]}],
+  gen(p){
+    const n = p.pins, half = n/2, pt = parseFloat(p.pitch);
+    const [bw, bh] = p.body.split("x").map(Number);
+    const padLen = 0.5;                          // outward length (short like a leadless pad)
+    const padW   = Math.max(0.2, pt * 0.55);     // along-row width
+    const rowY   = bh/2 - padLen/2 + 0.1;        // pads flush with the body edge, slight overhang
+    const pins = [];
+    // pin 1 at bottom-left, numbering counter-clockwise — same convention as soic above
+    for (let i = 0; i < half; i++){
+      const x = (i - (half - 1)/2) * pt;
+      pins.push(_pin(i + 1, x,  rowY, {w:padW, h:padLen, tht:false}));
+      pins.push(_pin(n - i, x, -rowY, {w:padW, h:padLen, tht:false}));
+    }
+    if (p.epad === "yes"){
+      // conservative central pad — leaves clearance to the row pads and body edge
+      const inset = 0.6, gap = 0.3;
+      const epW = Math.max(0.5, bw - inset*2);
+      const epH = Math.max(0.4, bh - (padLen + gap)*2);
+      pins.push(_pin("PAD", 0, 0, {w:epW, h:epH, tht:false, name:"PAD"}));
+    }
+    return { label:"DFN-"+n+" "+bw+"×"+bh, pins, body:{w:bw, h:bh},
+             kicad:"Package_DFN_QFN:DFN-"+n+(p.epad==="yes"?"-1EP":"")+"_"+bw+"x"+bh+"mm_P"+p.pitch+"mm" };
+  }
+});
+
+Footprints.register({
   id:"grid", name:"Grid / BGA / custom matrix", prefix:"U",
   params:[{key:"rows",label:"Rows",type:"int",def:4,min:1,max:40,step:1},
           {key:"cols",label:"Cols",type:"int",def:4,min:1,max:40,step:1},
