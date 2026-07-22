@@ -1513,6 +1513,55 @@ Sch.flip = (c, vert) => {
   Sch.render();
 };
 
+/* the point a multi-symbol rotate/flip pivots around: the selection's centroid, snapped
+   so the transformed group lands back on the schematic grid */
+function schGroupCentre(list){
+  let cx = 0, cy = 0;
+  for (const c of list){ cx += c.schX; cy += c.schY; }
+  return { cx: schSnap(cx / list.length), cy: schSnap(cy / list.length) };
+}
+
+/* Rotate a selection as ONE rigid block: every symbol spins 90° AND its position orbits
+   the group centre (not each part spinning in place). Locked symbols sit the transform
+   out; if they ALL are, nothing happens and no undo step is pushed. Returns true when
+   the group actually moved. */
+Sch.rotateGroup = (list) => {
+  const movable = list.filter(c => !compSchMoveLocked(c));
+  if (!movable.length) return false;
+  pushUndo("rotate schematic selection");
+  const { cx, cy } = schGroupCentre(list);
+  for (const c of movable){
+    const dx = c.schX - cx, dy = c.schY - cy;
+    c.schX = schSnap(cx + dy);   // 90° CCW on screen (y-down): (dx,dy) → (dy,−dx)
+    c.schY = schSnap(cy - dx);
+    c.schRot = (schRotOf(c) + 90) % 360;
+    schUpdateWiresFor(c);
+  }
+  schWarnForeignPinWires(movable);
+  Sch.render();
+  return true;
+};
+
+/* Mirror a selection as ONE rigid block across the group centre's vertical (X) or
+   horizontal (Y) axis: each symbol's POSITION reflects as well as its artwork. Flipping
+   every symbol in place left the layout untouched — pins swapped sides but the parts
+   stayed put, which is not what mirroring a block means. */
+Sch.flipGroup = (list, vert) => {
+  const movable = list.filter(c => !compSchMoveLocked(c));
+  if (!movable.length) return false;
+  pushUndo("flip schematic selection");
+  const { cx, cy } = schGroupCentre(list);
+  for (const c of movable){
+    if (vert) c.schY = schSnap(2*cy - c.schY);
+    else      c.schX = schSnap(2*cx - c.schX);
+    schFlipComp(c, vert);
+    schUpdateWiresFor(c);
+  }
+  schWarnForeignPinWires(movable);
+  Sch.render();
+  return true;
+};
+
 /* the component(s) the current keys act on: box selection, else selected, else hovered */
 Sch.targets = () => {
   if (Sch.boxSel.length) return Sch.boxSel.slice();
@@ -1919,9 +1968,15 @@ function schContextMenu(clientX, clientY, p){
     // right-clicking a boxed part keeps the box selection and acts on the whole group
     const inBox = boxSel && boxSel.length > 1 && boxSel.includes(c);
     if (!inBox){ UI.select({ type: "comp", comp: c }); Sch.render(); }
-    items.push({ label: "Rotate 90°  [R]", action: () => Sch.rotate(c) });
-    items.push({ label: "Flip horizontal  [X]", action: () => Sch.flip(c, false) });
-    items.push({ label: "Flip vertical  [Y]", action: () => Sch.flip(c, true) });
+    // inside a box selection these transform the whole group as one block (same as the
+    // R/X/Y keys); on a lone symbol they act on it alone
+    const grp = inBox ? boxSel.slice() : null;
+    items.push({ label: inBox ? "Rotate selection 90°  [R]" : "Rotate 90°  [R]",
+                 action: () => grp ? Sch.rotateGroup(grp) : Sch.rotate(c) });
+    items.push({ label: inBox ? "Flip selection horizontal  [X]" : "Flip horizontal  [X]",
+                 action: () => grp ? Sch.flipGroup(grp, false) : Sch.flip(c, false) });
+    items.push({ label: inBox ? "Flip selection vertical  [Y]" : "Flip vertical  [Y]",
+                 action: () => grp ? Sch.flipGroup(grp, true) : Sch.flip(c, true) });
     items.push({ label: "Edit ref / value…", action: () => UI.openQuickEdit(c) });
     if (typeof Boards !== "undefined" && Boards.canLink(c))
       items.push({ label: "Page Linker…", action: () => Boards.openLinkDialog(c) });
@@ -2264,41 +2319,14 @@ Sch.wire = () => {
         const t = Sch.targets();
         if (!t.length){ /* consumed — R must never rotate the BOARD part from this tab */ }
         else if (t.length === 1) Sch.rotate(t[0]);
-        else {
-          // rotate the whole selection as ONE block: every symbol spins 90° AND its
-          // position orbits the group's centre (not each part spinning in place).
-          // Bail without an undo step if every symbol in the selection is locked.
-          const movable = t.filter(c => !compSchMoveLocked(c));
-          if (movable.length){
-            pushUndo("rotate schematic selection");
-            let cx = 0, cy = 0;
-            for (const c of t){ cx += c.schX; cy += c.schY; }
-            cx = schSnap(cx / t.length); cy = schSnap(cy / t.length);
-            for (const c of movable){
-              const dx = c.schX - cx, dy = c.schY - cy;
-              c.schX = schSnap(cx + dy);   // 90° CCW on screen (y-down): (dx,dy) → (dy,−dx)
-              c.schY = schSnap(cy - dx);
-              c.schRot = (schRotOf(c) + 90) % 360;
-              schUpdateWiresFor(c);
-            }
-            schWarnForeignPinWires(movable);
-            Sch.render();
-          }
-        }
+        else Sch.rotateGroup(t);
       }
     } else if (k === "x" || k === "X" || k === "y" || k === "Y"){
       const vert = (k === "y" || k === "Y");
       const t = Sch.targets();
       if (!t.length){ /* consumed — X must not toggle the board X-ray from this tab */ }
-      else if (t.length > 1){
-        const movable = t.filter(c => !compSchMoveLocked(c));
-        if (movable.length){
-          pushUndo("flip schematic selection");
-          for (const c of movable){ schFlipComp(c, vert); schUpdateWiresFor(c); }
-          schWarnForeignPinWires(movable);
-          Sch.render();
-        }
-      } else Sch.flip(t[0], vert);
+      else if (t.length > 1) Sch.flipGroup(t, vert);
+      else Sch.flip(t[0], vert);
     } else if (k === "n" || k === "N"){
       if (!Sch._lastP) return;
       const pin = schFindPin(Sch._lastP.x, Sch._lastP.y, 16);
