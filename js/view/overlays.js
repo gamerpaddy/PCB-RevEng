@@ -250,15 +250,16 @@ function drawXlinkArrows(ctx){
   for (const c of State.components){
     const links = idx.byComp.get(c.id);
     if (!links || !links.length) continue;
-    const r = compRadius(c) * View.zoom;
+    const half = compBoxHalf(c);
+    const topY = half.hy * View.zoom, sideX = half.hx * View.zoom;
     const p = worldToScreen(c.x, c.y);
     if (p.x < -80 || p.y < -40 || p.x > View.width + 80 || p.y > View.height + 40) continue;
     let i = 0;
     for (const l of links){
       const o = idx.comp.get(l.a === c.id ? l.b : l.a);
       if (!o) continue;
-      const y = p.y - r - 2 - i * 14;   // hug the footprint box
-      const x = p.x - r * 0.4;
+      const y = p.y - topY - 2 - i * 14;   // hug the top edge of the footprint box
+      const x = p.x - sideX * 0.4;
       const label = (idx.page.get(o.id) || "?") + " · " + o.ref;
       // arrowhead pointing away from the part, then the destination text
       ctx.fillStyle = "#b78aff";

@@ -121,9 +121,9 @@ function onPointerDown(e){
   if (e.button === 2) return; // context menu handled separately
 
   // off-page link marker (arrow + page tag above a linked connector) — click = jump.
-  // NOT while mid-route (Tools.tracePts) or placing a free pin: switching pages then
-  // would commit geometry from the old page into the new page's arrays.
-  if (typeof xlinkHitAt === "function" && !Tools.tracePts && !Tools.addPinFor){
+  // Only in the select tool, so the tag never steals clicks meant for drawing/editing
+  // (trace/via/cut/etc.). NOT while mid-route (Tools.tracePts) or placing a free pin.
+  if (Tools.name === "select" && typeof xlinkHitAt === "function" && !Tools.tracePts && !Tools.addPinFor){
     const xh = xlinkHitAt(pt.x, pt.y);
     if (xh && typeof Boards !== "undefined"){ Boards.jumpTo(xh.target); return; }
   }
@@ -495,7 +495,9 @@ function applyBoxSelect(x0, y0, x1, y1){
   const lx = Math.min(x0,x1), hx = Math.max(x0,x1), ly = Math.min(y0,y1), hy = Math.max(y0,y1);
   const inside = (x,y) => x >= lx && x <= hx && y >= ly && y <= hy;
   const out = [];
-  for (const c of State.components) if (inside(c.x, c.y)) out.push({ type:"comp", comp:c });
+  // only grab parts that are actually visible here — a box on the front must not
+  // scoop up back-side parts hidden by the current draw side (mirrors hitTest)
+  for (const c of State.components) if (compBodyVisible(c) && inside(c.x, c.y)) out.push({ type:"comp", comp:c });
   for (const v of State.vias) if (viaVisible(v) && inside(v.x, v.y)) out.push({ type:"via", via:v });
   for (const t of State.traces) if (traceVisible(t) && t.points.some(p => inside(p.x, p.y))) out.push({ type:"trace", trace:t });
   for (const n of State.notes) if (inside(n.x, n.y)) out.push({ type:"note", note:n });

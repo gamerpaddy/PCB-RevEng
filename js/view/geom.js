@@ -132,6 +132,23 @@ function compRadius(comp){
   return r;
 }
 
+/* world-px half-extents of the part's rotated bounding box (body ∪ pads). Unlike
+   compRadius — a circle around the farthest diagonal corner — these hug the actual
+   top/side edges, so a floating tag over a WIDE part sits just above the box instead
+   of way out at the diagonal radius. */
+function compBoxHalf(comp){
+  const fp = compFootprint(comp);
+  const s = State.pxPerMm * (comp.scale || 1);
+  let hw = fp.body.w/2, hh = fp.body.h/2;
+  for (const p of fp.pins){
+    hw = Math.max(hw, Math.abs(p.xmm) + p.w/2);
+    hh = Math.max(hh, Math.abs(p.ymm) + p.h/2);
+  }
+  // AABB of the hw×hh box after rotating by comp.rot (mirroring doesn't change extent)
+  const a = comp.rot * Math.PI/180, ca = Math.abs(Math.cos(a)), sa = Math.abs(Math.sin(a));
+  return { hx: (hw*ca + hh*sa) * s, hy: (hh*ca + hw*sa) * s };
+}
+
 /* screen-space rotate gizmo for a selected part: a knob offset from the part's centre
    along its local "up" (0,-1) direction so it visibly turns with the part. Sizes are
    screen px so it stays grabbable at any zoom. */
