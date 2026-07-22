@@ -234,6 +234,10 @@ const _DIODE_BODY = [
 const SCH_SYM = {
   resistor:  { w:7.62, h:5.08, hideNums:true, hideNames:true, term:_T2(1.27),
     body:[ _rc(-2.54,-1.016,2.54,1.016) ] },
+  // NTC thermistor: resistor rectangle with the IEC temperature-dependence slash
+  // (a diagonal line through the box with a short foot at the lower-left end)
+  thermistor: { w:7.62, h:5.08, hideNums:true, hideNames:true, term:_T2(1.27),
+    body:[ _rc(-2.54,-1.016,2.54,1.016), _pl([[-3.2,1.6],[-2.3,1.6],[2.4,-1.6]]) ] },
   capacitor: { w:7.62, h:5.08, hideNums:true, hideNames:true, term:_T2(2.794),
     body:[ _pl([[-1.016,0],[-0.762,0]]), _pl([[-0.762,-2.032],[-0.762,2.032]]),
            _pl([[0.762,-2.032],[0.762,2.032]]), _pl([[0.762,0],[1.016,0]]) ] },
@@ -302,7 +306,7 @@ const SCH_SYM = {
    inspector's "Schematic sym" picker (labels) and its pin-name auto-fill (SYM_PINNAMES,
    in the same terminal order schGeometry maps component pins to). */
 const SYM_LABELS = {
-  resistor:"Resistor", capacitor:"Capacitor", cap_pol:"Capacitor (polarized)",
+  resistor:"Resistor", thermistor:"Thermistor (NTC)", capacitor:"Capacitor", cap_pol:"Capacitor (polarized)",
   inductor:"Inductor / ferrite", diode:"Diode", led:"LED", zener:"Zener diode",
   schottky:"Schottky diode", crystal:"Crystal / resonator", fuse:"Fuse",
   battery:"Battery / cell", npn:"Transistor NPN", pnp:"Transistor PNP",
@@ -311,7 +315,7 @@ const SYM_LABELS = {
 // terminal-SLOT letters, aligned with each symbol's drawn geometry (sym.term order:
 // [base/gate, collector/drain, emitter/source]). Used to map a pin NAME → the terminal it drives.
 const SYM_PINNAMES = {
-  resistor:["1","2"], capacitor:["1","2"], cap_pol:["+","-"], inductor:["1","2"],
+  resistor:["1","2"], thermistor:["1","2"], capacitor:["1","2"], cap_pol:["+","-"], inductor:["1","2"],
   diode:["A","K"], led:["A","K"], zener:["A","K"], schottky:["A","K"],
   crystal:["1","2"], fuse:["1","2"], battery:["+","-"],
   npn:["B","C","E"], pnp:["B","C","E"], nmos:["G","D","S"], pmos:["G","D","S"],
@@ -426,6 +430,7 @@ function _autoSymKind(c){
   const val = ((c.value || "") + " " + (c.part || "")).toLowerCase();
   if (n === 2){
     switch (rl){
+      case "RT": case "NTC": return "thermistor";   // RT/NTC ref = thermistor
       case "R": case "RN": case "RV": case "VR": case "TH": return "resistor";
       case "C":
         // a polarized footprint (e-cap SMD / radial with the + marker on) or an
