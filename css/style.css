@@ -138,6 +138,10 @@ select:focus,input:focus,textarea:focus{outline:1px solid var(--accent);}
 }
 .net-item:hover{background:var(--bg3);}
 .net-item.active{background:#1c3a5e;}
+/* net of the pad/via/trace selected on the board — softer than .active (which is the
+   list-clicked, focus-dimming net) but clearly picked out, with an accent bar */
+.net-item.sel{background:#1b2a3a; box-shadow:inset 2px 0 0 #4f8fd0;}
+.net-item.sel .nname{color:#eaf2fb; font-weight:600;}
 .net-swatch{width:10px; height:10px; border-radius:2px; flex:0 0 auto;}
 .net-color{width:16px; height:16px; flex:0 0 auto; padding:0; border:1px solid var(--line); border-radius:3px; background:none; cursor:pointer;}
 .net-color::-webkit-color-swatch-wrapper{padding:1px;}

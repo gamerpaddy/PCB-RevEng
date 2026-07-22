@@ -25,6 +25,34 @@ UI.focusPin = (comp, pinIdx) => {
   requestRender();
 };
 
+/* net of whatever is selected on the board (pad / via / trace, or a uniform multi-pad
+   selection) — mirrors what currentHighlightNet() lights up on the canvas so the net
+   list always agrees with the board. Distinct from UI.activeNetId, which is the
+   *clicked-in-the-list* net that focus-dims everything else. */
+UI.selectionNetId = () => {
+  const s = UI.sel;
+  if (s){
+    if (s.type === "pin"){ const p = s.comp.pins[s.pinIdx]; return (p && p.netId) || null; }
+    if (s.type === "via")   return s.via.netId || null;
+    if (s.type === "trace") return s.trace.netId || null;
+  }
+  const many = (arr, get) => {
+    const ids = new Set();
+    for (const it of arr){ const id = get(it); if (!id) return null; ids.add(id); }
+    return ids.size === 1 ? [...ids][0] : null;   // mixed nets → nothing to point at
+  };
+  if (UI.pinSel.length)   return many(UI.pinSel, p => { const q = p.comp.pins[p.pinIdx]; return q && q.netId; });
+  if (UI.traceSel.length) return many(UI.traceSel, t => t.netId);
+  return null;
+};
+
+/* scroll a net row into view inside #net-list only — never touches the page/panel scroll */
+function _revealNetRow(list, row){
+  const cr = list.getBoundingClientRect(), rr = row.getBoundingClientRect();
+  if (rr.top >= cr.top && rr.bottom <= cr.bottom) return;   // already visible
+  list.scrollTop += (rr.top - cr.top) - (cr.height - rr.height) / 2;
+}
+
 function _netPinStyle(){
   if (document.getElementById("net-pin-style")) return;
   const st = document.createElement("style");
@@ -43,6 +71,8 @@ UI.refreshNets = () => {
   list.innerHTML = "";
   const map = buildNetMap();
   const q = UI.netFilter.trim().toLowerCase();
+  const selNet = UI.selectionNetId();      // net of the pad/via/trace picked on the board
+  let selRow = null;
   let shown = 0, total = 0;
   for (const n of State.nets){
     const pinCount = (map.get(n.id) || []).length;
@@ -51,7 +81,9 @@ UI.refreshNets = () => {
     if (q && !n.name.toLowerCase().includes(q)) continue;
     shown++;
     const item = document.createElement("div");
-    item.className = "net-item" + (UI.activeNetId === n.id ? " active" : "");
+    item.className = "net-item" + (UI.activeNetId === n.id ? " active" : "")
+                   + (selNet === n.id ? " sel" : "");
+    if (selNet === n.id) selRow = item;
     item.innerHTML = `<input type="color" class="net-color" value="${/^#[0-9a-fA-F]{6}$/.test(n.color)?n.color:"#888888"}" title="Net colour">
       <button class="nprot${n.protected?" on":""}" title="${n.protected?"Protected — locked name, shielded from accidental merges. Click to unprotect.":"Click to protect — lock the name and shield from accidental merges."}">🛡</button>
       <span class="nname" title="${escAttr(n.name)}${n.protected?" (protected)":""}">${escAttr(n.name)}</span>
@@ -120,6 +152,18 @@ UI.refreshNets = () => {
     none.className = "panel-hint";
     none.textContent = "No nets match “" + UI.netFilter.trim() + "”";
     list.appendChild(none);
+  }
+  // clearing innerHTML above resets the scroll to the top, so bring the selected object's
+  // net back into view on every refresh — that's what makes clicking a pad point at its
+  // row in a list hundreds of nets long
+  if (selRow) _revealNetRow(list, selRow);
+  else if (selNet && q){
+    // the search box is hiding the very net that was just clicked — say so instead of
+    // leaving the panel looking like the pad has no net
+    const hint = document.createElement("div");
+    hint.className = "panel-hint";
+    hint.textContent = "Selected net “" + (getNet(selNet)?.name || "?") + "” is hidden by the search filter";
+    list.appendChild(hint);
   }
   $("#net-count").textContent = q ? "(" + shown + "/" + total + ")" : (total ? "(" + total + ")" : "");
   UI.refreshParts(); // keep the parts list in sync with the same mutations that touch nets

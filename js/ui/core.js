@@ -14,6 +14,7 @@ UI.togglePinSel = (comp, pinIdx) => {
   else UI.pinSel.push({comp, pinIdx});
   UI.sel = null;
   UI.refreshInspector();
+  UI.refreshNets();   // keep the net list pointing at the multi-selected pads' net
 };
 UI.isPinSelected = (comp, pinIdx) =>
   UI.pinSel.some(p => p.comp === comp && p.pinIdx === pinIdx);
@@ -32,6 +33,7 @@ UI.toggleTraceSel = (trace) => {
   if (i >= 0) UI.traceSel.splice(i, 1); else UI.traceSel.push(trace);
   UI.sel = null;
   UI.refreshInspector();
+  UI.refreshNets();
 };
 UI.isTraceSelected = (t) => UI.traceSel.includes(t);
 
