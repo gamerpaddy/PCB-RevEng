@@ -147,7 +147,7 @@ function snapToConductor(wx, wy, traceSide, tightTrace, traceWidth, exclude){
   // own size, clamped to 0.5×…2× the trace width, so tiny pads snap tight while big pads
   // (where the centre is far from where you click) still grab from up to 2× the width.
   const padCenter = !!traceWidth;
-  let best = null, bestD = Infinity;
+  let best = null, bestD = Infinity, bestOnPad = false;
   const filterPads = traceSide && traceSide !== "any";
   // widest distance a pad can still snap from, so a component whose bounding circle is
   // farther than that from the cursor can be skipped without touching its pads
@@ -163,13 +163,22 @@ function snapToConductor(wx, wy, traceSide, tightTrace, traceWidth, exclude){
       // (round WITH a drill) reaches every side; a round SMD land (tht:false, e.g. a test
       // point) lives on its own side just like a rectangular SMD pad.
       if (filterPads && !(fpin.shape === "circle" && fpin.tht !== false) && c.side !== traceSide) continue;
-      let wp = null, d, ptol;
+      let wp = null, d, ptol, onPad = false;
       if (padCenter){
         wp = pinWorldPos(c, fpin); d = Math.hypot(wx-wp.x, wy-wp.y);     // to pad centre
         const padR = Math.min(fpin.w, fpin.h) * s / 2;                   // pad's narrow half-extent
         ptol = Math.max(traceWidth * 0.5, Math.min(padR, traceWidth * 2)) * sf;
+        // the cursor anywhere ON the pad's copper always snaps (to the pad centre) — on a
+        // big pad that reach can be far smaller than the pad itself, which made the snap
+        // disappear while hovering the pad body. Outside the copper the reach above still
+        // rules, so a trace routed PAST a pad isn't grabbed by its edge.
+        onPad = pinEdgeDist(c, fpin, wx, wy) <= 0;
+        if (onPad && d > ptol) ptol = d;
       } else { d = pinEdgeDist(c, fpin, wx, wy); ptol = tol; }            // to pad edge (via tool)
-      if (d <= ptol && d < bestD){ if (!wp) wp = pinWorldPos(c, fpin); bestD=d; best={x:wp.x,y:wp.y,attach:{type:"pin",comp:c,pinIdx:pi},netId:c.pins[pi].netId}; }
+      // a pad the cursor is physically ON always outranks one merely within reach, even
+      // when the other pad's CENTRE happens to be closer
+      const better = (onPad && !bestOnPad) || (onPad === bestOnPad && d < bestD);
+      if (d <= ptol && better){ if (!wp) wp = pinWorldPos(c, fpin); bestD=d; bestOnPad=onPad; best={x:wp.x,y:wp.y,attach:{type:"pin",comp:c,pinIdx:pi},netId:c.pins[pi].netId}; }
     }
   }
   for (const v of State.vias){
@@ -180,7 +189,7 @@ function snapToConductor(wx, wy, traceSide, tightTrace, traceWidth, exclude){
     // reach is the via's own radius (plus the small fixed tol), even in tight-draw mode.
     // Otherwise a large via/PTH would only connect on its tiny inner hole, not its ring.
     const vtol = Math.max(tol, (v.r || State.viaR || 0) * sf);
-    if (d <= vtol && d < bestD){ bestD=d; best={x:v.x,y:v.y,attach:{type:"via",via:v},netId:v.netId}; }
+    if (d <= vtol && d < bestD && !bestOnPad){ bestD=d; best={x:v.x,y:v.y,attach:{type:"via",via:v},netId:v.netId}; }
   }
   if (traceSide){
     // when drawing (tightTrace) only snap within the nearby trace's own width, so a far
@@ -202,7 +211,9 @@ function snapToConductor(wx, wy, traceSide, tightTrace, traceWidth, exclude){
         }
       }
     }
-    if (tBest && (!best || tBestD < bestD)) best = tBest;
+    // …but a pad the cursor sits ON wins outright: a trace crossing that pad shouldn't
+    // steal the snap just because its centreline is nearer than the pad centre
+    if (tBest && !bestOnPad && (!best || tBestD < bestD)) best = tBest;
   }
   return best;
 }

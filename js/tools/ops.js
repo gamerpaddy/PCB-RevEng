@@ -87,8 +87,22 @@ function finishMeasure(){
     if (inp && parseFloat(inp) > 0){
       pushUndo("calibrate scale");
       const realMm = unit === "mil" ? parseFloat(inp)*0.0254 : parseFloat(inp);
+      const prevPxPerMm = State.pxPerMm || 10;
       State.pxPerMm = d / realMm;
-      UI.toast("Calibrated: " + State.pxPerMm.toFixed(2) + " px/mm — footprints now match board scale");
+      // The retained defaults (via size/drill, trace width) live in world px but MEAN a
+      // physical size, so rescale them with the new mapping — otherwise a 0.5 mm via
+      // silently becomes 0.18 mm the moment a high-resolution scan is calibrated.
+      // Already-drawn vias/traces keep their px size: they were traced onto the image and
+      // are physically correct as-is.
+      const f = State.pxPerMm / prevPxPerMm;
+      if (isFinite(f) && f > 0 && f !== 1){
+        State.viaR    = Math.max(0.5,  State.viaR * f);
+        State.viaHole = Math.max(0.25, State.viaHole * f);
+        State.traceW  = Math.max(0.5,  State.traceW * f);
+      }
+      UI.toast("Calibrated: " + State.pxPerMm.toFixed(2) + " px/mm — footprints now match board scale"
+             + " · defaults kept at " + (State.viaR*2/State.pxPerMm).toFixed(2) + " mm via / "
+             + (State.traceW/State.pxPerMm).toFixed(2) + " mm trace");
     }
     Tools.measureA = Tools.measureB = null;
   } else {
