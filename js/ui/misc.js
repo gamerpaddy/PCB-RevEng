@@ -102,6 +102,13 @@ UI.buildHelp = () => {
       [k("view.flip"),"Flip view (look from back)"],["Home / " + k("view.fit"),"Zoom to fit"],
       ["1 … 9, 0","Switch view to image layer 1–10 (or toggle visibility — see Board/display panel)"],
       [k("view.split"),"Split view — Front/Back side by side; 1…0 set the LEFT view's layer, Shift+1…0 the RIGHT"],
+      ["^ (Shift = right pane)","Show NO image in this view (black backdrop)"],
+      ["+ / -","Zoom in / out"],
+    ]],
+    ["Tabs & PCB pages", [
+      ["F1 … F5","Visual / Schematic / BOM / Nets / Projects tab"],
+      ["Shift+F1 … Shift+F12","Switch to PCB page 1…12 (multi-page projects)"],
+      ["Ctrl+R","Reload the app (F5 opens the Projects tab)"],
     ]],
     ["Editing", [
       [k("edit.rotate") + " / Shift+" + k("edit.rotate"),"Rotate 90° / 15° (selection or ghost)"],
@@ -113,9 +120,12 @@ UI.buildHelp = () => {
       ["Shift+drag trace anchor","Detach it (no snapping)"],
       [k("edit.drawside"),"Cycle active draw side (F.Cu/B.Cu/inner)"],[k("edit.net"),"Rename net of selection"],
       ["Ctrl+Z / Ctrl+Y","Undo / redo"],["Ctrl+D","Duplicate component"],
+      ["Ctrl+C / Ctrl+V","Copy / paste the selection (visual editor)"],
+      ["Shift+" + k("tool.trace"),"Trace-width picker (with the trace tool)"],
     ]],
     ["Project", [
       ["Ctrl+S","Save project (.json incl. images)"],["Ctrl+O","Open project"],["Ctrl+E","Export (netlist / BOM / schematic / CSV / JSON)"],
+      ["Ctrl+F","Find a part (parts dialog)"],["?","This help"],
     ]],
   ];
   const box = $("#help-body");
@@ -136,6 +146,7 @@ const KEY_GROUPS = [
   ["tool.",     "Tools"],
   ["edit.",     "Editing"],
   ["view.",     "View & dialogs"],
+  ["board.",    "PCB pages"],
   ["file.",     "File"],
   ["layer.",    "Image layers"],
   ["sch.",      "Schematic editor"],

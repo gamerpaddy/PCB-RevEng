@@ -12,6 +12,46 @@ const Boards = {
   _layerSel: new Map(), // board id -> UI.activeLayerId
   _sig: "",             // strip signature (names+idx) to skip needless DOM rebuilds
 
+  /* Drop every remembered camera / layer choice. Board ids are only unique WITHIN a
+     project — resetProject restarts the id counter and loadProject takes ids straight
+     from the file — so a project opened after another one inherits its predecessor's
+     pan/zoom per page (reproduced: page 2 of the new project opened at the old one's
+     camera instead of zoom-to-fit). Called from loadProject/resetProject. */
+  resetCameras(){
+    Boards._cam.clear(); Boards._schCam.clear(); Boards._layerSel.clear();
+  },
+
+  /* An undo/redo (or a multiplayer sync) can land on a DIFFERENT page than the one being
+     viewed — the snapshot carries its own boardIdx. Without this the page swapped under
+     you silently and kept the previous page's camera, showing the restored board at an
+     arbitrary pan/zoom with an activeLayerId belonging to the page you just left.
+     Same bookkeeping switchTo does, minus the selection clearing (afterHistory owns that). */
+  adoptPageChange(prevBoardId){
+    const b = activeBoard();
+    if (!b || b.id === prevBoardId) return;
+    if (prevBoardId != null && typeof View !== "undefined")
+      Boards._cam.set(prevBoardId, { zoom: View.zoom, panX: View.panX, panY: View.panY });
+    if (prevBoardId != null && typeof Sch !== "undefined")
+      Boards._schCam.set(prevBoardId, { zoom: Sch.zoom, panX: Sch.panX, panY: Sch.panY });
+    if (prevBoardId != null && typeof UI !== "undefined")
+      Boards._layerSel.set(prevBoardId, UI.activeLayerId);
+    const cam = Boards._cam.get(b.id);
+    if (typeof View !== "undefined"){
+      if (cam){ View.zoom = cam.zoom; View.panX = cam.panX; View.panY = cam.panY; }
+      else if (State.layers.length || State.components.length) zoomToFit();
+      View.hoverPin = null; View.hoverNetId = null;   // pointed at the page we just left
+    }
+    if (typeof Sch !== "undefined"){
+      const sc = Boards._schCam.get(b.id);
+      if (sc){ Sch.zoom = sc.zoom; Sch.panX = sc.panX; Sch.panY = sc.panY; }
+      Sch._geo = null;
+    }
+    if (typeof UI !== "undefined"){
+      UI.resolveActiveLayer(Boards._layerSel.get(b.id));
+      UI.toast("Page → " + b.name);   // never move the user between pages in silence
+    }
+  },
+
   /* ---------- page switching ---------- */
   switchTo(i){
     i = Math.max(0, Math.min(State.boards.length - 1, i | 0));
@@ -31,6 +71,11 @@ const Boards = {
       // an in-progress trace route holds points in the OLD page's coordinates/arrays
       Tools.tracePts = null; Tools.traceStartSnap = null; Tools.traceWidth = null;
       Tools.addPinFor = null;
+    }
+    if (typeof View !== "undefined"){
+      // hover state names a pad/net on the page we just left — the star ratsnest would
+      // otherwise keep its hub on a footprint that isn't here until the next mouse move
+      View.hoverPin = null; View.hoverNetId = null;
     }
     if (typeof UI !== "undefined"){
       UI.sel = null;
@@ -101,12 +146,17 @@ const Boards = {
     State.layerCount = nb.layerCount || 2;
     // the deleted page's nets may now be empty; the deleted page's selections are gone
     pruneNets();
-    if (wasActive && typeof UI !== "undefined"){
-      UI.sel = null;
-      UI.resolveActiveLayer(Boards._layerSel.get(nb.id));
-      UI.rebuildSideSelect();
-      if (typeof syncSettings === "function") syncSettings();
-      UI.refreshLayerList(); UI.refreshNets(); UI.refreshInspector();
+    if (typeof UI !== "undefined"){
+      // the nets panel is page-scoped but pruneNets() is project-wide: deleting a
+      // BACKGROUND page can empty a net, so refresh it either way
+      if (wasActive){
+        UI.sel = null;
+        UI.resolveActiveLayer(Boards._layerSel.get(nb.id));
+        UI.rebuildSideSelect();
+        if (typeof syncSettings === "function") syncSettings();
+        UI.refreshLayerList();
+      }
+      UI.refreshNets(); UI.refreshInspector();
     }
     if (typeof markDirty === "function") markDirty();
     Boards.refreshTabs();
@@ -602,8 +652,9 @@ const Boards = {
       if (Boards._sig !== Boards.signature()) Boards.refreshTabs();
       return origRR.apply(this, a);
     };
-    // hotkey actions (unbound by default — right-click… nothing to right-click here,
-    // bind them via the Keys dialog)
+    // hotkey actions, unbound by default — the page tabs have their own right-click menu,
+    // so these are bound from the Keys dialog (⌨) under "PCB pages". Shift+F1…F12 above
+    // are fixed and not rebindable.
     if (typeof KeyActions !== "undefined"){
       KeyActions.push(
         { id:"board.next", label:"Next PCB page",     def:"", run:()=>Boards.switchTo(State.boardIdx + 1 >= State.boards.length ? 0 : State.boardIdx + 1) },

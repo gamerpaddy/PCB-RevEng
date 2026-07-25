@@ -1226,7 +1226,8 @@ function mpApplyGuestLock(force){
   setLock("btn-export", lockSave);
   setLock("btn-new", lockOpen);
   setLock("btn-open", lockOpen);
-  document.querySelectorAll('#toolbar .tool[data-tool="align"]').forEach(b => b.classList.toggle("mp-locked", lockImg));
+  // (no align entry here: that tool has no toolbar button — setTool's mpBlockImageOp
+  // guard is what keeps guests out of it)
   document.querySelectorAll('#toolbar .tool[data-tool="component"],#toolbar .tool[data-tool="trace"],#toolbar .tool[data-tool="via"],#toolbar .tool[data-tool="cut"],#toolbar .tool[data-tool="note"]')
     .forEach(b => b.classList.toggle("mp-locked", lockObj));
   if (typeof UI !== "undefined" && UI.refreshLayerList) UI.refreshLayerList();   // per-layer-card buttons

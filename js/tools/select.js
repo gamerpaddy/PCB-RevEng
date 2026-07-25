@@ -379,11 +379,15 @@ function applyNetRename(obj, name, done){
     if (scope === "connected"){
       assignNetToConnected(obj, name);
     } else if (!name && scope === "all"){                 // clear EVERY object on the current net
+      // Project-wide, like mergeNets/renameNet: nets are global and the count this dialog
+      // offers ("clear whole net (7)") comes from netMembers(), which spans every PCB page.
+      // Clearing only State.* left the off-page members assigned — so the net survived
+      // pruneNets() and the button delivered fewer objects than it promised.
       if (oldId){
-        for (const c of State.components) for (const p of c.pins) if (p.netId === oldId) p.netId = null;
-        for (const v of State.vias)   if (v.netId === oldId) v.netId = null;
-        for (const t of State.traces) if (t.netId === oldId) t.netId = null;
-        for (const w of State.schWires) if (w.netId === oldId) w.netId = null;
+        for (const c of allOf("components")) for (const p of c.pins) if (p.netId === oldId) p.netId = null;
+        for (const v of allOf("vias"))     if (v.netId === oldId) v.netId = null;
+        for (const t of allOf("traces"))   if (t.netId === oldId) t.netId = null;
+        for (const w of allOf("schWires")) if (w.netId === oldId) w.netId = null;
         pruneNets();
       }
     } else if (!assignNetToObject(obj, name, scope)){

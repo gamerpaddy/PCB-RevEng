@@ -68,8 +68,17 @@ function nextId(){ return State._id++; }
    switching a page just repoints them, so all editor code keeps working untouched. */
 const BOARD_COLS = ["layers","components","vias","traces","notes","schWires","schLabels"];
 
+/* "PCB n", counting up from the page count until the name is free — naming by
+   boards.length alone collides after a middle page is deleted
+   ([PCB 1, PCB 2, PCB 3] − PCB 2 + add → a second "PCB 3") */
+function nextBoardName(){
+  const taken = new Set(State.boards.map(b => b.name));
+  let n = State.boards.length + 1;
+  while (taken.has("PCB " + n)) n++;
+  return "PCB " + n;
+}
 function makeBoard(name){
-  return { id: nextId(), name: name || ("PCB " + (State.boards.length + 1)),
+  return { id: nextId(), name: name || nextBoardName(),
            layerCount: 2,
            layers:[], components:[], vias:[], traces:[], notes:[], schWires:[], schLabels:[] };
 }
@@ -458,6 +467,9 @@ function cancelUndo(){
 
 function applySnapshot(json){
   const s = _wrapLegacyBoards(JSON.parse(json));
+  // which page we are LOOKING at right now — a snapshot carries its own boardIdx, so an
+  // undo can move us to a different page (see Boards.adoptPageChange below)
+  const prevBoardId = (State.boards[State.boardIdx] || State.boards[0] || {}).id;
   State.pxPerMm = s.pxPerMm;
   State.viaR = s.viaR || 8;
   State.viaHole = s.viaHole || 3.6;
@@ -518,6 +530,7 @@ function applySnapshot(json){
   for (const col of BOARD_COLS) State[col] = b[col];
   State.layerCount = b.layerCount || 2;
   if (typeof Boards !== "undefined" && Boards.refreshTabs) Boards.refreshTabs();
+  if (typeof Boards !== "undefined" && Boards.adoptPageChange) Boards.adoptPageChange(prevBoardId);
 }
 
 function undo(){
@@ -818,6 +831,7 @@ function loadProject(json, done){
   if (typeof Sch !== "undefined" && Sch.clearSelection){ Sch.clearSelection(); Sch._entered = false; }   // stale refs point at the old project's wires; re-fit the sheet to the new board
   Undo.stack.length = 0; Undo.redo.length = 0;
   _imgVault.clear(); _imgVaultSeq = 1;   // fresh project → drop any cached bitmaps
+  if (typeof Boards !== "undefined" && Boards.resetCameras) Boards.resetCameras();   // page ids repeat across projects
 
   // rebuild every page; each board carries its own layer list (bytes load async below)
   State.boards = (s.boards || []).map((sb, bi) => {
@@ -908,4 +922,5 @@ function resetProject(){
   if (typeof Boards !== "undefined" && Boards.refreshTabs) Boards.refreshTabs();
   Undo.stack.length = 0; Undo.redo.length = 0;
   _imgVault.clear(); _imgVaultSeq = 1;   // no undo history → cached bitmaps are unreachable
+  if (typeof Boards !== "undefined" && Boards.resetCameras) Boards.resetCameras();   // page ids restart at 1 here
 }
