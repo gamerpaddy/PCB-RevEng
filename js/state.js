@@ -351,6 +351,26 @@ function commitLayerImage(l){   // call AFTER assigning the new img/dataURL/tile
   l.imgId = _imgVaultSeq++;
   _imgVault.set(l.imgId, { img:l.img, dataURL:l.dataURL, tiles:l.tiles || null });
 }
+/* The undo timeline outlives the vault: it is PERSISTED (OPFS autosave restores it on
+   reload) while the vault is runtime-only and reset by loadProject/resetProject. A
+   restored snapshot therefore references imgIds that this session hands out again — to
+   DIFFERENT layers' bitmaps — and applySnapshot's `_imgVault.has(imgId)` check happily
+   accepts them, painting one layer with another layer's image. Reserve every id a
+   restored timeline mentions so the new session can only allocate above them; a miss
+   then correctly falls through to "keep the layer's current pixels" (the pre-crop bytes
+   themselves cannot survive a reload — they were never persisted). */
+function reserveImgIds(entries){
+  let max = 0;
+  const scan = (metas) => { for (const m of (metas || [])) if (m && m.imgId > max) max = m.imgId; };
+  for (const e of (entries || [])){
+    let s;
+    try { s = JSON.parse(e.json); } catch(err){ continue; }
+    for (const b of (s.boards || [])) scan(b.layersMeta);
+    scan(s.layersMeta);   // legacy single-board snapshot
+  }
+  if (max >= _imgVaultSeq) _imgVaultSeq = max + 1;
+  return _imgVaultSeq;
+}
 function ensureLayerImgId(l){   // lazily register a layer's current pixels (first snapshot)
   if (l.imgId == null || !_imgVault.has(l.imgId)) commitLayerImage(l);
   return l.imgId;

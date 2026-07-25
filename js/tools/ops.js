@@ -147,7 +147,14 @@ function deleteSelection(){
     } else if (UI.pinSel.length){
       // Delete on a shift-click multi-pin selection clears each pad's net (mirrors single-pad Delete)
       pushUndo("clear net on " + UI.pinSel.length + " pins");
-      for (const p of UI.pinSel) p.comp.pins[p.pinIdx].netId = null;
+      // clearing a pad's net must release the schematic wires anchored to it — they
+      // describe the connection that just went away. Skipping it (as this path used to)
+      // left the wires carrying the old netId, which also kept the emptied net alive
+      // through pruneNets(). Same invariant the single-pad path below follows.
+      for (const p of UI.pinSel){
+        p.comp.pins[p.pinIdx].netId = null;
+        releasePinWireNets(p.comp.id, p.pinIdx);
+      }
       UI.pinSel = [];
       pruneNets();
       UI.select(null); UI.refreshNets(); UI.refreshInspector(); requestRender();

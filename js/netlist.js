@@ -1,10 +1,15 @@
 /* ===== netlist.js — export to KiCad / CSV / JSON ===== */
 "use strict";
 
-function buildNetMap(){
-  // netId -> [{ref, pin}]
+/* netId -> [{ref, pin, pinName}].
+   `allPages` scopes it: EXPORTS must pass true — nets are project-global (off-page links
+   deliberately join pads across pages), so an export built from State.components alone
+   emits nets that are missing every node living on another page, with nothing to show
+   the netlist is incomplete. The left Nets panel passes nothing on purpose: it is a view
+   of the page you are editing. */
+function buildNetMap(allPages){
   const map = new Map();
-  for (const c of State.components){
+  for (const c of (allPages ? allOf("components") : State.components)){
     for (const p of c.pins){
       if (!p.netId) continue;
       if (!map.has(p.netId)) map.set(p.netId, []);
@@ -30,7 +35,7 @@ function exportKiCad(){
   lines.push("    (date " + sexpEscape(new Date().toISOString()) + ")");
   lines.push("    (tool " + sexpEscape("PCB RevEng v1") + "))");
   lines.push("  (components");
-  for (const c of State.components){
+  for (const c of allOf("components")){   // every PCB page — one netlist covers the project
     const fp = compFootprint(c);
     lines.push("    (comp (ref " + sexpEscape(c.ref) + ")");
     lines.push("      (value " + sexpEscape(c.value || c.part || "~") + ")");
@@ -40,7 +45,7 @@ function exportKiCad(){
   }
   lines.push("  )");
   lines.push("  (nets");
-  const map = buildNetMap();
+  const map = buildNetMap(true);
   let code = 1;
   for (const net of State.nets){
     const nodes = map.get(net.id);
@@ -137,11 +142,11 @@ function exportBOM(){
 }
 
 function exportJSON(){
-  const map = buildNetMap();
+  const map = buildNetMap(true);
   return JSON.stringify({
     generator: "pcb-reveng v1",
     date: new Date().toISOString(),
-    components: State.components.map(c => {
+    components: allOf("components").map(c => {   // every PCB page
       const fp = compFootprint(c);
       return {
         ref: c.ref, value: c.value, part: c.part,

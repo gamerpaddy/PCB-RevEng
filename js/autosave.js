@@ -299,6 +299,10 @@ async function autosaveInit(){
             const u = JSON.parse(undoData);
             if (Array.isArray(u.stack)) Undo.stack = u.stack;
             if (Array.isArray(u.redo)) Undo.redo = u.redo;
+            // the restored snapshots reference last session's image-vault ids; keep this
+            // session's allocator above them so an undo can't swap in another layer's
+            // bitmap (see reserveImgIds in state.js)
+            if (typeof reserveImgIds === "function") reserveImgIds(Undo.stack.concat(Undo.redo));
           } catch(e){}
         }
         Autosave.restoring = false;

@@ -83,9 +83,16 @@ const Boards = {
     boardsSyncScalars();
     const b = State.boards[i]; if (!b) return;
     const n = b.components.length + b.vias.length + b.traces.length;
-    if (!confirm(`Delete page “${b.name}” (${b.components.length} parts, ${b.layers.length} images, ${n} objects total)?\n\nThis cannot be undone.`)) return;
+    if (!confirm(`Delete page “${b.name}” (${b.components.length} parts, ${b.layers.length} images, ${n} objects total)?\n\nUndoable with Ctrl+Z.`)) return;
     const wasActive = i === State.boardIdx;
+    // A page delete MUST have its own restore point. Without one the deletion still sat
+    // in the timeline — every older snapshot carries the board, so the next unrelated
+    // Ctrl+Z quietly resurrected the page along with whatever it was actually undoing.
+    pushUndo("delete page " + b.name);
     State.boards.splice(i, 1);
+    // links into the deleted page, and its remembered camera/layer, go with it
+    State.xlinks = State.xlinks.filter(l => !b.components.some(c => c.id === l.a || c.id === l.b));
+    Boards._cam.delete(b.id); Boards._schCam.delete(b.id); Boards._layerSel.delete(b.id);
     if (State.boardIdx > i) State.boardIdx--;
     if (State.boardIdx >= State.boards.length) State.boardIdx = State.boards.length - 1;
     // repoint the aliases at whatever is now active
