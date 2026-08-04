@@ -9,13 +9,14 @@
    other side. Simultaneous edits are last-write-wins. Hosted (URL) image
    layers always travel as links; embedded photos are only sent when the
    "share images" option is on, downscaled to a px/mm cap. Cursors are
-   broadcast live and drawn as coloured pointers with name tags. */
+   broadcast live and drawn as coloured pointers with name tags; a peer on the
+   same page but a different copper side is dimmed and tagged with their side. */
 "use strict";
 
 const MP = {
   id: Math.random().toString(36).slice(2, 10),   // my peer id (also keys my cursor)
   peers: [],           // [{pc, dc, open, name, color, remoteId, q}]
-  cursors: new Map(),  // from-id -> {x,y,name,color,ts,el,leave}
+  cursors: new Map(),  // from-id -> {x,y,side,name,color,ts,el,leave}
   tabs: new Map(),     // from-id -> {tab,name,color} — which editor tab each peer is on
   edits: new Map(),    // "c12"/"v5"/"t7"/"n3" -> {color,name,ts,el} — recent remote edits (dots)
   remoteSel: new Map(),// from-id -> {keys,color,name,els} — what each peer has selected (rings)
@@ -988,8 +989,31 @@ function mpCursorMsg(m){
   c.host = !!m.host;   // the session initiator gets a crown on the name tag
   c.sch = !!m.sch;   // coords are schematic mm (sender was in the schematic editor)
   c.bid = m.bid;     // the PCB page the sender is on (cursor hidden on other pages)
+  c.side = mpCleanSide(m.side);   // copper side they're working on (null = unknown/old peer)
   c.leave = !!m.leave; c.ts = Date.now();
   mpLayoutCursors();
+}
+
+/* only ever trust a side key we know how to label */
+function mpCleanSide(s){
+  return (typeof s === "string" && SIDE_LABELS[s]) ? s : null;
+}
+
+/* the copper side my pointer is on: the side of the split pane under it, else the
+   draw-side selector. Read from View.cursorPane rather than View._paneSide, which is
+   only live inside a draw/hit-test pass. */
+function mpMySide(){
+  if (View.split && typeof paneSideOf === "function") return paneSideOf(View.cursorPane || "left");
+  return (typeof UI !== "undefined" && UI.drawSide) ? UI.drawSide() : null;
+}
+
+/* every copper side I can currently see, so a peer on any of them counts as "with me":
+   both panes in split view, otherwise just the draw side */
+function mpVisibleSides(){
+  if (View.split && typeof paneSideOf === "function")
+    return [paneSideOf("left"), paneSideOf("right")];
+  const s = (typeof UI !== "undefined" && UI.drawSide) ? UI.drawSide() : null;
+  return s ? [s] : [];
 }
 
 /* one overlay per editor: board cursors live in #canvas-wrap, schematic cursors in
@@ -1023,6 +1047,7 @@ function mpLayoutCursors(){
 function mpLayoutCursorsNow(){
     const tab = (typeof EditorTabs !== "undefined") ? EditorTabs.current : "visual";
     const now = Date.now();
+    const mySides = mpVisibleSides();
     for (const [id, c] of MP.cursors){
       // hidden when gone-stale, hidden-by-choice, or we're not on the peer's sheet
       const wrongTab = c.sch ? tab !== "schematic" : tab !== "visual";
@@ -1032,7 +1057,7 @@ function mpLayoutCursorsNow(){
         if (stale) continue;
         c.el = document.createElement("div");
         c.el.className = "mp-cursor";
-        c.el.innerHTML = '<svg width="18" height="18" viewBox="0 0 18 18"><path d="M2 1 L16 8.5 L9.2 10.2 L6 17 Z" fill="currentColor" stroke="#000" stroke-width="1"/></svg><span class="mp-name"></span>';
+        c.el.innerHTML = '<svg width="18" height="18" viewBox="0 0 18 18"><path d="M2 1 L16 8.5 L9.2 10.2 L6 17 Z" fill="currentColor" stroke="#000" stroke-width="1"/></svg><span class="mp-name"></span><span class="mp-side"></span>';
       }
       const cont = mpCursorContainer(c.sch);
       if (!cont){ continue; }
@@ -1046,6 +1071,17 @@ function mpLayoutCursorsNow(){
       const label = (c.host ? "\u{1F451} " : "") + (c.name || "");   // 👑 marks the host
       if (nameEl.textContent !== label) nameEl.textContent = label;
       nameEl.style.background = c.color || "#4dd2ff";
+      // same page, different copper side: dim the pointer and badge it with their side
+      const offSide = !c.sch && c.side && mySides.length && !mySides.includes(c.side);
+      const sideEl = c.el.querySelector(".mp-side");
+      c.el.classList.toggle("mp-offside", !!offSide);
+      sideEl.style.display = offSide ? "" : "none";
+      if (offSide){
+        const st = SIDE_LABELS[c.side] || c.side;
+        if (sideEl.textContent !== st) sideEl.textContent = st;
+        sideEl.style.background = SIDE_COLORS[c.side] || "#9aa3ad";
+        sideEl.title = (c.name || "Peer") + " is on " + st;
+      }
     }
     mpLayoutEdits();
 }
@@ -1069,7 +1105,9 @@ function mpWireCursorSend(){
       if (!throttled()) return;
       const w = (typeof Tools !== "undefined" && Tools.cursor) ? Tools.cursor : null;
       if (!w) return;
-      mpBroadcast({ t: "cur", from: MP.id, x: w.x, y: w.y, bid: activeBoard().id, name: MP.name, color: MP.color, host: MP.isHost });
+      MP._lastCur = { x: w.x, y: w.y, side: mpMySide() };
+      mpBroadcast({ t: "cur", from: MP.id, x: w.x, y: w.y, bid: activeBoard().id, side: MP._lastCur.side,
+        name: MP.name, color: MP.color, host: MP.isHost });
     });
     canvas.addEventListener("pointerleave", sendLeave);
   }
@@ -1085,6 +1123,19 @@ function mpWireCursorSend(){
     });
     schCv.addEventListener("pointerleave", sendLeave);
   }
+}
+
+/* flipping the draw side (selector, D hotkey, split pane) doesn't move the mouse, so
+   re-send the last position with the new side — otherwise peers keep dimming us until
+   we jiggle the pointer */
+function mpMaybeSendSide(){
+  const cur = MP._lastCur;
+  if (!cur || !mpConnected()) return;
+  const side = mpMySide();
+  if (side === cur.side) return;
+  cur.side = side;
+  mpBroadcast({ t: "cur", from: MP.id, x: cur.x, y: cur.y, bid: activeBoard().id, side,
+    name: MP.name, color: MP.color, host: MP.isHost });
 }
 
 /* ---------------- tab presence (coloured dots on the editor tab bar) ---------------- */
@@ -1476,6 +1527,10 @@ function mpInjectStyle(){
 .mp-cursor{position:absolute;left:0;top:0;will-change:transform}
 .mp-cursor .mp-name{position:absolute;left:12px;top:14px;color:#111;font:11px/1.5 sans-serif;
   padding:0 5px;border-radius:4px;white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,.5)}
+.mp-cursor .mp-side{position:absolute;left:12px;top:31px;color:#111;font:10px/1.4 sans-serif;
+  padding:0 4px;border-radius:3px;white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,.5);
+  border:1px solid rgba(0,0,0,.45)}
+.mp-cursor.mp-offside{opacity:.38}
 #btn-mp.mp-live{background:#1d4030;border-color:#2f7d52;color:#8fe6b0}
 .mp-peer{display:flex;align-items:center;gap:7px;padding:3px 2px;font-size:12px}
 .mp-peer .mp-dot{width:9px;height:9px;border-radius:50%;flex:none}
@@ -1535,7 +1590,7 @@ window.addEventListener("load", () => {
   window.markDirty = function(...a){ origDirty.apply(this, a); mpNudge(); };
   // any re-render (pan/zoom included) repositions the remote cursors
   const origRR = window.requestRender;
-  window.requestRender = function(...a){ origRR.apply(this, a); if (MP.cursors.size || MP.edits.size || MP.remoteSel.size) mpLayoutCursors(); };
+  window.requestRender = function(...a){ origRR.apply(this, a); mpMaybeSendSide(); if (MP.cursors.size || MP.edits.size || MP.remoteSel.size) mpLayoutCursors(); };
   // …and the same for the schematic editor (its pan/zoom goes through Sch.render)
   if (typeof Sch !== "undefined" && Sch.render){
     const origSR = Sch.render;
