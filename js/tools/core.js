@@ -19,7 +19,7 @@ const Tools = {
   traceStartSnap: null,
   angleSnap: localStorage.getItem("pcbreveng.traceAngleSnap") === "on",   // constrain new segments to 45° increments
   // component tool
-  ghostFp: null, ghostRot: 0, ghostSide: "front",
+  ghostFp: null, ghostRot: 0, ghostSide: "front", ghostScale: 1,
   pending: null,       // {fpId,fpParams,ref,value,part,kicad}
   // measure
   measureA: null, measureB: null,
@@ -88,7 +88,7 @@ function setTool(name){
   Tools.rotateLayer = null; Tools.rotLine = null;   // leave the rotate tool
   Tools.resizeLayer = null; Tools.resizeLine = null; Tools.resizeStep = 0;   // leave the resize-XY tool
   Tools._edgeArmed = false;   // re-arm edge auto-scroll: must leave the margin before it kicks in
-  if (name !== "component"){ Tools.ghostFp = null; Tools.pending = null; }
+  if (name !== "component"){ Tools.ghostFp = null; Tools.pending = null; Tools.ghostScale = 1; }
   if (name !== "select"){ View.hoverPin = null; View.cursorLabel = null; UI.setStatusPad(""); Tools._readout = ""; }   // pad/comp readout is select-mode only
   Tools.name = name;
   document.querySelectorAll("#toolbar .tool").forEach(b =>

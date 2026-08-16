@@ -1248,6 +1248,7 @@ function importCustomFpFile(file){
     Tools.pending = { fpId:"customfp", fpParams:{ name: entry.name }, ref:"", value:"", part:"", kicad:"" };
     Tools.ghostFp = generateFootprint("customfp", { name: entry.name });
     Tools.ghostRot = 0;
+    Tools.ghostScale = 1;
     Tools.ghostSide = UI.copperSide() === "back" ? "back" : "front";
     setTool("component");
     UI.toast("Imported " + entry.name + " — click to place · also in the Custom category & quick-add custom:" + entry.name);

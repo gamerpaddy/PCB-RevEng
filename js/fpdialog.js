@@ -415,6 +415,7 @@ UI.confirmFootprint = () => {
   } else {
     Tools.pending = vals;
     Tools.ghostFp = fp;
+    Tools.ghostScale = 1;   // a fresh footprint is 1.0×, never the scale left over from a paste
     Tools.ghostSide = UI.copperSide() === "back" ? "back" : "front";
     // fresh placement always starts at a straight 0/90/180/270 — snap any leftover
     // free angle from the rotate gizmo (or a prior paste) so R keeps everything aligned
