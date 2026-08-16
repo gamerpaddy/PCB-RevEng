@@ -479,7 +479,8 @@ function copySelection(){
     fpId: c.fpId, fpParams: JSON.parse(JSON.stringify(c.fpParams || {})),
     value: c.value || "", part: c.part || "", kicad: c.kicad || "",
     symOverride: c.symOverride || null,
-    rot: c.rot || 0, side: c.side,
+    rot: c.rot || 0, side: c.side, scale: c.scale || 1,
+    bom: c.bom ? JSON.parse(JSON.stringify(c.bom)) : null,
     refPrefix: (/^([A-Za-z]+)/.exec(c.ref) || [,"U"])[1],
     pins: c.pins.map(p => ({ num:p.num, name:p.name||"", netId:p.netId||null })),
   };
@@ -495,9 +496,13 @@ function pasteClipboard(){
     ref: "", value: cb.value, part: cb.part, kicad: cb.kicad,
     symOverride: cb.symOverride, refPrefix: cb.refPrefix,
     pinData: cb.pins || null,
+    bom: cb.bom ? JSON.parse(JSON.stringify(cb.bom)) : null,
   };
   Tools.ghostFp = generateFootprint(cb.fpId, Tools.pending.fpParams);
   Tools.ghostRot = cb.rot;
+  // a part sized to the board photo (Scale ×) must paste at that same size, or the copy
+  // lands at 1.0× and no longer matches the pads underneath it
+  Tools.ghostScale = cb.scale || 1;
   // Paste lands on the side the user is currently viewing (matches the footprint
   // dialog / QuickAdd flows). Flipping the view before pasting places on that side;
   // "Flip to other side" / edit.side toggles the ghost afterwards if wanted.

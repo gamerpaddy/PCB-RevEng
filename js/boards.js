@@ -67,7 +67,7 @@ const Boards = {
 
     // selections/drags point into the old page's arrays — drop them
     if (typeof Tools !== "undefined"){
-      Tools.drag = null; Tools.padEdit = null; Tools.pending = null;
+      Tools.drag = null; Tools.padEdit = null; Tools.pending = null; Tools.ghostScale = 1;
       // an in-progress trace route holds points in the OLD page's coordinates/arrays
       Tools.tracePts = null; Tools.traceStartSnap = null; Tools.traceWidth = null;
       Tools.addPinFor = null;

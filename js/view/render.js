@@ -373,7 +373,7 @@ function drawWorld(ctx){
     ctx.translate(Tools.cursor.x, Tools.cursor.y);
     ctx.rotate(Tools.ghostRot * Math.PI/180);
     if (Tools.ghostSide === "back") ctx.scale(-1,1);
-    drawFootprintShape(ctx, Tools.ghostFp, State.pxPerMm, {alpha:0.55, zoom:View.zoom});
+    drawFootprintShape(ctx, Tools.ghostFp, State.pxPerMm * (Tools.ghostScale || 1), {alpha:0.55, zoom:View.zoom});
     ctx.restore();
   }
 

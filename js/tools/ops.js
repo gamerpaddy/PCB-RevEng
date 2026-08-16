@@ -12,7 +12,8 @@ function componentDown(w, e){
   const p = Tools.pending;
   const fp = generateFootprint(p.fpId, p.fpParams);
   // no components stacked on the same spot (same side)
-  const s = State.pxPerMm;
+  const scale = Tools.ghostScale || 1;
+  const s = State.pxPerMm * scale;
   let rNew = Math.hypot(fp.body.w, fp.body.h)/2 * s;
   for (const o of State.components){
     if (o.side !== Tools.ghostSide) continue;
@@ -47,7 +48,7 @@ function componentDown(w, e){
     fpId: p.fpId, fpParams: {...p.fpParams},
     kicad: p.kicad || fp.kicad || "",
     x: w.x, y: w.y, rot: Tools.ghostRot, side: Tools.ghostSide,
-    scale: 1,
+    scale,
     symOverride: p.symOverride || null,
     pins: fp.pins.map(fpin => ({ num:fpin.num, name:fpin.name||"", netId:null })),
   };
@@ -61,6 +62,7 @@ function componentDown(w, e){
       if (pd){ if (pd.name) cp.name = pd.name; if (pd.netId != null) cp.netId = pd.netId; }
     }
   }
+  if (p.bom) comp.bom = JSON.parse(JSON.stringify(p.bom));
   State.components.push(comp);
   autoConnectPins(comp);   // pins dropped on existing copper inherit its net (e.g. plated mounting hole over a trace)
   p.ref = ""; // subsequent placements auto-number
