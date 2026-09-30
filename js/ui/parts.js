@@ -213,6 +213,7 @@ UI.commitRename = (c, newRef, noUndo) => {
     // noUndo: caller (footprint dialog / quick-edit) already pushed one snapshot for the whole edit
     if (!noUndo) pushUndo("rename " + c.ref);
     c.ref = newRef; registerRef(c.ref);
+    autoNameDiodePins(c);
     requestRender(); UI.refreshNets(); UI.refreshInspector();
     return;
   }

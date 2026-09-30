@@ -407,6 +407,7 @@ UI.confirmFootprint = () => {
     });
     // a concrete symbol pick fills in its standard pin names (nets/NC preserved above)
     if (vals.symOverride && vals.symOverride !== "box") applySymPinNames(c, vals.symOverride);
+    else autoNameDiodePins(c);
     pruneNets();
     UI.select({type:"comp", comp:c});
     UI.refreshNets(); requestRender();

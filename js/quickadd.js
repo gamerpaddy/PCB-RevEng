@@ -625,6 +625,7 @@ QuickAdd.place = () => {
     pins: fp.pins.map(fpin => ({ num:fpin.num, name:fpin.name||"", netId:null })),
   };
   if (comp.symOverride && comp.symOverride !== "box") applySymPinNames(comp, comp.symOverride);
+  else autoNameDiodePins(comp);
   State.components.push(comp);
   autoConnectPins(comp);
   UI.select({type:"comp", comp});

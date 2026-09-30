@@ -54,6 +54,7 @@ function componentDown(w, e){
   };
   // a concrete symbol pick fills in its standard pin names
   if (comp.symOverride && comp.symOverride !== "box") applySymPinNames(comp, comp.symOverride);
+  else autoNameDiodePins(comp);
   // a pasted copy carries the source part's pin names + nets (matched by pin number)
   if (p.pinData){
     const byNum = new Map(p.pinData.map(pd => [String(pd.num), pd]));

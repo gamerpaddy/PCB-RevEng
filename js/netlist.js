@@ -335,6 +335,10 @@ const SYM_PINORDER = {
   pnp:  { 3:["B","E","C"], 4:["B","C","E","C"] },
   nmos: { 3:["G","S","D"], 4:["G","D","S","D"] },
   pmos: { 3:["G","S","D"], 4:["G","D","S","D"] },
+  // 2-pin diodes: pin 1 = cathode, pin 2 = anode (axial DO-35/41, SOD/SMA/SMB, LED — same as the
+  // SOD footprint and KiCad's D_* libs). The symbol's slot order stays A,K; names drive the mapping.
+  diode:    { 2:["K","A"] }, led:     { 2:["K","A"] },
+  zener:    { 2:["K","A"] }, schottky:{ 2:["K","A"] },
 };
 /* does symbol kind `k` fit a part with n pins? Exact terminal-count match, or a tab-capable
    3-terminal semi driving a 4-pad package (one extra tab pad tied to the collector/drain). */
@@ -372,6 +376,27 @@ function applySymPinNames(c, kind){
   const order = c.pins.map((_, i) => i).sort((a, b) => _pinNumVal(c.pins[a].num) - _pinNumVal(c.pins[b].num));
   order.forEach((idx, k) => c.pins[idx].name = names[k]);
   return true;
+}
+
+/* an AUTO-detected diode (ref D1 / LED1…) gets the same K/A pin names a manual symbol pick would
+   give — but only while every pin is still unnamed, so user-typed names are never overwritten. */
+function autoNameDiodePins(c){
+  if (c.symOverride || c.pins.length !== 2 || c.pins.some(p => p.name)) return false;
+  const k = _autoSymKind(c);
+  return (k === "diode" || k === "led" || k === "zener" || k === "schottky") && applySymPinNames(c, k);
+}
+
+/* index of the pad that carries the red marker dot: pad 1 normally, but on a 2-pin diode whose
+   pins are named it sits on the ANODE ("A") pad. */
+function pin1MarkIdx(c){
+  if (c.pins.length === 2){
+    const k = _symKind(c);
+    if (k === "diode" || k === "led" || k === "zener" || k === "schottky"){
+      const i = c.pins.findIndex(p => (p.name || "").toUpperCase() === "A");
+      if (i >= 0) return i;
+    }
+  }
+  return 0;
 }
 
 /* When a component is switched to the generic Box / IC symbol, strip the pin NAMES that a

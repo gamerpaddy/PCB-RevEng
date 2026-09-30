@@ -312,7 +312,7 @@ function drawComponent(ctx, c, selNet, padsOnly){
     if (fp.polar) drawPolaritySymbol(ctx, fp, s, {zoom:View.zoom});
   }
   // pin1 marker (skip on far-side pad-only render)
-  const p1 = fp.pins[0];
+  const p1 = fp.pins[pin1MarkIdx(c)];
   if (p1 && !(padsOnly && !(p1.shape === "circle" && p1.tht !== false))){
     ctx.globalAlpha = compFa;
     ctx.fillStyle = "#ff5d5d";
