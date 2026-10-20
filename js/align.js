@@ -475,6 +475,7 @@ function startQuadDeskew(){
   const pw = View.split ? View.width/2 : View.width, m = 0.2;
   const at = (fx, fy) => { const q = screenToWorld(pw*fx, View.height*fy); return { x:q.x, y:q.y }; };
   Tools.deskewPts = [at(m,m), at(1-m,m), at(1-m,1-m), at(m,1-m)];
+  Tools.deskewInit = Tools.deskewPts.map(p => ({ x:p.x, y:p.y }));   // to detect "Apply without moving anything"
   Tools.deskewLayer = layer;
   UI.setHint(TOOL_HINTS.deskew);
   requestRender();
@@ -499,14 +500,15 @@ function _ptInQuad(p, q){
 function deskewDown(w, pt){
   const b = deskewButtons();
   const hit = r => pt.x >= r.x && pt.x <= r.x + r.w && pt.y >= r.y && pt.y <= r.y + r.h;
-  if (hit(b.apply)){ applyQuadDeskew(Tools.deskewLayer); return; }
-  if (hit(b.cancel)){ setTool("select"); UI.toast("Deskew cancelled"); return; }
   const pts = Tools.deskewPts;
   let best = -1, bd = 14;                       // grab radius in screen px
   pts.forEach((p, i) => {
     const s = worldToScreen(p.x, p.y), d = Math.hypot(s.x - pt.x, s.y - pt.y);
     if (d < bd){ bd = d; best = i; }
   });
+  // corner handles win over the Apply/Cancel pills, so a corner parked under a pill stays grabbable
+  if (best < 0 && hit(b.apply)){ applyQuadDeskew(Tools.deskewLayer); return; }
+  if (best < 0 && hit(b.cancel)){ setTool("select"); UI.toast("Deskew cancelled"); return; }
   if (best >= 0) Tools.drag = { kind:"deskew-corner", i:best };
   else if (_ptInQuad(w, pts)) Tools.drag = { kind:"deskew-move", wx:w.x, wy:w.y, orig:pts.map(p => ({ x:p.x, y:p.y })) };
 }
@@ -514,9 +516,19 @@ function deskewDown(w, pt){
 function applyQuadDeskew(layer){
   const pts = Tools.deskewPts;
   if (!layer || !layer.img || !pts || pts.length < 4){ setTool("select"); return; }
+  if (!State.layers.includes(layer)){ setTool("select"); UI.toast("That layer no longer exists — deskew cancelled"); return; }
+  const init = Tools.deskewInit;
+  if (init && pts.every((p, i) => Math.abs(p.x - init[i].x) < 1e-6 && Math.abs(p.y - init[i].y) < 1e-6)){
+    UI.toast("Drag the corners onto the corners of a real rectangle first");
+    return;
+  }
   // clicked world corners -> source-image pixels, then order them TL,TR,BR,BL *in the image*
   // (independent of view flip / layer mirror, which can swap which handle is "top-left")
   const raw = pts.map(p => worldToImagePx(layer, p.x, p.y));
+  if (raw.some(p => p.x < -1 || p.y < -1 || p.x > layer.img.width + 1 || p.y > layer.img.height + 1)){
+    UI.toast("A corner is outside the photo — drag all four corners onto the image");
+    return;
+  }
   const byY = raw.slice().sort((a, b) => a.y - b.y);
   const top = byY.slice(0, 2).sort((a, b) => a.x - b.x), bot = byY.slice(2).sort((a, b) => a.x - b.x);
   const sp = [top[0], top[1], bot[1], bot[0]];
@@ -546,17 +558,27 @@ function applyQuadDeskew(layer){
   }
   const bw = maxX-minX, bh = maxY-minY;
   const s = Math.min(iw/bw, ih/bh) * 0.98;
+  if (!(s > 0) || !isFinite(s)){ UI.toast("Could not deskew - these corners give an impossible perspective"); return; }
   const ox = (iw - bw*s)/2 - minX*s, oy = (ih - bh*s)/2 - minY*s;
   // final homography: src px -> output px (fitted)
   const dstFit = dst.map(p => ({x:p.x*s+ox, y:p.y*s+oy}));
   const H = solveHomography(sp, dstFit);
   if (!H){ UI.toast("Could not deskew - corners are collinear"); return; }
-  Tools.deskewPts = null; Tools.deskewLayer = null;
+  // bake + encode BEFORE touching any state: a cross-origin (tainted) image can't be exported,
+  // and that must leave the layer, the undo stack and the quad exactly as they were
+  let baked, dataURL;
+  try {
+    baked = warpImageMesh(layer.img, H, iw, ih);
+    dataURL = baked.toDataURL("image/jpeg", 0.92);
+  } catch (err){
+    UI.toast("Could not deskew this image (" + (err && err.name || "error") + ") — it may be a cross-origin hosted photo");
+    return;
+  }
+  Tools.deskewPts = null; Tools.deskewLayer = null; Tools.deskewInit = null;
   pushUndo("deskew " + layer.name);
-  const baked = warpImageMesh(layer.img, H, iw, ih);
   const img = new Image();
   img.onload = () => { requestRender(); };
-  layer.dataURL = baked.toDataURL("image/jpeg", 0.92);
+  layer.dataURL = dataURL;
   img.src = layer.dataURL;
   layer.img = baked;                 // use immediately; img reload keeps dataURL/bitmap in sync
   layer.url = null;                  // baked pixels are now embedded — no longer a hosted link
@@ -573,6 +595,7 @@ function applyQuadDeskew(layer){
   if (typeof markImagesDirty === "function") markImagesDirty();
   UI.refreshLayerList();
   setTool("select");
-  UI.toast("Layer deskewed — perspective removed");
+  UI.toast("Layer deskewed — perspective removed" +
+           (s < 0.6 ? " (strong perspective: image scaled to " + Math.round(s*100) + "%)" : ""));
   requestRender();
 }

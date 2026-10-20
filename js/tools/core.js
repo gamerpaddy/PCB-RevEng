@@ -29,6 +29,7 @@ const Tools = {
   alignReturnId: null, // layer id to re-activate once a 4-point align finishes
   deskewPts: null,     // quad deskew: the 4 draggable world-space corners
   deskewLayer: null,
+  deskewInit: null,    // the quad's starting corners (detects an unmoved quad)
   // freestyle pin placement
   addPinFor: null,     // component receiving clicked pins
   // via net memory (reused for non-shift placements)
@@ -83,6 +84,7 @@ function setTool(name){
   Tools.alignReturnId = null;
   Tools.deskewPts = null;
   Tools.deskewLayer = null;
+  Tools.deskewInit = null;
   Tools.addPinFor = null;
   Tools.padEdit = null;   // leave the visual pad editor when switching tools
   Tools.cropLayer = null; Tools.cropA = Tools.cropB = null;   // leave the crop tool
@@ -521,7 +523,7 @@ function applyBoxSelect(x0, y0, x1, y1){
    we pan the view toward it and keep it under the cursor, so you can move/drop it
    clear across a board that's larger than the screen. Only translation drags and
    component placement qualify (not view-pan / rotate / measure). */
-const EDGE_SCROLL_KINDS = { "move-comp":1, "move-via":1, "move-vert":1, "move-seg":1, "move-note":1, "move-layer":1 };
+const EDGE_SCROLL_KINDS = { "move-comp":1, "move-via":1, "move-vert":1, "move-seg":1, "move-note":1, "move-layer":1, "deskew-corner":1, "deskew-move":1 };
 
 /* true when the current interaction is one that should auto-pan near the edges:
    a translation drag, or the component tool tracking a ghost about to be placed.

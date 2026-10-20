@@ -742,7 +742,10 @@ function wireKeyboard(){
     switch (e.key){
       case "Enter":
         if (Tools.name==="trace") finishTrace();
-        else if (Tools.deskewPts) applyQuadDeskew(Tools.deskewLayer);
+        else if (Tools.deskewPts){
+          e.preventDefault();   // a focused toolbar button (e.g. Deskew itself) must not ALSO fire a click on Enter
+          applyQuadDeskew(Tools.deskewLayer);
+        }
         break;
       case "Escape":
         if (Tools.padEdit){ Tools.padEdit=null; UI.toast("Pad editing finished"); requestRender(); }
