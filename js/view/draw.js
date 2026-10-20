@@ -371,7 +371,7 @@ function drawAlignBanner(ctx){
   const marker = !!(Tools.alignPts);
   const deskew = !!(Tools.deskewPts);
   let txt, bg;
-  if (deskew){ txt = "DESKEW — click the line points · Esc: exit"; bg = "#5a2f7a"; }
+  if (deskew){ txt = "DESKEW — drag the 4 corners onto a real rectangle · Enter: apply · Esc: cancel"; bg = "#5a2f7a"; }
   else if (marker){
     const n = Tools.alignPts.length;
     txt = "ALIGN 4-POINT — click: place marker (" + n + "/8) · drag: move image · Esc: exit";
@@ -390,6 +390,23 @@ function drawAlignBanner(ctx){
   ctx.fill(); ctx.stroke();
   ctx.fillStyle = "#ffce8a"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
   ctx.fillText(txt, cx, y + h/2 + 0.5);
+  if (deskew) drawDeskewButtons(ctx);
+}
+
+/* Apply / Cancel pills for the quad deskew (hit-tested in align.js deskewDown) */
+function drawDeskewButtons(ctx){
+  const b = deskewButtons();
+  const pill = (r, label, bg) => {
+    ctx.fillStyle = bg; ctx.strokeStyle = "rgba(255,255,255,.35)"; ctx.lineWidth = 1;
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(r.x, r.y, r.w, r.h, 6); else ctx.rect(r.x, r.y, r.w, r.h);
+    ctx.fill(); ctx.stroke();
+    ctx.fillStyle = "#ffffff"; ctx.font = "600 13px Segoe UI, sans-serif";
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText(label, r.x + r.w/2, r.y + r.h/2 + 0.5);
+  };
+  pill(b.apply, "✔ Apply deskew (Enter)", "#2f7a4a");
+  pill(b.cancel, "✖ Cancel (Esc)", "#7a3030");
 }
 
 /* rotate tool: free-rotate gizmo on the active layer + the "level this" line while drawn.

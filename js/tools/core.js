@@ -27,7 +27,7 @@ const Tools = {
   alignPts: null,      // 4 ref pts + 4 layer pts
   alignLayer: null,    // layer captured when 4-point align started (the one that moves)
   alignReturnId: null, // layer id to re-activate once a 4-point align finishes
-  deskewPts: null,     // 2-line deskew clicks
+  deskewPts: null,     // quad deskew: the 4 draggable world-space corners
   deskewLayer: null,
   // freestyle pin placement
   addPinFor: null,     // component receiving clicked pins
@@ -60,6 +60,7 @@ const TOOL_HINTS = {
   align:     "Drag active layer to move · Alt+wheel scale · “Align” button = 4-point skew-correcting fit · Rotate tool = free/level rotation",
   measure:   "Drag to measure a distance (px and mm)",
   calibrate: "Drag along a KNOWN distance, then enter its real length in mm",
+  deskew:    "Drag the 4 corners onto the corners of something that is really rectangular (chip, whole PCB) · drag inside to move the quad · Apply / Enter · Esc cancels",
   crop:      "Drag a box around the part of the image to KEEP · Esc to cancel",
   rotate:    "Drag the knob (or Shift+drag anywhere) to free-rotate · drag a line along a feature that should be level → snaps it horizontal/vertical · Shift = 15° snap · Esc to exit",
   resizexy:  "Drag a HORIZONTAL then a VERTICAL line across features of known size, entering each real dimension — scales the layer's X and Y independently · Esc to cancel",
@@ -477,6 +478,14 @@ function handleDrag(pt, w, e){
     case "crop-rect":
       d.moved = true;
       Tools.cropB = { x:w.x, y:w.y };
+      break;
+    case "deskew-corner":
+      d.moved = true;
+      if (Tools.deskewPts) Tools.deskewPts[d.i] = { x:w.x, y:w.y };
+      break;
+    case "deskew-move":
+      d.moved = true;
+      if (Tools.deskewPts) d.orig.forEach((p, i) => { Tools.deskewPts[i] = { x:p.x + (w.x - d.wx), y:p.y + (w.y - d.wy) }; });
       break;
     case "box-select":
       d.moved = true;

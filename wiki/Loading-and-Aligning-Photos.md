@@ -49,10 +49,10 @@ If your base photo was taken at an angle, use Deskew to remove the perspective a
 
 1. Select the first layer in the list, which is the base layer.
 2. Click **Deskew** at the top of the left panel.
-3. Click the two ends of a line on the board that should be perfectly straight, such as a board edge.
-4. Click the two ends of a second line that should be parallel to the first.
+3. A four-cornered shape appears over the photo. Drag each corner onto the corner of something that is really a rectangle, such as a chip or the whole board. Drag inside the shape to move all four corners together.
+4. Click **Apply deskew** (or press Enter) to straighten the photo. Esc or **Cancel** leaves it untouched.
 
-The photo is straightened and the two lines become level. Deskew is only available on the base layer, the first one in the list. Every other photo is lined up to the base with Align instead, so that deskewing a layer later cannot undo its alignment.
+The shape is stretched into a true rectangle, so perspective and rotation are removed in both directions at once. The width-to-height ratio of the rectangle is estimated from the shape you draw, so pick something whose corners you can place accurately. Deskew is only available on the base layer, the first one in the list. Every other photo is lined up to the base with Align instead, so that deskewing a layer later cannot undo its alignment.
 
 ## Lining up a photo with Align
 
