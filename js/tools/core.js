@@ -27,8 +27,9 @@ const Tools = {
   alignPts: null,      // 4 ref pts + 4 layer pts
   alignLayer: null,    // layer captured when 4-point align started (the one that moves)
   alignReturnId: null, // layer id to re-activate once a 4-point align finishes
-  deskewPts: null,     // 2-line deskew clicks
+  deskewPts: null,     // quad deskew: the 4 draggable world-space corners
   deskewLayer: null,
+  deskewInit: null,    // the quad's starting corners (detects an unmoved quad)
   // freestyle pin placement
   addPinFor: null,     // component receiving clicked pins
   // via net memory (reused for non-shift placements)
@@ -60,6 +61,7 @@ const TOOL_HINTS = {
   align:     "Drag active layer to move · Alt+wheel scale · “Align” button = 4-point skew-correcting fit · Rotate tool = free/level rotation",
   measure:   "Drag to measure a distance (px and mm)",
   calibrate: "Drag along a KNOWN distance, then enter its real length in mm",
+  deskew:    "Drag the 4 corners onto the corners of something that is really rectangular (chip, whole PCB) · drag inside to move the quad · Apply / Enter · Esc cancels",
   crop:      "Drag a box around the part of the image to KEEP · Esc to cancel",
   rotate:    "Drag the knob (or Shift+drag anywhere) to free-rotate · drag a line along a feature that should be level → snaps it horizontal/vertical · Shift = 15° snap · Esc to exit",
   resizexy:  "Drag a HORIZONTAL then a VERTICAL line across features of known size, entering each real dimension — scales the layer's X and Y independently · Esc to cancel",
@@ -82,6 +84,7 @@ function setTool(name){
   Tools.alignReturnId = null;
   Tools.deskewPts = null;
   Tools.deskewLayer = null;
+  Tools.deskewInit = null;
   Tools.addPinFor = null;
   Tools.padEdit = null;   // leave the visual pad editor when switching tools
   Tools.cropLayer = null; Tools.cropA = Tools.cropB = null;   // leave the crop tool
@@ -478,6 +481,14 @@ function handleDrag(pt, w, e){
       d.moved = true;
       Tools.cropB = { x:w.x, y:w.y };
       break;
+    case "deskew-corner":
+      d.moved = true;
+      if (Tools.deskewPts) Tools.deskewPts[d.i] = { x:w.x, y:w.y };
+      break;
+    case "deskew-move":
+      d.moved = true;
+      if (Tools.deskewPts) d.orig.forEach((p, i) => { Tools.deskewPts[i] = { x:p.x + (w.x - d.wx), y:p.y + (w.y - d.wy) }; });
+      break;
     case "box-select":
       d.moved = true;
       d.x = w.x; d.y = w.y;
@@ -512,7 +523,7 @@ function applyBoxSelect(x0, y0, x1, y1){
    we pan the view toward it and keep it under the cursor, so you can move/drop it
    clear across a board that's larger than the screen. Only translation drags and
    component placement qualify (not view-pan / rotate / measure). */
-const EDGE_SCROLL_KINDS = { "move-comp":1, "move-via":1, "move-vert":1, "move-seg":1, "move-note":1, "move-layer":1 };
+const EDGE_SCROLL_KINDS = { "move-comp":1, "move-via":1, "move-vert":1, "move-seg":1, "move-note":1, "move-layer":1, "deskew-corner":1, "deskew-move":1 };
 
 /* true when the current interaction is one that should auto-pan near the edges:
    a translation drag, or the component tool tracking a ghost about to be placed.

@@ -406,16 +406,27 @@ function drawWorld(ctx){
     ctx.restore();
   }
 
-  // --- 2-line deskew: draw the line(s) the user is defining ---
-  if (Tools.deskewPts){
+  // --- quad deskew: the 4-corner shape to be straightened into a rectangle ---
+  if (Tools.deskewPts && Tools.deskewPts.length === 4){
     ctx.save();
-    ctx.lineWidth = 2/View.zoom;
-    const pts = Tools.deskewPts;
-    const seg = (a,b,col)=>{ ctx.strokeStyle=col; ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke(); };
-    const dot = (p,col)=>{ ctx.fillStyle=col; ctx.beginPath(); ctx.arc(p.x,p.y,4/View.zoom,0,Math.PI*2); ctx.fill(); };
-    if (pts[0] && pts[1]) seg(pts[0],pts[1],"#ffb648"); else if (pts[0] && Tools.cursor) seg(pts[0],Tools.cursor,"#ffb64880");
-    if (pts[2] && pts[3]) seg(pts[2],pts[3],"#4fd07f"); else if (pts[2] && Tools.cursor) seg(pts[2],Tools.cursor,"#4fd07f80");
-    pts.forEach((p,i)=> dot(p, i<2 ? "#ffb648" : "#4fd07f"));
+    const P = Tools.deskewPts, lerp = (a,b,t)=>({ x:a.x+(b.x-a.x)*t, y:a.y+(b.y-a.y)*t });
+    ctx.beginPath(); ctx.moveTo(P[0].x,P[0].y); for (let i=1;i<4;i++) ctx.lineTo(P[i].x,P[i].y); ctx.closePath();
+    ctx.fillStyle = "rgba(160,90,220,.12)"; ctx.fill();
+    // thin guide grid (bilinear across the quad) so you can judge how well the corners fit
+    ctx.strokeStyle = "rgba(255,206,138,.55)"; ctx.lineWidth = 1/View.zoom;
+    ctx.beginPath();
+    for (let k=1;k<4;k++){
+      const t = k/4, a = lerp(P[0],P[1],t), b = lerp(P[3],P[2],t), c = lerp(P[0],P[3],t), d = lerp(P[1],P[2],t);
+      ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.moveTo(c.x,c.y); ctx.lineTo(d.x,d.y);
+    }
+    ctx.stroke();
+    ctx.strokeStyle = "#ffb648"; ctx.lineWidth = 2/View.zoom;
+    ctx.beginPath(); ctx.moveTo(P[0].x,P[0].y); for (let i=1;i<4;i++) ctx.lineTo(P[i].x,P[i].y); ctx.closePath(); ctx.stroke();
+    const r = 7/View.zoom;   // corner handles
+    P.forEach((p,i)=>{
+      ctx.fillStyle = "#ffffff"; ctx.strokeStyle = "#a05adc"; ctx.lineWidth = 2/View.zoom;
+      ctx.beginPath(); ctx.rect(p.x-r, p.y-r, r*2, r*2); ctx.fill(); ctx.stroke();
+    });
     ctx.restore();
   }
 

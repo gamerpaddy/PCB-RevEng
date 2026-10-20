@@ -43,16 +43,28 @@ Click the body of a card to make that layer the active one. The active layer is 
 2. Add the back photo. Set its side dropdown to Back. The Mirror tick turns on by itself so the back lines up with the front.
 3. Lower the opacity of the top layer with its slider so you can see both photos at once while you line them up.
 
-## Straightening a crooked base photo with Deskew
+## Straightening a crooked photo with Deskew
 
-If your base photo was taken at an angle, use Deskew to remove the perspective and rotation before you align anything else.
+If a photo was taken at an angle, use Deskew to remove the perspective and rotation. Do this to the base photo before you align anything else.
 
-1. Select the first layer in the list, which is the base layer.
-2. Click **Deskew** at the top of the left panel.
-3. Click the two ends of a line on the board that should be perfectly straight, such as a board edge.
-4. Click the two ends of a second line that should be parallel to the first.
+1. Select the photo's layer in the list. For your first photo that is the base layer.
+2. Click **Deskew** in the Image layers panel on the left.
+3. A four-cornered shape appears over the photo. Drag each corner onto the corner of something that is really a rectangle, such as a chip or the whole board. Drag inside the shape to move all four corners together.
 
-The photo is straightened and the two lines become level. Deskew is only available on the base layer, the first one in the list. Every other photo is lined up to the base with Align instead, so that deskewing a layer later cannot undo its alignment.
+![The four-cornered Deskew shape dragged onto the corners of the board, with the Apply deskew and Cancel buttons at the top](images/deskew-quad.png)
+
+4. Click **Apply deskew** (or press Enter) to straighten the photo. Esc or **Cancel** leaves it untouched.
+
+![The same photo after Deskew, with the board squared up](images/deskew-result.png)
+
+The shape is stretched into a true rectangle, so perspective and rotation are removed in both directions at once. The photo's outer edges stay slanted, because the whole picture is warped along with the board.
+
+A few things to know:
+
+- The width-to-height ratio of the rectangle is estimated from the shape you draw, so pick something whose corners you can place accurately. If the proportions still look off, use the Resize XY tool afterwards to enter a known width and height.
+- All four corners must sit on the photo, and the shape must stay four-sided without crossing over itself. Otherwise Deskew tells you what to fix and keeps the shape open.
+- Applying Deskew without moving any corner does nothing.
+- Deskew rewrites the photo's pixels, so deskew a photo before you align other photos to it. Deskewing a layer that is already aligned throws that alignment away, and the program asks you to confirm first. You can undo a Deskew with Ctrl+Z.
 
 ## Lining up a photo with Align
 

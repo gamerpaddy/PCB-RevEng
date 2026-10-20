@@ -93,7 +93,7 @@ function wireToolbar(){
   $("#btn-rotate").addEventListener("click", ()=> startRotate());
   $("#btn-align").addEventListener("click", ()=> startPointAlign());
   $("#btn-crop").addEventListener("click", ()=> startCrop());
-  $("#btn-deskew").addEventListener("click", ()=> startLineDeskew());
+  $("#btn-deskew").addEventListener("click", ()=> startQuadDeskew());
   $("#btn-resizexy").addEventListener("click", ()=> startResizeXY());
   $("#btn-history").addEventListener("click", ()=> UI.openHistory());
   $("#btn-check").addEventListener("click", ()=> UI.openChecker());
@@ -740,7 +740,13 @@ function wireKeyboard(){
     // fixed keys (Backspace intentionally does NOT delete — it's the page-back key in
     // some browsers; deletion is the rebindable edit.delete action, default Delete)
     switch (e.key){
-      case "Enter": if (Tools.name==="trace") finishTrace(); break;
+      case "Enter":
+        if (Tools.name==="trace") finishTrace();
+        else if (Tools.deskewPts){
+          e.preventDefault();   // a focused toolbar button (e.g. Deskew itself) must not ALSO fire a click on Enter
+          applyQuadDeskew(Tools.deskewLayer);
+        }
+        break;
       case "Escape":
         if (Tools.padEdit){ Tools.padEdit=null; UI.toast("Pad editing finished"); requestRender(); }
         else if (Tools.name==="crop"){ Tools.cropLayer=null; Tools.cropA=Tools.cropB=null; setTool("select"); UI.toast("Crop cancelled"); requestRender(); }

@@ -1,17 +1,10 @@
-/* ===== align.js — image-layer align (4-point) & 2-line deskew/perspective ===== */
+/* ===== align.js — image-layer align (4-point) & quad deskew/perspective ===== */
 "use strict";
 
 /* ---------------- align tool ---------------- */
 function alignDown(w, pt, e){
-  // 2-line deskew collection (4 clicks: line1 ×2, line2 ×2)
-  if (Tools.deskewPts){
-    Tools.deskewPts.push({x:w.x, y:w.y});
-    const n = Tools.deskewPts.length;
-    if (n === 4) applyLineDeskew(Tools.deskewLayer);
-    else UI.setHint(DESKEW_HINTS[n-1] || "");
-    requestRender();
-    return;
-  }
+  // quad deskew: corner handles / Apply+Cancel buttons (see deskewDown)
+  if (Tools.deskewPts) return deskewDown(w, pt);
 
   // The align tool always lets you MOVE the image by dragging. During a 4-point procedure
   // (Tools.alignPts set) a plain CLICK instead drops the next alignment marker. We start a
@@ -204,7 +197,7 @@ function applyCrop(){
   requestRender();
 }
 
-/* ============ 2-line deskew / perspective straighten ============ */
+/* ============ perspective helpers (deskew homography, mesh warp) ============ */
 
 /* world point -> source-image pixel coords (0..w, 0..h), undoing the layer transform */
 function worldToImagePx(l, wx, wy){
@@ -459,7 +452,12 @@ function applyResizeXY(layer, fx, fy){
   requestRender();
 }
 
-function startLineDeskew(){
+/* ============ quad deskew ============
+   Deskew shows a 4-corner quadrilateral over the active layer. Drag each corner onto the
+   corners of something that is really a rectangle (a chip, the whole PCB, a board edge frame),
+   drag inside to move the whole quad, then Apply (button / Enter). The quad is mapped to an
+   axis-aligned rectangle, which removes perspective AND rotation in both directions at once. */
+function startQuadDeskew(){
   if (typeof mpBlockImageOp === "function" && mpBlockImageOp()) return;   // host-only in multiplayer
   const layer = UI.activeLayer();
   if (!layer || !layer.img){ UI.toast("Select an image layer first"); return; }
@@ -473,70 +471,114 @@ function startLineDeskew(){
   }
   if (!confirmRewarpIfPopulated(layer, "Deskewing")) return;
   setTool("align");
-  Tools.deskewPts = [];
+  // start with a rectangle inset in the (left) pane's visible area
+  const pw = View.split ? View.width/2 : View.width, m = 0.2;
+  const at = (fx, fy) => { const q = screenToWorld(pw*fx, View.height*fy); return { x:q.x, y:q.y }; };
+  Tools.deskewPts = [at(m,m), at(1-m,m), at(1-m,1-m), at(m,1-m)];
+  Tools.deskewInit = Tools.deskewPts.map(p => ({ x:p.x, y:p.y }));   // to detect "Apply without moving anything"
   Tools.deskewLayer = layer;
-  UI.setHint("Deskew: click the 2 ends of a line that should be straight (line 1, point 1)");
+  UI.setHint(TOOL_HINTS.deskew);
+  requestRender();
 }
 
-const DESKEW_HINTS = [
-  "Deskew - line 1: click the second end",
-  "Deskew - line 2 (parallel to line 1): click the first end",
-  "Deskew - line 2: click the second end",
-  "",
-];
+/* Apply / Cancel pill buttons, screen-space rects in the pane being drawn / hit-tested */
+function deskewButtons(){
+  const pw = View.split ? View.width/2 : View.width;
+  const cx = (View._paneDX || 0) + pw/2, gap = 10, y = 40, h = 28;
+  return { apply:{ x:cx - gap/2 - 160, y, w:160, h }, cancel:{ x:cx + gap/2, y, w:110, h } };
+}
 
-function applyLineDeskew(layer){
+function _ptInQuad(p, q){
+  let inside = false;
+  for (let i = 0, j = q.length-1; i < q.length; j = i++){
+    if ((q[i].y > p.y) !== (q[j].y > p.y) &&
+        p.x < (q[j].x - q[i].x) * (p.y - q[i].y) / (q[j].y - q[i].y) + q[i].x) inside = !inside;
+  }
+  return inside;
+}
+
+function deskewDown(w, pt){
+  const b = deskewButtons();
+  const hit = r => pt.x >= r.x && pt.x <= r.x + r.w && pt.y >= r.y && pt.y <= r.y + r.h;
   const pts = Tools.deskewPts;
-  Tools.deskewPts = null; Tools.deskewLayer = null;
-  UI.setHint(TOOL_HINTS.align);
-  if (!layer || !layer.img || !pts || pts.length < 4) return;
-  // clicked world points -> source-image pixels
-  const sp = pts.map(p => worldToImagePx(layer, p.x, p.y));
-  // average undirected line angle (mod π) via double-angle mean
-  const a1 = Math.atan2(sp[1].y-sp[0].y, sp[1].x-sp[0].x);
-  const a2 = Math.atan2(sp[3].y-sp[2].y, sp[3].x-sp[2].x);
-  const avg = 0.5*Math.atan2(Math.sin(2*a1)+Math.sin(2*a2), Math.cos(2*a1)+Math.cos(2*a2));
-  // Level to the NEAREST axis by the SMALLEST rotation (≤45°). Deriving the target axis
-  // from Math.round (not the sign of avg) avoids a 180° flip: a near-vertical line can
-  // come out of the undirected-angle mean as either +90° or −90°, and the old
-  // `π/2 − avg` gave ≈180° for the −90° case (e.g. two edges drawn top-to-bottom).
-  const nearest = Math.round(avg / (Math.PI/2)) * (Math.PI/2);
-  const rot = nearest - avg;
-  const horizontal = Math.abs(Math.cos(nearest)) > 0.5;   // target axis is 0/π → horizontal
+  let best = -1, bd = 14;                       // grab radius in screen px
+  pts.forEach((p, i) => {
+    const s = worldToScreen(p.x, p.y), d = Math.hypot(s.x - pt.x, s.y - pt.y);
+    if (d < bd){ bd = d; best = i; }
+  });
+  // corner handles win over the Apply/Cancel pills, so a corner parked under a pill stays grabbable
+  if (best < 0 && hit(b.apply)){ applyQuadDeskew(Tools.deskewLayer); return; }
+  if (best < 0 && hit(b.cancel)){ setTool("select"); UI.toast("Deskew cancelled"); return; }
+  if (best >= 0) Tools.drag = { kind:"deskew-corner", i:best };
+  else if (_ptInQuad(w, pts)) Tools.drag = { kind:"deskew-move", wx:w.x, wy:w.y, orig:pts.map(p => ({ x:p.x, y:p.y })) };
+}
+
+function applyQuadDeskew(layer){
+  const pts = Tools.deskewPts;
+  if (!layer || !layer.img || !pts || pts.length < 4){ setTool("select"); return; }
+  if (!State.layers.includes(layer)){ setTool("select"); UI.toast("That layer no longer exists — deskew cancelled"); return; }
+  const init = Tools.deskewInit;
+  if (init && pts.every((p, i) => Math.abs(p.x - init[i].x) < 1e-6 && Math.abs(p.y - init[i].y) < 1e-6)){
+    UI.toast("Drag the corners onto the corners of a real rectangle first");
+    return;
+  }
+  // clicked world corners -> source-image pixels, then order them TL,TR,BR,BL *in the image*
+  // (independent of view flip / layer mirror, which can swap which handle is "top-left")
+  const raw = pts.map(p => worldToImagePx(layer, p.x, p.y));
+  if (raw.some(p => p.x < -1 || p.y < -1 || p.x > layer.img.width + 1 || p.y > layer.img.height + 1)){
+    UI.toast("A corner is outside the photo — drag all four corners onto the image");
+    return;
+  }
+  const byY = raw.slice().sort((a, b) => a.y - b.y);
+  const top = byY.slice(0, 2).sort((a, b) => a.x - b.x), bot = byY.slice(2).sort((a, b) => a.x - b.x);
+  const sp = [top[0], top[1], bot[1], bot[0]];
+  // must be a proper convex quad, else the homography folds the image over itself
+  let sign = 0, convex = true;
+  for (let i = 0; i < 4; i++){
+    const a = sp[i], b = sp[(i+1)%4], c = sp[(i+2)%4];
+    const cr = (b.x-a.x)*(c.y-b.y) - (b.y-a.y)*(c.x-b.x);
+    if (Math.abs(cr) < 1e-6 || (sign && Math.sign(cr) !== sign)){ convex = false; break; }
+    sign = Math.sign(cr);
+  }
+  if (!convex){ UI.toast("Corners must form a convex four-sided shape — adjust them and try again"); return; }
+  // target rectangle: average opposite-edge lengths (so the aspect ratio is an estimate), centred on the quad
+  const len = (a, b) => Math.hypot(a.x-b.x, a.y-b.y);
+  const rw = (len(sp[0], sp[1]) + len(sp[3], sp[2])) / 2, rh = (len(sp[0], sp[3]) + len(sp[1], sp[2])) / 2;
   const cx = (sp[0].x+sp[1].x+sp[2].x+sp[3].x)/4, cy = (sp[0].y+sp[1].y+sp[2].y+sp[3].y)/4;
-  const ca = Math.cos(rot), sa = Math.sin(rot);
-  const lev = sp.map(p => ({ x: cx + (p.x-cx)*ca - (p.y-cy)*sa, y: cy + (p.x-cx)*sa + (p.y-cy)*ca }));
-  // snap each line's perpendicular coordinate to its mean -> truly parallel & axis-aligned
-  const dst = lev.map(p => ({x:p.x, y:p.y}));
-  if (horizontal){
-    const y1=(lev[0].y+lev[1].y)/2, y2=(lev[2].y+lev[3].y)/2;
-    dst[0].y=y1; dst[1].y=y1; dst[2].y=y2; dst[3].y=y2;
-  } else {
-    const x1=(lev[0].x+lev[1].x)/2, x2=(lev[2].x+lev[3].x)/2;
-    dst[0].x=x1; dst[1].x=x1; dst[2].x=x2; dst[3].x=x2;
-  }
+  const dst = [{x:cx-rw/2, y:cy-rh/2}, {x:cx+rw/2, y:cy-rh/2}, {x:cx+rw/2, y:cy+rh/2}, {x:cx-rw/2, y:cy+rh/2}];
   // fit dst into the original image dimensions (preserve aspect, centre)
-  const iw=layer.img.width, ih=layer.img.height;
-  let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
-  // map the FOUR IMAGE CORNERS through the same level+snap-derived homography to get true bounds:
+  const iw = layer.img.width, ih = layer.img.height;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  // map the FOUR IMAGE CORNERS through the homography to get true bounds:
   const Hraw = solveHomography(sp, dst);
-  if (!Hraw){ UI.toast("Could not deskew - points are collinear"); return; }
+  if (!Hraw){ UI.toast("Could not deskew - corners are collinear"); return; }
   for (const c of [[0,0],[iw,0],[iw,ih],[0,ih]]){
-    const q=_applyH(Hraw,c[0],c[1]);
-    minX=Math.min(minX,q.x);maxX=Math.max(maxX,q.x);minY=Math.min(minY,q.y);maxY=Math.max(maxY,q.y);
+    const q = _applyH(Hraw, c[0], c[1]);
+    minX = Math.min(minX, q.x); maxX = Math.max(maxX, q.x); minY = Math.min(minY, q.y); maxY = Math.max(maxY, q.y);
   }
-  const bw=maxX-minX, bh=maxY-minY;
+  const bw = maxX-minX, bh = maxY-minY;
   const s = Math.min(iw/bw, ih/bh) * 0.98;
+  if (!(s > 0) || !isFinite(s)){ UI.toast("Could not deskew - these corners give an impossible perspective"); return; }
   const ox = (iw - bw*s)/2 - minX*s, oy = (ih - bh*s)/2 - minY*s;
   // final homography: src px -> output px (fitted)
   const dstFit = dst.map(p => ({x:p.x*s+ox, y:p.y*s+oy}));
   const H = solveHomography(sp, dstFit);
-  if (!H){ UI.toast("Could not deskew - points are collinear"); return; }
+  if (!H){ UI.toast("Could not deskew - corners are collinear"); return; }
+  // bake + encode BEFORE touching any state: a cross-origin (tainted) image can't be exported,
+  // and that must leave the layer, the undo stack and the quad exactly as they were
+  let baked, dataURL;
+  try {
+    baked = warpImageMesh(layer.img, H, iw, ih);
+    dataURL = baked.toDataURL("image/jpeg", 0.92);
+  } catch (err){
+    UI.toast("Could not deskew this image (" + (err && err.name || "error") + ") — it may be a cross-origin hosted photo");
+    return;
+  }
+  Tools.deskewPts = null; Tools.deskewLayer = null; Tools.deskewInit = null;
   pushUndo("deskew " + layer.name);
-  const baked = warpImageMesh(layer.img, H, iw, ih);
   const img = new Image();
   img.onload = () => { requestRender(); };
-  layer.dataURL = baked.toDataURL("image/jpeg", 0.92);
+  layer.dataURL = dataURL;
   img.src = layer.dataURL;
   layer.img = baked;                 // use immediately; img reload keeps dataURL/bitmap in sync
   layer.url = null;                  // baked pixels are now embedded — no longer a hosted link
@@ -552,6 +594,8 @@ function applyLineDeskew(layer){
   layer.scale = effScale;
   if (typeof markImagesDirty === "function") markImagesDirty();
   UI.refreshLayerList();
-  UI.toast("Layer deskewed & straightened (" + (horizontal?"horizontal":"vertical") + " lines)");
+  setTool("select");
+  UI.toast("Layer deskewed — perspective removed" +
+           (s < 0.6 ? " (strong perspective: image scaled to " + Math.round(s*100) + "%)" : ""));
   requestRender();
 }
