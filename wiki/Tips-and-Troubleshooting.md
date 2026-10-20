@@ -3,7 +3,7 @@
 ## Tips for clean results
 
 - Photograph the board straight on with even light. Straighter photos are easier to align and the deskew step has less to correct.
-- Deskew the base photo first, then align every other photo to it. Deskew is only offered on the first layer for this reason.
+- Deskew the base photo first, then align every other photo to it. Deskewing a photo that is already aligned throws that alignment away, so do it first.
 - Lower the opacity of the top layer while aligning so you can see both photos at once.
 - Calibrate the scale early, using a known distance such as the 2.54 millimetre header pitch, so footprints are the right size from the start.
 - Name power and ground nets as you go. They are protected and keep their colour, which makes the board easier to read.
