@@ -110,9 +110,10 @@ function selectDown(w, pt, e){
       return;
     }
   }
-  // ctrl-click a trace → add/remove this segment from a multi-trace selection
-  if ((e.ctrlKey || e.metaKey) && h && h.type === "trace"){
-    UI.toggleTraceSel(h.trace);
+  // ctrl-click any object (part / pad / via / trace / note) → add it to / remove it from a
+  // multi-selection, the same set a marquee box-select builds (Del / align / bulk edit work on it)
+  if ((e.ctrlKey || e.metaKey) && h){
+    UI.ctrlToggleSel(h);
     requestRender();
     return;
   }

@@ -45,6 +45,30 @@ UI.clearBoxSel = () => { UI.boxSel = []; };
 UI.boxSelHas = (kind, obj) => UI.boxSel.some(s => s[kind] === obj);
 UI.boxSelCount = () => UI.boxSel.length;
 
+/* Ctrl-click: add/remove one hit-object to/from the multi-selection. Whatever is currently
+   selected (single item, trace multi-selection, or box selection) is folded into the set
+   first, so ctrl-clicking builds on it. A pad counts as its part. Traces-only sets stay in
+   UI.traceSel (net assign / width panel); any mix goes into UI.boxSel like a marquee. */
+UI.ctrlToggleSel = (h) => {
+  const norm = (o) => o.type === "pin" ? { type:"comp", comp:o.comp } : o;
+  const same = (a, b) => a.type === b.type && a[a.type] === b[b.type];
+  const items = UI.boxSel.slice();
+  for (const t of UI.traceSel) items.push({ type:"trace", trace:t });
+  if (UI.sel && /^(comp|pin|via|trace|note)$/.test(UI.sel.type)) items.push(norm(UI.sel));
+  const hit = norm(h);
+  const i = items.findIndex(s => same(s, hit));
+  if (i >= 0) items.splice(i, 1); else items.push(hit);
+  UI.sel = null; UI.pinSel = []; UI.activeNetId = null;
+  UI.boxSelBounds = null;                      // no marquee area → hide the "Pads in box" filter
+  if (items.length && items.every(s => s.type === "trace")){
+    UI.traceSel = items.map(s => s.trace); UI.boxSel = [];
+  } else {
+    UI.traceSel = []; UI.boxSel = items;
+  }
+  UI.refreshInspector();
+  UI.refreshNets();
+};
+
 const $ = (sel) => document.querySelector(sel);
 
 /* ---------------- status bar ---------------- */

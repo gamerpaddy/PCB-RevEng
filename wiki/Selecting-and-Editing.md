@@ -18,7 +18,7 @@ Drag a selected component or via to move it. Drag a trace corner handle to resha
 
 - Hold Shift and click pads to select several pads at once. The Inspector then offers one Net field that applies to all of them.
 - Hold Shift and click a trace to select every trace on its net.
-- Hold Ctrl and click traces to add or remove single segments from a selection.
+- Hold Ctrl and click parts, pads, vias, traces or notes to add or remove them from a multi-selection (same set a box select makes — Delete, align and bulk edits work on it).
 
 ## The Inspector for a component
 
