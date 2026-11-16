@@ -167,4 +167,29 @@ function wireLCSC(){
   en.addEventListener("change", () => LCSC.setEnabled(en.checked));
   px.addEventListener("change", () => LCSC.setProxy(px.value));
 }
+
+/* Download button: point it straight at the executable for this computer (the rolling release
+   built by .github/workflows/build-proxy.yml). Falls back to the release page when the
+   system/CPU can't be told apart (e.g. macOS in Safari/Firefox hides Intel vs Apple silicon). */
+const LCSC_RELEASE = "https://github.com/gamerpaddy/PCB-RevEng/releases/";
+async function wireLCSCDownload(){
+  const a = document.getElementById("lcsc-dl"), note = document.getElementById("lcsc-dl-note");
+  if (!a) return;
+  const ua = navigator.userAgent || "", uad = navigator.userAgentData;
+  const plat = ((uad && uad.platform) || navigator.platform || "") + " " + ua;
+  let arch = "";
+  try { if (uad && uad.getHighEntropyValues) arch = (await uad.getHighEntropyValues(["architecture"])).architecture || ""; } catch(e){}
+  const arm = arch === "arm" || /arm64|aarch64/i.test(ua);
+  let file = "", label = "";
+  if (/win/i.test(plat) && !/darwin/i.test(plat)){ file = arm ? "lcsc-proxy-windows-arm64.exe" : "lcsc-proxy-windows-x64.exe"; label = "Windows"; }
+  else if (/android/i.test(ua)) { file = ""; }
+  else if (/linux|x11/i.test(plat)){ file = arm ? "lcsc-proxy-linux-arm64" : "lcsc-proxy-linux-x64"; label = "Linux"; }
+  else if (/mac/i.test(plat) && arch){ file = arch === "arm" ? "lcsc-proxy-macos-apple-silicon" : "lcsc-proxy-macos-intel"; label = "macOS"; }
+  if (!file){ if (note) note.textContent = "pick your system on the release page"; return; }
+  a.href = LCSC_RELEASE + "download/lcsc-proxy-latest/" + file;
+  a.removeAttribute("target");   // plain file download, no blank tab
+  a.textContent = "⬇ Download proxy (" + label + ")";
+  if (note) note.textContent = "then run it and leave it open" + (label === "Windows" ? "" : " (chmod +x first)");
+}
 window.addEventListener("DOMContentLoaded", wireLCSC);
+window.addEventListener("DOMContentLoaded", wireLCSCDownload);
