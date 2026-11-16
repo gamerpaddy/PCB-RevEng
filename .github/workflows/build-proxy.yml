@@ -1,0 +1,75 @@
+name: Build LCSC proxy
+
+# Compiles tools/lcsc-proxy (Go, standard library only) into small standalone executables
+# for Windows / Linux / macOS. The binaries are NOT committed to git: they are published
+# as assets of the rolling "lcsc-proxy-latest" GitHub Release (and as run artifacts).
+
+on:
+  push:
+    branches: [main]
+    paths: ["tools/lcsc-proxy/**", ".github/workflows/build-proxy.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tools/lcsc-proxy
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+      - name: Vet
+        run: go vet ./...
+      - name: Build all platforms
+        run: |
+          mkdir -p dist
+          build() { # goos goarch outname
+            CGO_ENABLED=0 GOOS=$1 GOARCH=$2 go build -trimpath -ldflags "-s -w" -o "dist/$3" .
+          }
+          build windows amd64 lcsc-proxy-windows-x64.exe
+          build windows arm64 lcsc-proxy-windows-arm64.exe
+          build linux   amd64 lcsc-proxy-linux-x64
+          build linux   arm64 lcsc-proxy-linux-arm64
+          build darwin  amd64 lcsc-proxy-macos-intel
+          build darwin  arm64 lcsc-proxy-macos-apple-silicon
+          ls -l dist
+      - name: Smoke test (linux build)
+        run: |
+          ./dist/lcsc-proxy-linux-x64 25699 & PID=$!
+          sleep 1
+          test "$(curl -s -o /dev/null -w '%{http_code}' 'http://127.0.0.1:25699/?url=https%3A%2F%2Fexample.com%2F')" = 403
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X OPTIONS 'http://127.0.0.1:25699/')" = 204
+          curl -si 'http://127.0.0.1:25699/?url=http%3A%2F%2Feasyeda.com%2F' | head -1 | grep 403
+          kill $PID
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lcsc-proxy
+          path: tools/lcsc-proxy/dist/*
+
+  release:
+    needs: build
+    if: github.event_name == 'push' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: lcsc-proxy
+          path: dist
+      - name: Publish rolling release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release delete lcsc-proxy-latest --cleanup-tag --yes || true
+          gh release create lcsc-proxy-latest dist/* \
+            --target "${{ github.sha }}" \
+            --title "LCSC proxy (latest build)" \
+            --notes "Standalone local relay for the experimental LCSC/JLC parts crawler. No install needed: download the file for your system, run it, and leave it open. Built from ${{ github.sha }}."

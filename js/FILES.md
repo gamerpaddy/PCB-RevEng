@@ -26,7 +26,7 @@ Cache-buster: bump `?v=` in `index.html` when editing a file so the browser relo
 | `kicadsearch.js` | KiCad-library fuzzy footprint search backing `fpdialog`. |
 | `footprints.js` | Registry entry point + polar-mark params for generated footprints. |
 | `alignobj.js` | Right-click "align selection" (H / V / onto a drawn line) for box-selected objects in the Visual and Schematic panes. |
-| `lcsc.js` | Experimental JLC/LCSC part crawler (off by default): EasyEDA footprint → Custom footprint + part details; needs `tools/lcsc-proxy.js` for CORS. |
+| `lcsc.js` | Experimental JLC/LCSC part crawler (off by default): EasyEDA footprint → Custom footprint + part details; needs the `tools/lcsc-proxy/` relay (Go, built by Actions) for CORS. |
 | `boards.js` | Multi-PCB pages: bottom tab strip (Visual+Schematic), page add/rename/delete/switch with per-page camera memory, off-page connector links (`comp.xlink`, pin-by-pin net merge, jump buttons). Data model lives in state.js (`State.boards` + active-page aliases). |
 
 ## `footprints/` — generated footprint families

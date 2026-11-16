@@ -74,10 +74,12 @@ Move-locked parts are skipped. In the Visual editor, trace ends attached to a mo
 
 Open **Options → 🔬 Experimental → Parts crawler** and tick *Enable LCSC lookup*. In the footprint selector, the **Custom** category then shows an LCSC lookup box: enter a part number such as `C25804` and press Fetch. The footprint is imported as a Custom footprint and the Value and Part name fields are filled from the part's details (manufacturer, package, class, price and stock appear in the status line).
 
-Browsers cannot read easyeda.com directly (CORS), so run the bundled relay and put its address in the Proxy URL field:
+Browsers cannot read easyeda.com directly (CORS), so a small local relay is needed. It is a single standalone program with nothing to install (no Node, no Python): download the file for your system from the repository's **lcsc-proxy-latest** release (Releases page), run it, and leave its window open while you use the crawler.
 
-```
-node tools/lcsc-proxy.js
-```
+| System | File |
+| --- | --- |
+| Windows | `lcsc-proxy-windows-x64.exe` (ARM: `-arm64.exe`) |
+| Linux | `lcsc-proxy-linux-x64` (or `-arm64`; run `chmod +x` first) |
+| macOS | `lcsc-proxy-macos-apple-silicon` or `lcsc-proxy-macos-intel` (run `chmod +x` first) |
 
-Proxy URL: `http://localhost:8765/?url={url}`. The relay only forwards requests to easyeda.com and lcsc.com hosts.
+The Proxy URL field already defaults to `http://localhost:25615/?url={url}`, so nothing needs configuring. To use another port, start the program with it (`lcsc-proxy 9000`) and change the URL to match. The relay listens on this computer only and only forwards requests to easyeda.com and lcsc.com hosts. The executables are built from `tools/lcsc-proxy/` by a GitHub Action and are not stored in git; you can also build it yourself with `go build`.

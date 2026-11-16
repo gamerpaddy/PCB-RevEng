@@ -538,12 +538,12 @@
       <div class="panel-hint" style="margin:6px 0 8px;color:#e0a94a">
         Experimental. Looks up an LCSC part number (e.g. C25804) on EasyEDA and imports its footprint + details
         (Footprint selector &rarr; Custom &rarr; LCSC lookup). Browsers block direct access, so run
-        <code>node tools/lcsc-proxy.js</code> and set the Proxy URL below. Nothing is sent unless enabled and you press Fetch.
+        the small <code>lcsc-proxy</code> program (no install; download from the repo's <em>lcsc-proxy-latest</em> release) and leave it running. Nothing is sent unless enabled and you press Fetch.
       </div>
       <div class="dlg-row" style="gap:14px"><label style="width:auto"><input type="checkbox" id="lcsc-en"> Enable LCSC lookup</label></div>
       <div class="dlg-row" style="gap:6px;margin-top:6px">
         <label style="width:110px">Proxy URL</label>
-        <input type="text" id="lcsc-proxy" placeholder="http://localhost:8765/?url={url}" style="flex:1">
+        <input type="text" id="lcsc-proxy" placeholder="http://localhost:25615/?url={url}" style="flex:1">
       </div>
     </div>
 

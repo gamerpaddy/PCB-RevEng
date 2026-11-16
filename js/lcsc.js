@@ -5,21 +5,28 @@
      • details: MPN, manufacturer, package, description, value, datasheet link, JLC class,
        price / stock — filled into the footprint dialog's Value / Part fields.
    Browsers block cross-origin reads of easyeda.com (no CORS header), so a lookup either goes
-   through a user-supplied proxy URL ("http://localhost:8765/?url={url}" – see
-   tools/lcsc-proxy.js, a zero-dependency local relay) or fails with a clear message.
+   through a local proxy URL (default "http://localhost:25615/?url={url}" – see
+   tools/lcsc-proxy/, a small standalone executable built by GitHub Actions) or fails with
+   a clear message.
    Nothing is ever sent unless the feature is switched on AND the user presses Fetch. */
 "use strict";
 
 const LCSC = {
   KEY_EN: "pcbreveng.lcscCrawler",
   KEY_PROXY: "pcbreveng.lcscProxy",
+  DEFAULT_PROXY: "http://localhost:25615/?url={url}",
   API: "https://easyeda.com/api/products/{id}/components?version=6.4.19.5",
   UNIT: 0.254,                                  // EasyEDA unit = 10 mil in mm
   cache: new Map(),                             // id → parsed part (this session)
 
   enabled(){ try { return localStorage.getItem(LCSC.KEY_EN) === "on"; } catch(e){ return false; } },
   setEnabled(on){ try { localStorage.setItem(LCSC.KEY_EN, on ? "on" : "off"); } catch(e){} },
-  proxy(){ try { return (localStorage.getItem(LCSC.KEY_PROXY) || "").trim(); } catch(e){ return ""; } },
+  /* the saved proxy URL, else the default local relay (an empty field resets to the default) */
+  proxy(){
+    let v = ""; try { v = (localStorage.getItem(LCSC.KEY_PROXY) || "").trim(); } catch(e){}
+    if (!v || /^http:\/\/(localhost|127\.0\.0\.1):8765\//.test(v)) return LCSC.DEFAULT_PROXY;  // 8765 = old node relay
+    return v;
+  },
   setProxy(v){ try { v ? localStorage.setItem(LCSC.KEY_PROXY, v.trim()) : localStorage.removeItem(LCSC.KEY_PROXY); } catch(e){} },
 
   /* "C25804" | "25804" | any URL containing C25804 → "C25804" (or null) */
@@ -41,8 +48,8 @@ const LCSC = {
     try { res = await fetch(LCSC._route(target), { headers: { Accept: "application/json" } }); }
     catch(e){
       throw new Error(LCSC.proxy()
-        ? "Could not reach the proxy (" + LCSC.proxy() + ") — is tools/lcsc-proxy.js running?"
-        : "Blocked by the browser (CORS). easyeda.com can only be read through a proxy — set a Proxy URL in 🔬 Experimental (run tools/lcsc-proxy.js).");
+        ? "Could not reach the proxy (" + LCSC.proxy() + ") — is the lcsc-proxy program running?"
+        : "Blocked by the browser (CORS). easyeda.com can only be read through a proxy — run the lcsc-proxy program (see the wiki) and check the Proxy URL in 🔬 Experimental.");
     }
     if (!res.ok) throw new Error("HTTP " + res.status + " from " + (LCSC.proxy() ? "proxy" : "server"));
     return res.json();
