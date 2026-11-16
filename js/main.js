@@ -562,6 +562,20 @@ function wireCanvas(){
 function showCanvasContextMenu(cx, cy, w){
   const h = hitTest(w.x, w.y);
   const items = [];
+  // multi-selection (marquee) → alignment tools. Right-clicking one of the boxed objects keeps
+  // the box (instead of collapsing the selection onto that single object).
+  const alignItems = (typeof AlignObj !== "undefined") ? AlignObj.visMenuItems() : [];
+  if (alignItems.length){
+    const hObj = h ? (h.type === "pin" ? h.comp : h[h.type]) : null, hType = h ? (h.type === "pin" ? "comp" : h.type) : null;
+    const inBox = !!h && UI.boxSel.some(s => s.type === hType && s[hType] === hObj);
+    if (inBox || !h){
+      items.push(...alignItems, { sep:true },
+        { label:"Delete selection (" + UI.boxSelCount() + ")", danger:true, action:()=>deleteSelection() });
+      if (!h) items.push({ sep:true }, { label:"Add note here…", action:()=>{ noteDown(w, {}); } });
+      UI.showContextMenu(cx, cy, items);
+      return;
+    }
+  }
   if (h && h.type === "pin"){
     const c = h.comp, p = c.pins[h.pinIdx];
     UI.select(h);

@@ -205,6 +205,36 @@ function buildFpParams(){
     imp.title = "Import KiCad footprint files — they are retained in this browser and searchable in quick-add as custom:<name>";
     imp.addEventListener("click", () => $("#file-customfp").click());
     grp.appendChild(imp);
+    // LCSC / JLC part crawler (experimental, Options → 🔬 Experimental)
+    if (typeof LCSC !== "undefined" && LCSC.enabled()){
+      const lb = document.createElement("div");
+      lb.className = "fp-custom-row";
+      lb.style.cssText = "flex-direction:column;align-items:stretch;gap:4px;margin:6px 0;padding:6px;border:1px solid #223a3a;border-radius:5px";
+      const lt = document.createElement("div");
+      lt.className = "panel-hint"; lt.style.color = "#4ac0c0";
+      lt.textContent = "🔍 LCSC / JLC lookup (experimental) — part number:";
+      const li = document.createElement("input");
+      li.type = "text"; li.id = "lcsc-id"; li.placeholder = "e.g. C25804"; li.style.cssText = "width:100%;box-sizing:border-box";
+      const lg = document.createElement("button");
+      lg.type = "button"; lg.id = "lcsc-go"; lg.textContent = "Fetch footprint + details";
+      const ls = document.createElement("span"); ls.className = "panel-hint"; ls.id = "lcsc-status";
+      const doFetch = async () => {
+        ls.textContent = "Fetching…";
+        try {
+          const part = await LCSC.fetchPart(li.value);
+          const entry = LCSC.importFootprint(part);
+          if (part.value && !$("#fp-value").value) $("#fp-value").value = part.value;
+          if (part.mpn) $("#fp-part").value = part.mpn;
+          if (!entry){ ls.textContent = "⚠ " + LCSC.summary(part) + " — no footprint found"; return; }
+          FPD.params.name = entry.name; buildFpParams();
+          const st = $("#lcsc-status"); if (st) st.textContent = "✓ " + LCSC.summary(part) + " — " + entry.pins.length + " pads";
+        } catch(err){ ls.textContent = "⚠ " + err.message; }
+      };
+      lg.addEventListener("click", doFetch);
+      li.addEventListener("keydown", (e) => { if (e.key === "Enter"){ e.preventDefault(); e.stopPropagation(); doFetch(); } });
+      lb.appendChild(lt); lb.appendChild(li); lb.appendChild(lg); lb.appendChild(ls);
+      grp.appendChild(lb);
+    }
     // AI footprint maker (experimental) — describe a part, get a generated .kicad_mod
     if (typeof AI !== "undefined" && AI.enabled("footprint")){
       const aiBox = document.createElement("div");

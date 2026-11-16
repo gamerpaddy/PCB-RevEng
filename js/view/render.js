@@ -432,6 +432,7 @@ function drawWorld(ctx){
 
   // --- box (marquee) selection: highlight members + draw the rubber-band while dragging ---
   drawBoxSelection(ctx);
+  if (typeof AlignObj !== "undefined") AlignObj.drawVis(ctx);
 
   // --- alignment reference points (world-space crosshair at exact location) ---
   if (Tools.alignPts){

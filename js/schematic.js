@@ -646,6 +646,7 @@ Sch.render = () => {
   schDrawNetLabels(ctx, comps, geo);
   schDrawOffPage(ctx, comps, geo);
   schDrawWireDraft(ctx);
+  if (typeof AlignObj !== "undefined") AlignObj.drawSch(ctx);
   schDrawHotPin(ctx);
   schDrawMarquee(ctx);
 
@@ -1723,6 +1724,7 @@ function schStopEdgeScroll(){
 /* pointer-move core, callable from both the event handler and the edge-scroll tick */
 Sch.onMove = (p, e) => {
   const mx = schS2X(p.x), my = schS2Y(p.y);
+  if (typeof AlignObj !== "undefined" && AlignObj.line && AlignObj.line.pane === "sch") Sch.requestRender();   // rubber-band line follows the cursor
 
   // an active pan (wheel-click / Space) works in EVERY mode, including wire mode
   if (Sch.drag && Sch.drag.kind === "pan"){
@@ -1977,6 +1979,7 @@ function schContextMenu(clientX, clientY, p){
                  action: () => grp ? Sch.flipGroup(grp, false) : Sch.flip(c, false) });
     items.push({ label: inBox ? "Flip selection vertical  [Y]" : "Flip vertical  [Y]",
                  action: () => grp ? Sch.flipGroup(grp, true) : Sch.flip(c, true) });
+    if (inBox) items.push(...AlignObj.schMenuItems());
     items.push({ label: "Edit ref / value…", action: () => UI.openQuickEdit(c) });
     if (typeof Boards !== "undefined" && Boards.canLink(c))
       items.push({ label: "Page Linker…", action: () => Boards.openLinkDialog(c) });
@@ -2003,7 +2006,7 @@ function schContextMenu(clientX, clientY, p){
       }});
   } else {
     // empty space with a box selection → offer to lock/unlock the whole group
-    if (boxSel){ items.push(groupLockItem()); items.push({ sep: true }); }
+    if (boxSel){ items.push(...AlignObj.schMenuItems()); items.push(groupLockItem()); items.push({ sep: true }); }
     items.push({ label: Sch.mode === "wire" ? "Wire mode off  [W/Esc]" : "Wire mode  [W]", action: () => Sch.setMode(Sch.mode === "wire" ? "select" : "wire") });
     items.push({ label: "Zoom to fit", action: () => Sch.fit() });
   }
@@ -2037,6 +2040,7 @@ Sch.wire = () => {
       return;
     }
     if (e.button === 2) return;   // context menu handled separately
+    if (typeof AlignObj !== "undefined" && AlignObj.line && AlignObj.line.pane === "sch"){ AlignObj.click({ x: mx, y: my }); return; }
 
     // off-page line: clicking the edge chevron / its label jumps to that page
     // (not while drawing a wire — the jump would silently destroy the draft)
