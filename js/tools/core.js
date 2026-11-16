@@ -123,6 +123,9 @@ function onPointerDown(e){
   }
   if (e.button === 2) return; // context menu handled separately
 
+  // "Align onto a drawn line…" — the next two clicks define the line
+  if (typeof AlignObj !== "undefined" && AlignObj.line && AlignObj.line.pane === "vis"){ AlignObj.click(w); return; }
+
   // off-page link marker (arrow + page tag above a linked connector) — click = jump.
   // Only in the select tool, so the tag never steals clicks meant for drawing/editing
   // (trace/via/cut/etc.). NOT while mid-route (Tools.tracePts) or placing a free pin.
@@ -238,7 +241,7 @@ function onPointerMove(e){
     View.canvas.style.cursor = h ? "pointer" : "default";
   }
 
-  if (View.split || Tools.name==="trace" || Tools.name==="via" || Tools.name==="component" || Tools.name==="measure" || Tools.name==="rotate" || Tools.alignPts || Tools.deskewPts)
+  if (View.split || Tools.name==="trace" || Tools.name==="via" || Tools.name==="component" || Tools.name==="measure" || Tools.name==="rotate" || Tools.alignPts || Tools.deskewPts || (typeof AlignObj !== "undefined" && AlignObj.line))
     requestRender();   // redraw every move so the ghost / snap-ring / mirror cursor tracks the pointer
   else if (View.hoverNetId !== Tools._lastHover){ Tools._lastHover = View.hoverNetId; requestRender(); }
 }

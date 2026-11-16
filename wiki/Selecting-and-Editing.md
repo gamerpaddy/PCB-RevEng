@@ -59,3 +59,25 @@ You can also reach rotate, flip, duplicate, lock and delete by right clicking a 
 
 - Click the undo and redo arrows in the top bar, or press Ctrl and Z to undo and Ctrl and Y to redo.
 - Click the clock button in the top bar to open the undo timeline. Each past action has an **Undo this** button that reverts only what that action changed, leaving later edits to other items in place.
+
+## Aligning several objects
+
+Drag a box (marquee) around parts, vias and notes in the Visual editor, or box-select symbols in the Schematic, then **right-click** the selection:
+
+- **Align horizontally (same Y)** puts everything on one horizontal line (the average height).
+- **Align vertically (same X)** puts everything on one vertical line.
+- **Align onto a drawn line…** click a start point and an end point; every selected object is projected onto that line. Press Esc to cancel.
+
+Move-locked parts are skipped. In the Visual editor, trace ends attached to a moved part or via travel with it. In the Schematic, symbols snap to the sheet grid and their wires follow. Each alignment is a single undo step.
+
+## Parts crawler (experimental, off by default)
+
+Open **Options → 🔬 Experimental → Parts crawler** and tick *Enable LCSC lookup*. In the footprint selector, the **Custom** category then shows an LCSC lookup box: enter a part number such as `C25804` and press Fetch. The footprint is imported as a Custom footprint and the Value and Part name fields are filled from the part's details (manufacturer, package, class, price and stock appear in the status line).
+
+Browsers cannot read easyeda.com directly (CORS), so run the bundled relay and put its address in the Proxy URL field:
+
+```
+node tools/lcsc-proxy.js
+```
+
+Proxy URL: `http://localhost:8765/?url={url}`. The relay only forwards requests to easyeda.com and lcsc.com hosts.
