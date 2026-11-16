@@ -3,6 +3,13 @@
 
 /* ---------------- component tool ---------------- */
 function componentDown(w, e){
+  // C held while clicking → straight to the Custom category (imported / LCSC-fetched parts),
+  // skipping quick-add and any footprint that was armed
+  if (Keys.c){
+    Tools.pending = null; Tools.ghostFp = null;
+    UI.openFootprintDialog(null, "customfp");
+    return;
+  }
   // no footprint armed → the experimental quick-add popup (if enabled) or the selector;
   // Shift-click always opens the full footprint selector, even with quick-add on
   if (!Tools.pending){

@@ -32,7 +32,7 @@ function fpLoadLast(){
   try { return JSON.parse(localStorage.getItem("pcbreveng.fpLast") || "null"); } catch(e){ return null; }
 }
 
-UI.openFootprintDialog = (editComp) => {
+UI.openFootprintDialog = (editComp, forceCat) => {
   FPD.editComp = editComp || null;
   FPD.symOverride = editComp ? (editComp.symOverride || "auto") : "auto";
   // wire the schematic-symbol picker once (the <select> is static; its options are rebuilt)
@@ -61,6 +61,12 @@ UI.openFootprintDialog = (editComp) => {
         FPD.params = {...last.params};
       }
     }
+    // asked for a specific category (e.g. hold C + click → "customfp"): jump straight to it
+    if (forceCat && getFootprintDef(forceCat) && forceCat !== FPD.catId){
+      FPD.paramCache[FPD.catId] = {...FPD.params};
+      FPD.catId = forceCat;
+      FPD.params = FPD.paramCache[forceCat] ? {...FPD.paramCache[forceCat]} : {};
+    }
     fpSetFields(FPD.fieldCache[FPD.catId]);
     $("#fp-ref").value = ""; // auto-numbered, increments per placement
     $("#fp-ok").textContent = "Place (click on board)";
@@ -68,6 +74,7 @@ UI.openFootprintDialog = (editComp) => {
   buildFpCats();
   buildFpParams();
   dlg.showModal();
+  if (forceCat === "customfp") $("#lcsc-id")?.focus();   // LCSC lookup box (when enabled): ready to type a C-number
   // the preview canvas can only measure its (flex-sized) box once the dialog is
   // actually laid out — redraw now so the first open isn't squished/low-res
   drawFpPreview();
@@ -232,7 +239,14 @@ function buildFpParams(){
       };
       lg.addEventListener("click", doFetch);
       li.addEventListener("keydown", (e) => { if (e.key === "Enter"){ e.preventDefault(); e.stopPropagation(); doFetch(); } });
-      lb.appendChild(lt); lb.appendChild(li); lb.appendChild(lg); lb.appendChild(ls);
+      const lt2 = document.createElement("button");
+      lt2.type = "button"; lt2.textContent = "Test proxy"; lt2.title = "Check the proxy works — no part number needed";
+      lt2.addEventListener("click", async () => {
+        lt2.disabled = true; ls.textContent = "Testing proxy…";
+        const r = await LCSC.testProxy();
+        lt2.disabled = false; ls.textContent = (r.ok ? "✓ " : "⚠ ") + r.msg;
+      });
+      lb.appendChild(lt); lb.appendChild(li); lb.appendChild(lg); lb.appendChild(lt2); lb.appendChild(ls);
       grp.appendChild(lb);
     }
     // AI footprint maker (experimental) — describe a part, get a generated .kicad_mod

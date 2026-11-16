@@ -43,6 +43,25 @@ const LCSC = {
     return p.includes("{url}") ? p.replace("{url}", encodeURIComponent(target)) : p + encodeURIComponent(target);
   },
 
+  /* "Test" button: checks the proxy end-to-end WITHOUT needing a part number.
+     1) the proxy itself answers (a host that is not allowed must come back 403 "host not allowed")
+     2) it can really reach EasyEDA (a known part, C25804, is looked up)
+     Returns { ok, msg } — msg is a one-line human result. */
+  async testProxy(){
+    const px = LCSC.proxy();
+    let r;
+    try { r = await fetch(LCSC._route("https://example.com/")); }
+    catch(e){ return { ok:false, msg:"Cannot reach the proxy at " + px + " — is the lcsc-proxy program running? (Browser blocked/refused the connection)" }; }
+    const body = await r.text().catch(() => "");
+    if (!(r.status === 403 && /host not allowed/i.test(body)))
+      return { ok:false, msg:"Something answered at " + px + " (HTTP " + r.status + ") but it doesn't look like lcsc-proxy — check the URL / port" };
+    try {
+      const j = await LCSC._getJson(LCSC.API.replace("{id}", "C25804"));
+      if (j && j.success !== false && j.result) return { ok:true, msg:"Proxy works — reached EasyEDA (test part C25804 found)" };
+      return { ok:false, msg:"Proxy is running, but EasyEDA gave an unexpected answer" + (j && j.message ? ": " + j.message : "") };
+    } catch(e){ return { ok:false, msg:"Proxy is running, but EasyEDA was not reachable: " + e.message }; }
+  },
+
   async _getJson(target){
     let res;
     try { res = await fetch(LCSC._route(target), { headers: { Accept: "application/json" } }); }
@@ -166,6 +185,14 @@ function wireLCSC(){
   document.getElementById("btn-lab")?.addEventListener("click", sync);
   en.addEventListener("change", () => LCSC.setEnabled(en.checked));
   px.addEventListener("change", () => LCSC.setProxy(px.value));
+  const tb = document.getElementById("lcsc-test"), ts = document.getElementById("lcsc-test-status");
+  if (tb) tb.addEventListener("click", async () => {
+    LCSC.setProxy(px.value);                       // test what is typed, even before the field loses focus
+    tb.disabled = true; ts.style.color = ""; ts.textContent = "Testing…";
+    const r = await LCSC.testProxy();
+    tb.disabled = false; ts.style.color = r.ok ? "#5ec27a" : "#e0705a";
+    ts.textContent = (r.ok ? "✓ " : "⚠ ") + r.msg;
+  });
 }
 
 /* Download button: point it straight at the executable for this computer (the rolling release

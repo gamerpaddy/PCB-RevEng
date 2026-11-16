@@ -117,6 +117,8 @@ function selectDown(w, pt, e){
     requestRender();
     return;
   }
+  // grabbing a member of a multi-selection (ctrl-click set / box select) drags the WHOLE set
+  if (h && !e.shiftKey && startGroupMove(h, w)){ requestRender(); return; }
   UI.select(h);
   if (!h){
     // drag from empty board = marquee/box select (mass-select an area); a plain click
@@ -185,6 +187,59 @@ function selectDown(w, pt, e){
     Tools.drag = { kind:"move-note", note:h.note, offX:w.x-h.note.x, offY:w.y-h.note.y, moved:false };
   }
   requestRender();
+}
+
+/* Start moving every object of the current multi-selection (UI.boxSel, or a UI.traceSel set)
+   when `h` — the object under the cursor — is one of its members. Returns false otherwise,
+   so a click outside the set falls through to the normal single-select. Parts and vias take
+   the trace ends that touch them along (like a single move); move-locked parts stay put.
+   A click that never drags collapses the selection onto the clicked object (see onPointerUp). */
+function startGroupMove(h, w){
+  const items = UI.boxSel.length ? UI.boxSel
+              : UI.traceSel.length ? UI.traceSel.map(t => ({ type:"trace", trace:t })) : null;
+  if (!items) return false;
+  const hn = h.type === "pin" ? { type:"comp", comp:h.comp } : h;
+  if (!items.some(s => s.type === hn.type && s[s.type] === hn[hn.type])) return false;
+  const comps = [], vias = [], notes = [], traces = [];
+  for (const s of items){
+    if (s.type === "comp"){ if (!compMoveLocked(s.comp)) comps.push({ o:s.comp, x:s.comp.x, y:s.comp.y }); }
+    else if (s.type === "via")   vias.push({ o:s.via, x:s.via.x, y:s.via.y });
+    else if (s.type === "note")  notes.push({ o:s.note, x:s.note.x, y:s.note.y });
+    else if (s.type === "trace") traces.push({ t:s.trace, pts:s.trace.points.map(p => ({ x:p.x, y:p.y })) });
+  }
+  if (!comps.length && !vias.length && !notes.length && !traces.length){
+    UI.setHint("Everything selected is move-locked"); return true;
+  }
+  // trace vertices of NON-selected traces sitting on a moved pad / via follow it
+  const inSel = new Set(traces.map(x => x.t));
+  const anchors = [];
+  const ctol = 6 / View.zoom;
+  const reachesAll = (fpin) => fpin.shape === "circle" && fpin.tht !== false;
+  for (const m of comps){
+    const c = m.o, fp = compFootprint(c);
+    for (let pi=0; pi<fp.pins.length; pi++){
+      const fpin = fp.pins[pi]; if (!fpin) continue;
+      const pinNet = c.pins[pi] ? c.pins[pi].netId : null;
+      for (const t of State.traces){
+        if (inSel.has(t) || t.netId !== pinNet || !(reachesAll(fpin) || t.side === c.side)) continue;
+        for (let i=0;i<t.points.length;i++)
+          if (pinEdgeDist(c, fpin, t.points[i].x, t.points[i].y) <= ctol)
+            anchors.push({ pts:t.points, i, m, dx:t.points[i].x-c.x, dy:t.points[i].y-c.y });
+      }
+    }
+  }
+  for (const m of vias){
+    const v = m.o, vtol = Math.max(v.r || State.viaR, 6/View.zoom);
+    for (const t of State.traces){
+      if (inSel.has(t) || t.netId !== v.netId) continue;
+      for (let i=0;i<t.points.length;i++)
+        if (Math.hypot(t.points[i].x-v.x, t.points[i].y-v.y) <= vtol)
+          anchors.push({ pts:t.points, i, m, dx:t.points[i].x-v.x, dy:t.points[i].y-v.y });
+    }
+  }
+  pushUndo("move selection");
+  Tools.drag = { kind:"move-group", wx:w.x, wy:w.y, comps, vias, notes, traces, anchors, moved:false, click:h };
+  return true;
 }
 
 function onDoubleClick(e){

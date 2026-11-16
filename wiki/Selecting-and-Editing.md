@@ -19,6 +19,7 @@ Drag a selected component or via to move it. Drag a trace corner handle to resha
 - Hold Shift and click pads to select several pads at once. The Inspector then offers one Net field that applies to all of them.
 - Hold Shift and click a trace to select every trace on its net.
 - Hold Ctrl and click parts, pads, vias, traces or notes to add or remove them from a multi-selection (same set a box select makes — Delete, align and bulk edits work on it).
+- Drag any object that is part of a multi-selection to move the whole selection together (move-locked parts stay put; trace ends touching moved parts follow). A plain click on a selected object selects just that one.
 
 ## The Inspector for a component
 
@@ -81,5 +82,9 @@ Browsers cannot read easyeda.com directly (CORS), so a small local relay is need
 | Windows | `lcsc-proxy-windows-x64.exe` (ARM: `-arm64.exe`) |
 | Linux | `lcsc-proxy-linux-x64` (or `-arm64`; run `chmod +x` first) |
 | macOS | `lcsc-proxy-macos-apple-silicon` or `lcsc-proxy-macos-intel` (run `chmod +x` first) |
+
+Press **Test** next to the Proxy URL (or **Test proxy** in the lookup box) to check that the relay is running and can reach EasyEDA — no part number needed.
+
+With the component tool, hold **C** while clicking to open the footprint selector straight on the **Custom** category (with the LCSC lookup box ready, when enabled).
 
 The Proxy URL field already defaults to `http://localhost:25615/?url={url}`, so nothing needs configuring. To use another port, start the program with it (`lcsc-proxy 9000`) and change the URL to match. The relay listens on this computer only and only forwards requests to easyeda.com and lcsc.com hosts. The executables are built from `tools/lcsc-proxy/` by a GitHub Action and are not stored in git; you can also build it yourself with `go build`.

@@ -259,6 +259,11 @@ function onPointerUp(e){
     else Tools._dragEndedAt = Date.now();
     UI.refreshInspector();
   }
+  if (d.kind === "move-group"){
+    if (!d.moved){ cancelUndo(); UI.select(d.click); }   // plain click on a member → just that object
+    else { Tools._dragEndedAt = Date.now(); markDirty(); }
+    UI.refreshInspector();
+  }
   if (d.kind === "rot-gizmo"){
     if (!d.moved) cancelUndo();   // a plain click on the knob shouldn't churn undo
     UI.refreshLayerList();
@@ -407,6 +412,18 @@ function handleDrag(pt, w, e){
       d.moved = true;
       d.note.x = w.x - d.offX; d.note.y = w.y - d.offY;
       break;
+    case "move-group": {
+      // sub-4px jitter stays a CLICK (which collapses the selection onto the clicked object)
+      if (!d.moved && Math.hypot(w.x - d.wx, w.y - d.wy) * View.zoom < 4) break;
+      d.moved = true;
+      const dx = w.x - d.wx, dy = w.y - d.wy;
+      for (const m of d.comps){ m.o.x = m.x + dx; m.o.y = m.y + dy; }
+      for (const m of d.vias)  { m.o.x = m.x + dx; m.o.y = m.y + dy; }
+      for (const m of d.notes) { m.o.x = m.x + dx; m.o.y = m.y + dy; }
+      for (const m of d.traces) m.t.points.forEach((p, i) => { p.x = m.pts[i].x + dx; p.y = m.pts[i].y + dy; });
+      for (const a of d.anchors){ a.pts[a.i].x = a.m.o.x + a.dx; a.pts[a.i].y = a.m.o.y + a.dy; }
+      break;
+    }
     case "move-layer":
       // in the align procedure, ignore sub-4px jitter so a click stays a marker (not a nudge)
       if (d.alignClick && Math.hypot(w.x-d.wx, w.y-d.wy)*View.zoom < 4) break;
@@ -526,7 +543,7 @@ function applyBoxSelect(x0, y0, x1, y1){
    we pan the view toward it and keep it under the cursor, so you can move/drop it
    clear across a board that's larger than the screen. Only translation drags and
    component placement qualify (not view-pan / rotate / measure). */
-const EDGE_SCROLL_KINDS = { "move-comp":1, "move-via":1, "move-vert":1, "move-seg":1, "move-note":1, "move-layer":1, "deskew-corner":1, "deskew-move":1 };
+const EDGE_SCROLL_KINDS = { "move-comp":1, "move-via":1, "move-vert":1, "move-seg":1, "move-note":1, "move-group":1, "move-layer":1, "deskew-corner":1, "deskew-move":1 };
 
 /* true when the current interaction is one that should auto-pan near the edges:
    a translation drag, or the component tool tracking a ghost about to be placed.

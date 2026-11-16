@@ -1,7 +1,7 @@
 /* ===== main.js — bootstrap, events, hotkeys, file I/O ===== */
 "use strict";
 
-const Keys = { space:false };
+const Keys = { space:false, c:false };
 
 /* autosave (IndexedDB) lives in autosave.js — autosaveInit, markDirty,
    markImagesDirty, loadDefaultProject, updateSaveStatus, etc. are defined there */
@@ -649,6 +649,7 @@ function wireKeyboard(){
     if (document.querySelector("dialog[open]")) return; // dialogs own the keyboard (Esc closes natively)
 
     if (e.code === "Space"){ Keys.space = true; if (!Tools.drag) View.canvas.style.cursor="grab"; e.preventDefault(); return; }
+    if (e.code === "KeyC" && !e.ctrlKey && !e.metaKey && !e.altKey) Keys.c = true;   // hold C + click (component tool) → Custom part
 
     const ctrl = e.ctrlKey || e.metaKey;
     if (ctrl){
@@ -778,7 +779,9 @@ function wireKeyboard(){
       case "-": zoomAt(View.width/2, View.height/2, 1/1.25); break;
     }
   });
+  window.addEventListener("blur", () => { Keys.c = false; Keys.space = false; });
   window.addEventListener("keyup", e => {
+    if (e.code === "KeyC") Keys.c = false;
     if (e.code === "Space"){
       Keys.space = false;
       if (!Tools.drag) View.canvas.style.cursor = toolCursor(Tools.name);

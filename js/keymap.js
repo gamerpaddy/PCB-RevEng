@@ -10,7 +10,7 @@ function clickBtn(sel){ return () => { const el = document.querySelector(sel); i
    button. Actions with def:"" are UNBOUND by default (right-click to assign a key). */
 const KeyActions = [
   { id:"tool.select",    label:"Select / move tool",            def:"S",      btn:"#toolbar .tool[data-tool='select']",    run:()=>setTool("select") },
-  { id:"tool.component", label:"Place component tool",          def:"C",      btn:"#toolbar .tool[data-tool='component']", run:()=>{ Tools.pending=null; setTool("component"); } },
+  { id:"tool.component", label:"Place component tool",          def:"C",      btn:"#toolbar .tool[data-tool='component']", run:()=>{ if (Tools.name === "component") return; /* already armed: C is the hold-to-add-Custom modifier */ Tools.pending=null; setTool("component"); } },
   { id:"tool.trace",     label:"Trace tool",                    def:"W",      btn:"#toolbar .tool[data-tool='trace']",     run:()=>setTool("trace") },
   { id:"tool.via",       label:"Via tool (press again = pick/clear net under cursor)", def:"V", btn:"#toolbar .tool[data-tool='via']", run:()=>{ if (Tools.name === "via") viaNetPick(); else setTool("via"); } },
   { id:"tool.cut",       label:"Cut trace tool",                def:"K",      btn:"#toolbar .tool[data-tool='cut']",       run:()=>setTool("cut") },
