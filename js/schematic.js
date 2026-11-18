@@ -1201,15 +1201,46 @@ function schWireEndPinOK(w, pin){
 
 /* wires whose endpoint is anchored to a pin of `comp` follow the pin when the part
    moves/rotates/flips; the neighbouring point is shifted to keep every bend at 90° */
+/* T-junctions on wire `h`: free wire ENDS (a/b not anchored to a pin) of other same-net wires
+   that sit on h's path. Returned in order along h (start → end) as {v, key, p}. These are the
+   "branches" that only stay connected while h keeps passing through their end point. */
+function schJunctionsOn(h){
+  const wn = schWireNet(h), out = [];
+  const pts = h.points;
+  for (const v of State.schWires){
+    if (v === h) continue;
+    const vn = schWireNet(v);
+    if (wn && vn && wn !== vn) continue;
+    for (const key of ["a", "b"]){
+      if (v[key]) continue;                                   // anchored to a pin → not a free end
+      const p = v.points[key === "a" ? 0 : v.points.length - 1];
+      let along = -1, run = 0;
+      for (let i = 0; i + 1 < pts.length; i++){
+        const L = Math.hypot(pts[i+1].x - pts[i].x, pts[i+1].y - pts[i].y);
+        if (distToSeg(p.x, p.y, pts[i], pts[i+1]) <= 0.05){
+          along = run + Math.hypot(p.x - pts[i].x, p.y - pts[i].y); break;
+        }
+        run += L;
+      }
+      if (along >= 0) out.push({ v, key, p: { x: p.x, y: p.y }, along });
+    }
+  }
+  out.sort((x, y) => x.along - y.along);
+  return out;
+}
+
 function schUpdateWiresFor(comp){
   const geo = Sch.geo();
   for (const w of State.schWires){
     let touched = false;
+    // branches hanging off this wire BEFORE it is re-routed (see the repair below)
+    let junctions = null;
     for (const key of ["a", "b"]){
       const an = w[key];
       if (!an || an.comp !== comp.id) continue;
       const p = schPinPos(comp, an.pin, geo);
       if (!p) continue;
+      if (!junctions) junctions = schJunctionsOn(w);
       const pts = w.points;
       const endIdx = key === "a" ? 0 : pts.length - 1;
       const old = pts[endIdx];
@@ -1232,7 +1263,53 @@ function schUpdateWiresFor(comp){
       w.points = (Math.abs(A.x-B.x) < 0.01 || Math.abs(A.y-B.y) < 0.01)
         ? [A, B] : [A, { x: B.x, y: A.y }, B];
     }
+    // Re-routing can pull the wire off a T-junction: another wire that ENDED on this one
+    // (a free end sitting on its path) would be left dangling, silently splitting the net
+    // (e.g. a connector moved in the schematic broke every net that branched off its wires).
+    // If any such branch point is no longer on the wire, rebuild the path from its two ends
+    // THROUGH those junction points — they never move, so the result is stable frame to
+    // frame while dragging and every branch stays attached.
+    if (touched && junctions && junctions.length &&
+        junctions.some(j => !schPointOnPath(j.p, w.points))){
+      const A = w.points[0], B = w.points[w.points.length - 1];
+      const path = [{ x: A.x, y: A.y }];
+      let prevDir = null;
+      for (const q of junctions.map(j => j.p).concat([B])){
+        const last = path[path.length - 1];
+        for (const r of schOrthoPath(last, q, prevDir)){
+          const l2 = path[path.length - 1];
+          prevDir = schSegDir(l2, r) || prevDir;
+          path.push({ x: r.x, y: r.y });
+        }
+      }
+      w.points = schCleanThrough(path, junctions.map(j => j.p));
+    }
   }
+}
+
+/* like schCleanPoints (drop zero-length steps, merge collinear runs) but a vertex that is a
+   required pass-through point — or the tip of a back-track spur that reaches one — is kept,
+   so a rebuilt wire never "straightens away" the junction it was routed through */
+function schCleanThrough(pts, keep){
+  const eps = 0.001, same = (p, q) => Math.abs(p.x - q.x) < eps && Math.abs(p.y - q.y) < eps;
+  const out = pts.filter((p, i) => !i || !same(p, pts[i-1]));
+  for (let i = 1; i + 1 < out.length; ){
+    const a = out[i-1], b = out[i], c = out[i+1];
+    const abH = Math.abs(a.y - b.y) < eps, bcH = Math.abs(b.y - c.y) < eps;
+    const abV = Math.abs(a.x - b.x) < eps, bcV = Math.abs(b.x - c.x) < eps;
+    const straight = (abH && bcH) || (abV && bcV);
+    const between = straight && ((abH && (b.x - a.x) * (c.x - b.x) > 0) || (abV && (b.y - a.y) * (c.y - b.y) > 0));
+    if (straight && between && !keep.some(k => same(k, b))) out.splice(i, 1);
+    else i++;
+  }
+  return out;
+}
+
+/* is point p on the polyline? */
+function schPointOnPath(p, pts){
+  for (let i = 0; i + 1 < pts.length; i++)
+    if (distToSeg(p.x, p.y, pts[i], pts[i+1]) <= 0.05) return true;
+  return false;
 }
 
 /* wire + segment index under a screen point (for click-select and segment dragging) */
