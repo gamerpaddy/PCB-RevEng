@@ -1258,10 +1258,28 @@ function schUpdateWiresFor(comp){
     // (keeping the junction) while an inserted elbow keeps the 90° invariant that
     // schWireSegPoint / schSegDir / the overlap tests all rely on. Only `touched` wires
     // reach here, so at least one end is anchored to the moved part.
-    if (touched && w.points.length <= 3){
+    // …but only when the neighbour shift above couldn't keep every segment axis-aligned:
+    // a 3-point wire whose pin-side leg just got longer/shorter (e.g. the part moved
+    // sideways) already has the right shape — re-routing it would snap its elbow to the
+    // far end's row/column instead of simply extending the leg.
+    const diagonal = (pts) => pts.some((q, i) => i && Math.abs(q.x - pts[i-1].x) > 0.01 && Math.abs(q.y - pts[i-1].y) > 0.01);
+    if (touched && w.points.length <= 3 && diagonal(w.points)){
       const A = w.points[0], B = w.points[w.points.length - 1];
       w.points = (Math.abs(A.x-B.x) < 0.01 || Math.abs(A.y-B.y) < 0.01)
         ? [A, B] : [A, { x: B.x, y: A.y }, B];
+    }
+    // longer wire: the neighbour shift can still leave one diagonal leg (e.g. two collinear
+    // legs at the pin end) — give each such leg an elbow so every segment stays axis-aligned
+    if (touched && w.points.length > 3 && diagonal(w.points)){
+      const out = [w.points[0]];
+      for (let i = 1; i < w.points.length; i++){
+        const a = out[out.length - 1], b = w.points[i];
+        if (Math.abs(a.x - b.x) > 0.01 && Math.abs(a.y - b.y) > 0.01){
+          const prev = out.length > 1 ? schSegDir(out[out.length - 2], a) : null;
+          for (const q of schOrthoPath(a, b, prev)) out.push({ x: q.x, y: q.y });
+        } else out.push(b);
+      }
+      w.points = out;
     }
     // Re-routing can pull the wire off a T-junction: another wire that ENDED on this one
     // (a free end sitting on its path) would be left dangling, silently splitting the net
