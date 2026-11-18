@@ -633,3 +633,30 @@ dialog::backdrop{background:rgba(0,0,0,.55);}
 .board-tab-add:hover{color:#7ee787;}
 #xlink-dialog{background:var(--bg2); color:var(--fg); border:1px solid var(--line); border-radius:8px; padding:14px;}
 #xlink-dialog select{background:var(--bg3); color:var(--fg); border:1px solid var(--line); border-radius:4px; font-size:12px;}
+
+/* ---------- first-run guided tour (js/tour.js) ---------- */
+#tour-root{position:fixed; inset:0; z-index:100000; pointer-events:none;}
+#tour-block{position:absolute; inset:0; pointer-events:auto; background:transparent;}   /* swallow clicks on the app while touring */
+#tour-dim{position:absolute; inset:0; width:100%; height:100%; pointer-events:none;}
+#tour-path{fill:rgba(8,10,14,.68);}
+#tour-rings{position:absolute; inset:0; pointer-events:none;}
+.tour-ring{
+  position:absolute; border:2px solid var(--accent2); border-radius:6px;
+  box-shadow:0 0 0 3px rgba(255,182,72,.25), 0 0 18px rgba(255,182,72,.45);
+  animation:tour-pulse 1.4s ease-in-out infinite;
+}
+@keyframes tour-pulse{50%{box-shadow:0 0 0 6px rgba(255,182,72,.12), 0 0 26px rgba(255,182,72,.6);}}
+#tour-card{
+  position:absolute; width:340px; max-width:calc(100vw - 16px); pointer-events:auto;
+  background:var(--bg2); border:1px solid var(--accent2); border-radius:10px;
+  padding:14px 16px 12px; box-shadow:0 10px 40px rgba(0,0,0,.55); user-select:text;
+}
+#tour-title{font-size:15px; font-weight:700; margin-bottom:6px; color:var(--accent2);}
+#tour-text{font-size:13px; line-height:1.5; color:var(--fg);}
+#tour-text b{color:#fff;}
+#tour-text code{background:var(--bg3); padding:0 4px; border-radius:3px; font-size:12px;}
+#tour-foot{display:flex; align-items:center; gap:10px; margin-top:12px;}
+#tour-prog{color:var(--fg-dim); font-size:11px; margin-left:auto;}
+#tour-skip{background:transparent; border:none; color:var(--fg-dim); cursor:pointer; padding:4px 2px; font-size:12px; text-decoration:underline;}
+#tour-skip:hover{color:var(--fg);}
+.tour-nav{display:flex; gap:6px;}

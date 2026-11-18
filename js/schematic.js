@@ -2139,6 +2139,20 @@ Sch.wire = () => {
     const ws = schWireSegHit(p.x, p.y);
     const c = Sch.hit(mx, my);
     const wireWins = ws && (!c || !schPtInBody(c, mx, my));
+    // ctrl-click a symbol → add it to / remove it from the multi-selection (same set a
+    // marquee builds: drag moves the group, arrows / R / align / Delete act on all of it)
+    if (c && !wireWins && (e.ctrlKey || e.metaKey) && !e.shiftKey){
+      const cur = Sch.boxSel.slice();
+      if (UI.sel && UI.sel.type === "comp" && !cur.includes(UI.sel.comp)) cur.push(UI.sel.comp);
+      const i = cur.indexOf(c);
+      if (i >= 0) cur.splice(i, 1); else cur.push(c);
+      Sch.boxSel = cur;
+      Sch.selWire = null; Sch.selWires = null; Sch.selLabel = null; Sch.selSeg = null;
+      UI.select(null);
+      UI.toast(cur.length + " symbol" + (cur.length === 1 ? "" : "s") + " selected");
+      Sch.render();
+      return;
+    }
     if (c && !wireWins){
       // a symbol-locked part can be selected/inspected but not dragged on the sheet
       if (compSchMoveLocked(c) && !Sch.boxSel.includes(c)){

@@ -20,6 +20,7 @@ Drag a selected component or via to move it. Drag a trace corner handle to resha
 - Hold Shift and click a trace to select every trace on its net.
 - Hold Ctrl and click parts, pads, vias, traces or notes to add or remove them from a multi-selection (same set a box select makes — Delete, align and bulk edits work on it).
 - Drag any object that is part of a multi-selection to move the whole selection together (move-locked parts stay put; trace ends touching moved parts follow). A plain click on a selected object selects just that one.
+- In the **Schematic** tab, Ctrl+click symbols the same way to build a multi-selection; drag moves them all, and R / arrows / align / Delete act on the whole set.
 
 ## The Inspector for a component
 
